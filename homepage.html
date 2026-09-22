@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Campus Pulse & Knowledge Hub</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+</head>
+<body>
+
+  <div class="mobile-frame">
+
+    <!-- Auth Overlay -->
+    <div id="auth-screen" class="auth-overlay">
+      <div class="auth-box">
+        <form id="login-form" class="auth-form" onsubmit="handleAuth(event)">
+          <h2>Welcome Back</h2>
+          <p class="auth-sub">Access your campus ecosystem</p>
+          <input type="email" id="login-email" class="auth-input" placeholder="Email Address" required />
+          <input type="password" class="auth-input" placeholder="Password" required />
+          <button type="submit" class="primary-btn">Sign In</button>
+          <p class="auth-toggle-text">Need an account? <span onclick="toggleAuthMode()">Sign Up</span></p>
+        </form>
+
+        <form id="signup-form" class="auth-form hidden" onsubmit="handleAuth(event)">
+          <h2>Create Account</h2>
+          <p class="auth-sub">Join thousands of active students</p>
+          <input type="text" class="auth-input" placeholder="Full Name" required />
+          <input type="email" class="auth-input" placeholder="Email Address" required />
+          <input type="password" class="auth-input" placeholder="Password" required />
+          <button type="submit" class="primary-btn">Create Account</button>
+          <p class="auth-toggle-text">Already have an account? <span onclick="toggleAuthMode()">Sign In</span></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- App Header -->
+    <header class="app-header">
+      <div class="brand-group">
+        <span class="brand-badge">PULSE</span>
+        <span class="brand-title">Campus Hub</span>
+      </div>
+      <div class="header-actions">
+        <button class="review-trigger-btn" onclick="openReviewModal()">+ Review</button>
+        <button class="icon-header-btn" onclick="toggleNotifications()">
+          <i class="fa-solid fa-bell"></i>
+          <span class="dot"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Notifications Drawer -->
+    <div id="notif-drawer" class="notif-drawer">
+      <div class="notif-header">
+        <span>Notifications</span>
+        <i class="fa-solid fa-xmark" onclick="toggleNotifications()"></i>
+      </div>
+      <div class="notif-body">
+        <div class="notif-item">
+          <i class="fa-solid fa-calendar-day notif-icon"></i>
+          <div>
+            <strong>Midterm Review Session</strong>
+            <p>Physics 101 review starts at 6:00 PM today in Science Hall 204.</p>
+          </div>
+        </div>
+        <div class="notif-item">
+          <i class="fa-solid fa-comments notif-icon"></i>
+          <div>
+            <strong>New Reply on Study Group</strong>
+            <p>Alex accepted your request to join CS101 Prep Team.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content Container -->
+    <main class="content-container">
+
+      <!-- Tab 1: Home / Feed -->
+      <section id="home-view" class="view active-view">
+        <div class="hero-card">
+          <span class="sub-heading">Academic Dashboard</span>
+          <h1 class="hero-title">Welcome Back, Student</h1>
+          <p class="description">Track your courses, join study groups, and keep up with campus updates.</p>
+          
+          <div class="analytics-row">
+            <div class="stat-box">
+              <span id="total-reviews-count" class="stat-number">143</span>
+              <span class="stat-label">Reviews</span>
+            </div>
+            <div class="stat-box">
+              <span id="gpa-summary-val" class="stat-number">3.8</span>
+              <span class="stat-label">Current GPA</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-number">12</span>
+              <span class="stat-label">Credits</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Tools -->
+        <div class="quick-tools-bar">
+          <button class="tool-btn" onclick="switchTab('gpa-view')">
+            <i class="fa-solid fa-calculator"></i>
+            <span>GPA Calc</span>
+          </button>
+          <button class="tool-btn" onclick="openTimerModal()">
+            <i class="fa-solid fa-stopwatch"></i>
+            <span>Pomodoro</span>
+          </button>
+          <button class="tool-btn" onclick="switchTab('chat-view')">
+            <i class="fa-solid fa-comments"></i>
+            <span>Live Chat</span>
+          </button>
+          <button class="tool-btn" onclick="switchTab('events-view')">
+            <i class="fa-solid fa-calendar-check"></i>
+            <span>Events</span>
+          </button>
+        </div>
+
+        <!-- Campus Activity Feed -->
+        <div class="feed-section">
+          <div class="section-header">
+            <h3>Campus Live Feed</h3>
+            <button class="text-btn" onclick="openNewPostModal()">+ New Post</button>
+          </div>
+
+          <div id="feed-container" class="stack-list">
+            <!-- Dynamic Feed Items -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 2: Search / Catalog -->
+      <section id="search-view" class="view">
+        <h1 class="page-title">Course & Guide Hub</h1>
+        
+        <div class="search-input-wrapper">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <input type="text" id="searchInput" class="search-bar" placeholder="Search courses, instructors, or topics..." onkeyup="filterCards()" />
+        </div>
+
+        <div class="filter-chips">
+          <button class="chip active" onclick="filterChip('all', this)">All</button>
+          <button class="chip" onclick="filterChip('stem', this)">STEM</button>
+          <button class="chip" onclick="filterChip('humanities', this)">Humanities</button>
+          <button class="chip" onclick="filterChip('business', this)">Business</button>
+          <button class="chip" onclick="filterChip('guides', this)">Guides</button>
+        </div>
+
+        <div id="searchGrid" class="grid-2x2">
+          <div class="card" data-category="stem" onclick="openModal('Physics 101', 'Calculus-based mechanics, thermodynamics, and lab fundamentals.')">
+            <i class="fa-solid fa-atom"></i>
+            <span>Physics 101</span>
+            <span class="card-tag">STEM</span>
+          </div>
+          <div class="card" data-category="stem" onclick="openModal('Calculus II', 'Techniques of integration, sequence and series, differential equations.')">
+            <i class="fa-solid fa-calculator"></i>
+            <span>Calculus II</span>
+            <span class="card-tag">STEM</span>
+          </div>
+          <div class="card" data-category="humanities" onclick="openModal('World History', 'Global historical perspectives from 1500 to modern geopolitics.')">
+            <i class="fa-solid fa-landmark"></i>
+            <span>World History</span>
+            <span class="card-tag">Humanities</span>
+          </div>
+          <div class="card" data-category="business" onclick="openModal('Microeconomics', 'Supply and demand models, market structures, and pricing strategy.')">
+            <i class="fa-solid fa-chart-line"></i>
+            <span>Microeconomics</span>
+            <span class="card-tag">Business</span>
+          </div>
+          <div class="card" data-category="stem" onclick="openModal('Data Structures', 'Arrays, linked lists, trees, graphs, and algorithmic complexity analysis.')">
+            <i class="fa-solid fa-code"></i>
+            <span>Data Structures</span>
+            <span class="card-tag">STEM</span>
+          </div>
+          <div class="card" data-category="guides" onclick="openModal('Exam Prep Blueprint', 'Proven strategies for memorization, flashcard creation, and stress management.')">
+            <i class="fa-solid fa-book-open"></i>
+            <span>Exam Prep</span>
+            <span class="card-tag">Guides</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 3: Study Groups -->
+      <section id="groups-view" class="view">
+        <h1 class="page-title">Study Groups</h1>
+        <p class="description">Connect with peers in your active courses.</p>
+
+        <div class="filter-chips">
+          <button class="chip active" onclick="filterGroups('all', this)">All Groups</button>
+          <button class="chip" onclick="filterGroups('open', this)">Open Seats</button>
+          <button class="chip" onclick="filterGroups('mine', this)">My Groups</button>
+        </div>
+
+        <div id="groups-list" class="stack-list">
+          <!-- Dynamic Study Groups -->
+        </div>
+      </section>
+
+      <!-- Tab 4: Live Campus Chat -->
+      <section id="chat-view" class="view">
+        <h1 class="page-title">Campus Chat</h1>
+        <p class="description">Live user-to-user room for quick student chat.</p>
+
+        <div class="chat-container">
+          <div id="app-chat-messages" class="chat-messages-box">
+            <!-- Messages load dynamically -->
+          </div>
+          <form id="app-chat-form" class="chat-form-row" onsubmit="sendAppChatMessage(event)">
+            <input type="text" id="app-chat-input" class="auth-input" placeholder="Type a message..." required autocomplete="off" />
+            <button type="submit" class="primary-btn chat-send-btn">Send</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- Tab 5: Events & Deadlines -->
+      <section id="events-view" class="view">
+        <h1 class="page-title">Events & Deadlines</h1>
+        <p class="description">Upcoming campus workshops and key dates.</p>
+
+        <div id="events-list" class="stack-list">
+          <!-- Dynamic Events -->
+        </div>
+      </section>
+
+      <!-- Tab 6: GPA Calculator -->
+      <section id="gpa-view" class="view">
+        <h1 class="page-title">GPA Calculator</h1>
+        
+        <div class="gpa-dashboard-card">
+          <div class="gpa-score" id="calculated-gpa">3.80</div>
+          <span class="gpa-label">Cumulative Estimated GPA</span>
+        </div>
+
+        <div class="section-header">
+          <h3>Course Grades</h3>
+          <button class="text-btn" onclick="addGpaRow()">+ Add Course</button>
+        </div>
+
+        <div id="gpa-rows-container" class="stack-list">
+          <!-- Dynamic GPA Rows -->
+        </div>
+      </section>
+
+      <!-- Tab 7: Reviews View -->
+      <section id="profile-view" class="view">
+        <h1 class="page-title">Instructor Reviews</h1>
+        
+        <div class="filter-reviews-bar">
+          <span class="filter-label">Filter by rating:</span>
+          <select id="rating-filter" class="mini-select" onchange="renderReviews()">
+            <option value="all">All Ratings</option>
+            <option value="5">5 Stars</option>
+            <option value="4">4 Stars</option>
+            <option value="3">3 Stars</option>
+          </select>
+        </div>
+
+        <div id="user-reviews-list" class="stack-list">
+          <!-- Reviews render dynamically -->
+        </div>
+      </section>
+
+      <!-- Tab 8: Settings & Theme Studio -->
+      <section id="settings-view" class="view">
+        <h1 class="page-title">Settings</h1>
+
+        <div id="theme-studio-box" class="customization-box expandable-theme">
+          <div class="theme-header-row" onclick="toggleThemeStudio()">
+            <div>
+              <h2 class="custom-title">Theme Studio</h2>
+              <p class="custom-sub-inline">Presets & Custom Color Customizer</p>
+            </div>
+            <i id="theme-chevron" class="fa-solid fa-chevron-down theme-chevron"></i>
+          </div>
+
+          <div class="theme-body-content">
+            <p class="custom-sub">Presets</p>
+            <div class="preset-row">
+              <button class="preset-btn p-cyber" onclick="setCyberTheme()">Cyber</button>
+              <button class="preset-btn p-synthwave" onclick="setSynthwaveTheme()">Synth</button>
+              <button class="preset-btn p-matrix" onclick="setMatrixTheme()">Matrix</button>
+              <button class="preset-btn p-dracula" onclick="setDraculaTheme()">Dracula</button>
+              <button class="preset-btn p-nordic" onclick="setNordicTheme()">Nordic</button>
+              <button class="preset-btn p-orange" onclick="setOrangeTheme()">Solar</button>
+              <button class="preset-btn p-crimson" onclick="setCrimsonTheme()">Ruby</button>
+              <button class="preset-btn p-gold" onclick="setGoldTheme()">Gold</button>
+              <button class="preset-btn p-emerald" onclick="setEmeraldTheme()">Mint</button>
+              <button class="preset-btn p-monochrome" onclick="setMonochromeTheme()">Mono</button>
+            </div>
+
+            <p class="custom-sub">Custom Colors</p>
+            <div class="color-picker-grid">
+              <div class="picker-item">
+                <label for="picker-main">Accent Color</label>
+                <input type="color" id="picker-main" value="#00f3ff" onchange="updateTheme()" />
+              </div>
+              <div class="picker-item">
+                <label for="picker-light">Highlight Accent</label>
+                <input type="color" id="picker-light" value="#80f9ff" onchange="updateTheme()" />
+              </div>
+              <div class="picker-item">
+                <label for="picker-card">Card Tint</label>
+                <input type="color" id="picker-card" value="#001a24" onchange="updateTheme()" />
+              </div>
+              <div class="picker-item">
+                <label for="picker-nav">Nav / Bar Tint</label>
+                <input type="color" id="picker-nav" value="#081018" onchange="updateTheme()" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <ul class="settings-list">
+          <li onclick="toggleLightMode(this)">
+            <div class="setting-text">
+              <span>Light Mode</span>
+              <small>Switch to bright background interface</small>
+            </div>
+            <div id="lightmode-toggle" class="toggle-btn"></div>
+          </li>
+          <li onclick="toggleSettingSwitch(this, 'anonymous')">
+            <div class="setting-text">
+              <span>Anonymous Mode</span>
+              <small>Hide public identity on posts and reviews</small>
+            </div>
+            <div id="anon-toggle" class="toggle-btn active"></div>
+          </li>
+          <li onclick="toggleSettingSwitch(this, 'datasaver')">
+            <div class="setting-text">
+              <span>Data Saver</span>
+              <small>Disable decorative glass blur effects</small>
+            </div>
+            <div id="datasaver-toggle" class="toggle-btn"></div>
+          </li>
+        </ul>
+
+        <button class="secondary-btn logout-btn" onclick="logout()">
+          <i class="fa-solid fa-right-from-bracket"></i> Sign Out
+        </button>
+      </section>
+
+    </main>
+
+    <!-- Navigation Bar -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" onclick="switchTab('home-view', this)">
+        <i class="fa-solid fa-house"></i>
+      </button>
+      <button class="nav-btn" onclick="switchTab('search-view', this)">
+        <i class="fa-solid fa-compass"></i>
+      </button>
+      <button class="nav-btn" onclick="switchTab('groups-view', this)">
+        <i class="fa-solid fa-user-group"></i>
+      </button>
+      <button class="nav-btn" onclick="switchTab('chat-view', this)">
+        <i class="fa-solid fa-comments"></i>
+      </button>
+      <button class="nav-btn" onclick="switchTab('profile-view', this)">
+        <i class="fa-solid fa-star"></i>
+      </button>
+      <button class="nav-btn" onclick="switchTab('settings-view', this)">
+        <i class="fa-solid fa-gear"></i>
+      </button>
+    </nav>
+
+  </div>
+
+  <!-- Detail Information Modal -->
+  <div id="detailModal" class="modal-overlay" onclick="closeModal(event)">
+    <div class="modal-content">
+      <h2 id="modalTitle" class="modal-title">Title</h2>
+      <p id="modalBody" class="modal-body-text">Details...</p>
+      <div class="modal-actions">
+        <button class="primary-btn" onclick="closeModalForce()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Review Modal -->
+  <div id="reviewModal" class="modal-overlay">
+    <div class="modal-content text-left">
+      <h2 class="modal-title">Add Instructor Review</h2>
+      <form onsubmit="submitReview(event)">
+        <input type="text" id="review-teacher" class="auth-input modal-input" placeholder="Course or Instructor Name" required />
+        <div class="rating-picker">
+          <label for="review-rating">Rating:</label>
+          <select id="review-rating" class="mini-select flex-1">
+            <option value="5">5 Stars ⭐⭐⭐⭐⭐</option>
+            <option value="4">4 Stars ⭐⭐⭐⭐</option>
+            <option value="3">3 Stars ⭐⭐⭐</option>
+            <option value="2">2 Stars ⭐⭐</option>
+            <option value="1">1 Star ⭐</option>
+          </select>
+        </div>
+        <textarea id="review-text" class="auth-input textarea-input modal-input" placeholder="Share course feedback..." required></textarea>
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" onclick="closeReviewModal()">Cancel</button>
+          <button type="submit" class="primary-btn">Submit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Post Modal -->
+  <div id="postModal" class="modal-overlay">
+    <div class="modal-content text-left">
+      <h2 class="modal-title">Create Campus Post</h2>
+      <form onsubmit="submitPost(event)">
+        <input type="text" id="post-title" class="auth-input modal-input" placeholder="Headline / Subject" required />
+        <textarea id="post-text" class="auth-input textarea-input modal-input" placeholder="What's happening on campus?" required></textarea>
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" onclick="closePostModal()">Cancel</button>
+          <button type="submit" class="primary-btn">Post</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Pomodoro Timer Modal -->
+  <div id="timerModal" class="modal-overlay">
+    <div class="modal-content">
+      <h2 class="modal-title">Pomodoro Timer</h2>
+      <div class="timer-display" id="timer-display">25:00</div>
+      <div class="modal-actions">
+        <button id="timer-start-btn" class="primary-btn" onclick="toggleTimer()">Start Focus</button>
+        <button class="secondary-btn" onclick="resetTimer()">Reset</button>
+        <button class="secondary-btn" onclick="closeTimerModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
