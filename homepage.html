@@ -4,8 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Campus Pulse & Knowledge Hub</title>
+  
+  <!-- PWA Meta Tags -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#080d14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  
+  <!-- Supabase JS SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -18,7 +28,7 @@
           <h2>Welcome Back</h2>
           <p class="auth-sub">Access your campus ecosystem</p>
           <input type="email" id="login-email" class="auth-input" placeholder="Email Address" required />
-          <input type="password" class="auth-input" placeholder="Password" required />
+          <input type="password" id="login-password" class="auth-input" placeholder="Password" required />
           <button type="submit" class="primary-btn">Sign In</button>
           <p class="auth-toggle-text">Need an account? <span onclick="toggleAuthMode()">Sign Up</span></p>
         </form>
@@ -26,9 +36,9 @@
         <form id="signup-form" class="auth-form hidden" onsubmit="handleAuth(event)">
           <h2>Create Account</h2>
           <p class="auth-sub">Join thousands of active students</p>
-          <input type="text" class="auth-input" placeholder="Full Name" required />
-          <input type="email" class="auth-input" placeholder="Email Address" required />
-          <input type="password" class="auth-input" placeholder="Password" required />
+          <input type="text" id="signup-name" class="auth-input" placeholder="Full Name" required />
+          <input type="email" id="signup-email" class="auth-input" placeholder="Email Address" required />
+          <input type="password" id="signup-password" class="auth-input" placeholder="Password" required />
           <button type="submit" class="primary-btn">Create Account</button>
           <p class="auth-toggle-text">Already have an account? <span onclick="toggleAuthMode()">Sign In</span></p>
         </form>
@@ -81,20 +91,20 @@
       <section id="home-view" class="view active-view">
         <div class="hero-card">
           <span class="sub-heading">Academic Dashboard</span>
-          <h1 class="hero-title">Welcome Back, Student</h1>
-          <p class="description">Track your courses, join study groups, and keep up with campus updates.</p>
+          <h1 class="hero-title" id="user-welcome-title">Welcome Back, Student</h1>
+          <p class="description">Track your courses, join study groups, and keep up with campus updates across all your devices.</p>
           
           <div class="analytics-row">
             <div class="stat-box">
-              <span id="total-reviews-count" class="stat-number">143</span>
+              <span id="total-reviews-count" class="stat-number">--</span>
               <span class="stat-label">Reviews</span>
             </div>
             <div class="stat-box">
-              <span id="gpa-summary-val" class="stat-number">3.8</span>
+              <span id="gpa-summary-val" class="stat-number">0.00</span>
               <span class="stat-label">Current GPA</span>
             </div>
             <div class="stat-box">
-              <span class="stat-number">12</span>
+              <span id="total-credits-val" class="stat-number">0</span>
               <span class="stat-label">Credits</span>
             </div>
           </div>
@@ -187,7 +197,7 @@
       <!-- Tab 3: Study Groups -->
       <section id="groups-view" class="view">
         <h1 class="page-title">Study Groups</h1>
-        <p class="description">Connect with peers in your active courses.</p>
+        <p class="description">Connect with peers in your active courses in real-time.</p>
 
         <div class="filter-chips">
           <button class="chip active" onclick="filterGroups('all', this)">All Groups</button>
@@ -203,11 +213,11 @@
       <!-- Tab 4: Live Campus Chat -->
       <section id="chat-view" class="view">
         <h1 class="page-title">Campus Chat</h1>
-        <p class="description">Live user-to-user room for quick student chat.</p>
+        <p class="description">Cross-device real-time multi-user student chat.</p>
 
         <div class="chat-container">
           <div id="app-chat-messages" class="chat-messages-box">
-            <!-- Messages load dynamically -->
+            <!-- Messages load dynamically via Supabase -->
           </div>
           <form id="app-chat-form" class="chat-form-row" onsubmit="sendAppChatMessage(event)">
             <input type="text" id="app-chat-input" class="auth-input" placeholder="Type a message..." required autocomplete="off" />
@@ -231,7 +241,7 @@
         <h1 class="page-title">GPA Calculator</h1>
         
         <div class="gpa-dashboard-card">
-          <div class="gpa-score" id="calculated-gpa">3.80</div>
+          <div class="gpa-score" id="calculated-gpa">0.00</div>
           <span class="gpa-label">Cumulative Estimated GPA</span>
         </div>
 
@@ -329,12 +339,12 @@
             </div>
             <div id="anon-toggle" class="toggle-btn active"></div>
           </li>
-          <li onclick="toggleSettingSwitch(this, 'datasaver')">
+          <li onclick="toggleSettingSwitch(this, 'autoSystemTheme')">
             <div class="setting-text">
-              <span>Data Saver</span>
-              <small>Disable decorative glass blur effects</small>
+              <span>Sync System Dark Mode</span>
+              <small>Automatically switch light/dark mode with OS</small>
             </div>
-            <div id="datasaver-toggle" class="toggle-btn"></div>
+            <div id="system-theme-toggle" class="toggle-btn"></div>
           </li>
         </ul>
 
@@ -433,7 +443,6 @@
     </div>
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

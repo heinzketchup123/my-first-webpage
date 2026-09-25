@@ -1,14 +1,22 @@
-// Storage Keys
-const BASE_REVIEWS_KEY = 'knowledge_app_reviews';
-const BASE_THEME_KEY = 'knowledge_app_theme';
-const BASE_SETTINGS_KEY = 'knowledge_app_settings';
-const BASE_FEED_KEY = 'knowledge_app_feed';
-const BASE_GROUPS_KEY = 'knowledge_app_groups';
-const BASE_GPA_KEY = 'knowledge_app_gpa';
-const BASE_CHAT_KEY = 'knowledge_app_chat';
-const CURRENT_USER_KEY = 'knowledge_app_current_user';
-const USERS_REGISTRY_KEY = 'knowledge_app_registered_users';
+// Supabase Configuration
+// Get these from: Supabase Dashboard -> Project Settings -> API
+const SUPABASE_URL = "https://ndrkvyodqeqpopxkozov.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5kcmt2eW9kcWVxcG9weGtvem92Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNTUyOTIsImV4cCI6MjEwNTkzMTI5Mn0.kqVCpk1YpXY9YIcyyljPlgdZzBgpo3YdNERCMlTMV8w";
 
+let supabaseClient = null;
+let isSupabaseConnected = false;
+
+if (SUPABASE_URL !== "YOUR_SUPABASE_URL" && typeof supabase !== 'undefined') {
+  try {
+    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    isSupabaseConnected = true;
+    console.log("⚡ Supabase Engine successfully initialized!");
+  } catch (err) {
+    console.error("Supabase init failed, running in local mode:", err);
+  }
+}
+
+// Storage Keys
 const THEME_PRESETS = {
   cyber: { main: '#00f3ff', light: '#0088cc', card: 'rgba(0, 243, 255, 0.06)', nav: 'rgba(10, 20, 30, 0.95)', bg: '#080d14', textOnAccent: '#000000' },
   synthwave: { main: '#ff007f', light: '#cc0066', card: 'rgba(255, 0, 127, 0.08)', nav: 'rgba(25, 10, 30, 0.95)', bg: '#120518', textOnAccent: '#ffffff' },
@@ -23,94 +31,18 @@ const THEME_PRESETS = {
 };
 
 const defaultFeed = [
-  { 
-    id: 1, 
-    author: "Campus News", 
-    title: "Library Extended Hours for Finals Week", 
-    text: "Main Campus Library will remain open 24 hours starting next Monday through exam week. Quiet zones will be strictly enforced on floors 3 and 4.", 
-    likes: 24, 
-    liked: false, 
-    time: "2h ago",
-    comments: [
-      { author: "Alex R.", text: "Finally! Is the coffee bar staying open late too?" },
-      { author: "Sarah M.", text: "Floor 3 is a lifesaver during midterm week." }
-    ]
-  },
-  { 
-    id: 2, 
-    author: "Physics Club", 
-    title: "Quantum Physics Guest Lecture", 
-    text: "Dr. Aris Thorne from MIT joins us virtually this Thursday at 5:00 PM in Lecture Hall A. Snacks and extra credit vouchers will be provided!", 
-    likes: 15, 
-    liked: false, 
-    time: "5h ago",
-    comments: [
-      { author: "Jason K.", text: "Will this session be recorded for remote students?" }
-    ]
-  }
+  { id: "1", author: "Campus News", title: "Library Extended Hours for Finals Week", text: "Main Campus Library will remain open 24 hours starting next Monday.", likes: 24, time: "2h ago", comments: [] },
+  { id: "2", author: "Physics Club", title: "Quantum Physics Guest Lecture", text: "Dr. Aris Thorne joins us virtually this Thursday at 5:00 PM.", likes: 15, time: "5h ago", comments: [] }
 ];
 
 const defaultGroups = [
-  { 
-    id: 1, 
-    name: "Physics 101 Midterm Squad", 
-    course: "Physics 101", 
-    members: 4, 
-    max: 6, 
-    joined: false,
-    host: "Elena Vance",
-    location: "Science Hall Rm 204",
-    schedule: "Tue/Thu 5:00 PM",
-    topics: ["Thermodynamics", "Newtonian Kinematics", "Lab Quiz Prep"],
-    roster: ["Elena V.", "Mark K.", "Chloe S.", "David L."]
-  },
-  { 
-    id: 2, 
-    name: "Calculus Problem Solvers", 
-    course: "Calculus II", 
-    members: 5, 
-    max: 5, 
-    joined: false,
-    host: "Marcus Brody",
-    location: "Library Pod B",
-    schedule: "Mondays 6:30 PM",
-    topics: ["Integration by Parts", "Infinite Series", "Taylor Polynomials"],
-    roster: ["Marcus B.", "Sam T.", "Priya N.", "Carlos D.", "Liam W."]
-  },
-  { 
-    id: 3, 
-    name: "World History Discussion", 
-    course: "World History", 
-    members: 2, 
-    max: 4, 
-    joined: true,
-    host: "Sophia Lin",
-    location: "Student Center Lounge",
-    schedule: "Wednesdays 4:00 PM",
-    topics: ["Modern Geopolitics", "Industrial Revolution", "DBQ Essay Review"],
-    roster: ["Sophia L.", "You"]
-  }
+  { id: "1", name: "Physics 101 Midterm Squad", course: "Physics 101", members: 4, max: 6, joined: false, host: "Elena Vance", location: "Science Hall Rm 204", schedule: "Tue/Thu 5:00 PM", topics: ["Thermodynamics", "Lab Quiz Prep"], roster: ["Elena V.", "Mark K."] },
+  { id: "2", name: "Calculus Problem Solvers", course: "Calculus II", members: 5, max: 5, joined: false, host: "Marcus Brody", location: "Library Pod B", schedule: "Mondays 6:30 PM", topics: ["Integration by Parts"], roster: ["Marcus B.", "Priya N."] }
 ];
 
 const defaultEvents = [
-  { 
-    id: 1,
-    title: "Career Fair 2026", 
-    date: "Sept 28, 10:00 AM", 
-    location: "Student Union", 
-    rsvp: false,
-    attendeesCount: 142,
-    description: "Connect with over 40 hiring partners, tech startups, and research institutes. Bring printed resumes and dress business casual!" 
-  },
-  { 
-    id: 2,
-    title: "CS Hackathon Warmup", 
-    date: "Oct 2, 4:00 PM", 
-    location: "Tech Lab 3", 
-    rsvp: true,
-    attendeesCount: 38,
-    description: "Practice rapid prototyping, meet team partners, and get early API keys for next month's 24-hour campus hackathon." 
-  }
+  { id: "1", title: "Career Fair 2026", date: "Sept 28, 10:00 AM", location: "Student Union", rsvp: false, attendeesCount: 142, description: "Connect with over 40 hiring partners, tech startups, and research institutes." },
+  { id: "2", title: "CS Hackathon Warmup", date: "Oct 2, 4:00 PM", location: "Tech Lab 3", rsvp: true, attendeesCount: 38, description: "Practice rapid prototyping and meet team partners." }
 ];
 
 const defaultGpaCourses = [
@@ -120,18 +52,12 @@ const defaultGpaCourses = [
 ];
 
 const defaultReviews = [
-  { teacher: "Mr. Smith (Physics)", rating: "5", text: "Fair grader and clear study sheets provided before midterms. Office hours are super helpful." },
-  { teacher: "Ms. Davis (English)", rating: "4", text: "Great discussion-based class, moderate homework load. Gives good writing feedback." }
+  { id: "1", teacher: "Mr. Smith (Physics)", rating: "5", text: "Fair grader and clear study sheets provided before midterms." }
 ];
 
-const defaultChatMessages = [
-  { user: "Campus Bot", text: "Welcome to the Live Campus Chat Room!", time: "12:00 PM" },
-  { user: "Alex R.", text: "Anyone studying for Physics 101 at the library right now?", time: "12:02 PM" }
-];
+const defaultSettings = { lightMode: false, anonymous: true, autoSystemTheme: false };
 
-const defaultSettings = { lightMode: false, anonymous: true, datasaver: false };
-
-let currentUser = localStorage.getItem(CURRENT_USER_KEY) || null;
+let currentUser = null;
 let userReviews = [];
 let campusFeed = [];
 let studyGroups = [];
@@ -141,80 +67,131 @@ let chatMessages = [];
 let appSettings = { ...defaultSettings };
 let appTheme = { ...THEME_PRESETS.cyber };
 
-// Socket.io initialization (if library is present)
-let socket = null;
-if (typeof io !== 'undefined') {
-  try {
-    socket = io();
-    socket.on('chat message', (data) => {
-      chatMessages.push(data);
-      saveChat();
-      renderChat();
-    });
-  } catch (e) {
-    console.log('Socket.io running in standalone/offline mode.');
-  }
-}
-
-// Active Modal Context
 let currentPostCommentId = null;
-
-// Pomodoro Timer State
 let timerSeconds = 1500;
 let timerInterval = null;
+let realtimeChannel = null;
 
 document.addEventListener("DOMContentLoaded", () => {
-  if (currentUser) {
-    document.getElementById('auth-screen').style.display = 'none';
-    loadUserData();
+  registerServiceWorker();
+  initSystemThemeListener();
+
+  if (isSupabaseConnected) {
+    // Check initial Auth session
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        currentUser = session.user.email;
+        document.getElementById('auth-screen').style.display = 'none';
+        const nameDisplay = currentUser.split('@')[0];
+        document.getElementById('user-welcome-title').textContent = `Welcome Back, ${nameDisplay}`;
+        initSupabaseRealtime();
+        loadAllSupabaseData();
+      } else {
+        document.getElementById('auth-screen').style.display = 'flex';
+      }
+    });
+
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        currentUser = session.user.email;
+        document.getElementById('auth-screen').style.display = 'none';
+        const nameDisplay = currentUser.split('@')[0];
+        document.getElementById('user-welcome-title').textContent = `Welcome Back, ${nameDisplay}`;
+        initSupabaseRealtime();
+        loadAllSupabaseData();
+      } else {
+        currentUser = null;
+        document.getElementById('auth-screen').style.display = 'flex';
+        loadLocalFallbackData();
+      }
+    });
   } else {
-    document.getElementById('auth-screen').style.display = 'flex';
-    applyDefaults();
+    currentUser = localStorage.getItem('knowledge_app_current_user') || 'guest@campus.edu';
+    if (currentUser !== 'guest@campus.edu') {
+      document.getElementById('auth-screen').style.display = 'none';
+    }
+    loadLocalFallbackData();
   }
 });
 
-function getUserKey(baseKey) {
-  return currentUser ? `${baseKey}_${currentUser}` : baseKey;
+function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(err => console.log('SW registration skipped:', err));
+  }
 }
 
-function loadUserData() {
-  const getItem = (key, fallback) => {
-    const val = localStorage.getItem(getUserKey(key));
-    return val ? JSON.parse(val) : fallback;
-  };
+function initSystemThemeListener() {
+  const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  darkModeMediaQuery.addEventListener('change', e => {
+    if (appSettings.autoSystemTheme) {
+      appSettings.lightMode = !e.matches;
+      loadSavedSettings();
+    }
+  });
+}
 
-  userReviews = getItem(BASE_REVIEWS_KEY, [...defaultReviews]);
-  campusFeed = getItem(BASE_FEED_KEY, [...defaultFeed]);
-  studyGroups = getItem(BASE_GROUPS_KEY, [...defaultGroups]);
-  gpaCourses = getItem(BASE_GPA_KEY, [...defaultGpaCourses]);
-  campusEvents = getItem('knowledge_app_events', [...defaultEvents]);
-  chatMessages = getItem(BASE_CHAT_KEY, [...defaultChatMessages]);
-  appSettings = getItem(BASE_SETTINGS_KEY, { ...defaultSettings });
-  appTheme = getItem(BASE_THEME_KEY, { ...THEME_PRESETS.cyber });
+// Supabase Realtime Subscriptions Engine
+function initSupabaseRealtime() {
+  if (realtimeChannel) return;
 
-  applyPresetConfig(appTheme, false);
-  loadSavedSettings();
-  renderFeed();
-  renderGroups();
-  renderEvents();
+  realtimeChannel = supabaseClient
+    .channel('public-db-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_chat' }, () => fetchChat())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_feed' }, () => fetchFeed())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'study_groups' }, () => fetchGroups())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_reviews' }, () => fetchReviews())
+    .subscribe();
+}
+
+async function loadAllSupabaseData() {
+  await Promise.all([fetchFeed(), fetchChat(), fetchGroups(), fetchReviews()]);
+  const savedGpa = localStorage.getItem(`gpa_${currentUser}`);
+  gpaCourses = savedGpa ? JSON.parse(savedGpa) : [...defaultGpaCourses];
+  campusEvents = [...defaultEvents];
   renderGpaRows();
-  renderReviews();
-  renderChat();
-  updateAnalytics();
+  renderEvents();
 }
 
-function applyDefaults() {
+async function fetchFeed() {
+  const { data, error } = await supabaseClient.from('campus_feed').select('*').order('created_at', { ascending: false }).limit(30);
+  if (!error && data) {
+    campusFeed = data;
+    renderFeed();
+  }
+}
+
+async function fetchChat() {
+  const { data, error } = await supabaseClient.from('campus_chat').select('*').order('created_at', { ascending: true }).limit(50);
+  if (!error && data) {
+    chatMessages = data;
+    renderChat();
+  }
+}
+
+async function fetchGroups() {
+  const { data, error } = await supabaseClient.from('study_groups').select('*');
+  if (!error && data) {
+    studyGroups = data.length ? data : [...defaultGroups];
+    renderGroups();
+  }
+}
+
+async function fetchReviews() {
+  const { data, error } = await supabaseClient.from('instructor_reviews').select('*').order('created_at', { ascending: false });
+  if (!error && data) {
+    userReviews = data;
+    renderReviews();
+    updateAnalytics();
+  }
+}
+
+function loadLocalFallbackData() {
   userReviews = [...defaultReviews];
   campusFeed = [...defaultFeed];
   studyGroups = [...defaultGroups];
   gpaCourses = [...defaultGpaCourses];
   campusEvents = [...defaultEvents];
-  chatMessages = [...defaultChatMessages];
-  appSettings = { ...defaultSettings };
-  appTheme = { ...THEME_PRESETS.cyber };
-
-  applyPresetConfig(appTheme, false);
-  loadSavedSettings();
+  chatMessages = [{ user: "Campus Bot", text: "Welcome to Live Campus Chat!", time: "12:00 PM" }];
   renderFeed();
   renderGroups();
   renderEvents();
@@ -224,55 +201,52 @@ function applyDefaults() {
   updateAnalytics();
 }
 
-// Storage Savers
-function saveFeed() { if (currentUser) localStorage.setItem(getUserKey(BASE_FEED_KEY), JSON.stringify(campusFeed)); }
-function saveGroups() { if (currentUser) localStorage.setItem(getUserKey(BASE_GROUPS_KEY), JSON.stringify(studyGroups)); }
-function saveGpa() { if (currentUser) localStorage.setItem(getUserKey(BASE_GPA_KEY), JSON.stringify(gpaCourses)); }
-function saveEvents() { if (currentUser) localStorage.setItem(getUserKey('knowledge_app_events'), JSON.stringify(campusEvents)); }
-function saveChat() { if (currentUser) localStorage.setItem(getUserKey(BASE_CHAT_KEY), JSON.stringify(chatMessages)); }
-function saveReviewsToStorage() { if (currentUser) localStorage.setItem(getUserKey(BASE_REVIEWS_KEY), JSON.stringify(userReviews)); }
-function saveSettingsToStorage() { if (currentUser) localStorage.setItem(getUserKey(BASE_SETTINGS_KEY), JSON.stringify(appSettings)); }
-function saveThemeToStorage() { if (currentUser) localStorage.setItem(getUserKey(BASE_THEME_KEY), JSON.stringify(appTheme)); }
-
-// Auth Mechanics
+// Authentication Handlers
 function toggleAuthMode() {
   document.getElementById('login-form').classList.toggle('hidden');
   document.getElementById('signup-form').classList.toggle('hidden');
 }
 
-function handleAuth(event) {
+async function handleAuth(event) {
   event.preventDefault();
-  const signupForm = document.getElementById('signup-form');
-  const loginForm = document.getElementById('login-form');
-  const users = JSON.parse(localStorage.getItem(USERS_REGISTRY_KEY)) || {};
+  const isSignup = !document.getElementById('signup-form').classList.contains('hidden');
 
-  if (!signupForm.classList.contains('hidden')) {
-    const email = signupForm.querySelector('input[type="email"]').value.trim().toLowerCase();
-    const pass = signupForm.querySelector('input[type="password"]').value;
-    if (users[email]) return alert("Account exists. Please log in.");
-    users[email] = { password: pass };
-    localStorage.setItem(USERS_REGISTRY_KEY, JSON.stringify(users));
-    currentUser = email;
+  if (isSupabaseConnected) {
+    try {
+      if (isSignup) {
+        const email = document.getElementById('signup-email').value;
+        const password = document.getElementById('signup-password').value;
+        const { error } = await supabaseClient.auth.signUp({ email, password });
+        if (error) alert("Sign up failed: " + error.message);
+        else alert("Account created! Check your email to confirm registration.");
+      } else {
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) alert("Login failed: " + error.message);
+      }
+    } catch (err) {
+      alert("Auth error: " + err.message);
+    }
   } else {
-    const email = document.getElementById('login-email').value.trim().toLowerCase();
-    const pass = loginForm.querySelector('input[type="password"]').value;
-    if (!users[email] || users[email].password !== pass) return alert("Invalid credentials.");
-    currentUser = email;
+    currentUser = document.getElementById('login-email').value || 'student@campus.edu';
+    localStorage.setItem('knowledge_app_current_user', currentUser);
+    document.getElementById('auth-screen').style.display = 'none';
+    loadLocalFallbackData();
   }
-
-  localStorage.setItem(CURRENT_USER_KEY, currentUser);
-  document.getElementById('auth-screen').style.display = 'none';
-  loadUserData();
 }
 
-function logout() {
-  currentUser = null;
-  localStorage.removeItem(CURRENT_USER_KEY);
-  applyDefaults();
-  document.getElementById('auth-screen').style.display = 'flex';
+async function logout() {
+  if (isSupabaseConnected) {
+    await supabaseClient.auth.signOut();
+  } else {
+    currentUser = null;
+    localStorage.removeItem('knowledge_app_current_user');
+    document.getElementById('auth-screen').style.display = 'flex';
+  }
 }
 
-// Themes & Styles
+// Theme Engine
 function setCyberTheme() { applyPresetConfig(THEME_PRESETS.cyber); }
 function setSynthwaveTheme() { applyPresetConfig(THEME_PRESETS.synthwave); }
 function setMatrixTheme() { applyPresetConfig(THEME_PRESETS.matrix); }
@@ -284,7 +258,7 @@ function setGoldTheme() { applyPresetConfig(THEME_PRESETS.gold); }
 function setEmeraldTheme() { applyPresetConfig(THEME_PRESETS.emerald); }
 function setMonochromeTheme() { applyPresetConfig(THEME_PRESETS.monochrome); }
 
-function applyPresetConfig(config, shouldSave = true) {
+function applyPresetConfig(config) {
   const root = document.documentElement;
   root.style.setProperty('--accent-color', config.main);
   root.style.setProperty('--accent-light', config.light);
@@ -295,9 +269,7 @@ function applyPresetConfig(config, shouldSave = true) {
     root.style.setProperty('--nav-bg', config.nav);
     root.style.setProperty('--bg-color', config.bg);
   }
-
   appTheme = { ...config };
-  if (shouldSave) saveThemeToStorage();
 }
 
 function updateTheme() {
@@ -306,7 +278,7 @@ function updateTheme() {
   const card = document.getElementById('picker-card').value;
   const nav = document.getElementById('picker-nav').value;
 
-  applyPresetConfig({ main, light, card, nav, bg: appTheme.bg, textOnAccent: '#ffffff' }, true);
+  applyPresetConfig({ main, light, card, nav, bg: appTheme.bg, textOnAccent: '#ffffff' });
 }
 
 function toggleThemeStudio() {
@@ -332,18 +304,16 @@ function toggleLightMode(listItem) {
   if (appSettings.lightMode) document.body.classList.add('light-mode');
   else document.body.classList.remove('light-mode');
 
-  applyPresetConfig(appTheme, false);
-  saveSettingsToStorage();
+  applyPresetConfig(appTheme);
 }
 
 function toggleSettingSwitch(listItem, key) {
   const toggle = listItem.querySelector('.toggle-btn');
   toggle.classList.toggle('active');
   appSettings[key] = toggle.classList.contains('active');
-  saveSettingsToStorage();
 }
 
-// Navigation
+// Tab Navigation
 function switchTab(viewId, element) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active-view'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -358,25 +328,23 @@ function switchTab(viewId, element) {
     if (idx !== -1 && btns[idx]) btns[idx].classList.add('active');
   }
 
-  if (viewId === 'chat-view') {
-    renderChat();
-  }
+  if (viewId === 'chat-view') renderChat();
 }
 
 function toggleNotifications() {
   document.getElementById('notif-drawer').classList.toggle('open');
 }
 
-// Live Chat Engine
+// Chat Engine
 function renderChat() {
   const box = document.getElementById('app-chat-messages');
   if (!box) return;
 
   box.innerHTML = '';
-  const myName = appSettings.anonymous ? "You" : (currentUser ? currentUser.split('@')[0] : "You");
+  const myHandle = appSettings.anonymous ? "You" : (currentUser ? currentUser.split('@')[0] : "You");
 
   chatMessages.forEach(msg => {
-    const isMine = msg.user === myName || msg.user === currentUser || msg.user === 'You';
+    const isMine = msg.user === myHandle || msg.user === currentUser || msg.user === 'You';
     const msgEl = document.createElement('div');
     msgEl.className = `chat-bubble ${isMine ? 'chat-bubble-mine' : 'chat-bubble-other'}`;
     msgEl.innerHTML = `
@@ -390,7 +358,7 @@ function renderChat() {
   box.scrollTop = box.scrollHeight;
 }
 
-function sendAppChatMessage(event) {
+async function sendAppChatMessage(event) {
   event.preventDefault();
   const input = document.getElementById('app-chat-input');
   if (!input || !input.value.trim()) return;
@@ -399,20 +367,19 @@ function sendAppChatMessage(event) {
   const senderName = appSettings.anonymous ? "Anonymous Student" : (currentUser ? currentUser.split('@')[0] : "Student");
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const msgObj = { user: senderName, text: text, time: timeStr };
+  const msgObj = { user: senderName, text, time: timeStr };
 
-  if (socket && socket.connected) {
-    socket.emit('chat message', msgObj);
+  if (isSupabaseConnected) {
+    await supabaseClient.from('campus_chat').insert([msgObj]);
   } else {
     chatMessages.push(msgObj);
-    saveChat();
     renderChat();
   }
 
   input.value = '';
 }
 
-// Feed Features
+// Feed Engine
 function renderFeed() {
   const container = document.getElementById('feed-container');
   if (!container) return;
@@ -430,10 +397,10 @@ function renderFeed() {
       <div class="post-title">${post.title}</div>
       <p class="post-body">${post.text}</p>
       <div class="post-actions">
-        <span class="post-action-btn ${post.liked ? 'liked' : ''}" onclick="toggleLikePost(${post.id})">
-          <i class="fa-solid fa-heart"></i> ${post.likes}
+        <span class="post-action-btn ${post.liked ? 'liked' : ''}" onclick="toggleLikePost('${post.id}')">
+          <i class="fa-solid fa-heart"></i> ${post.likes || 0}
         </span>
-        <span class="post-action-btn" onclick="openCommentsModal(${post.id})">
+        <span class="post-action-btn" onclick="openCommentsModal('${post.id}')">
           <i class="fa-solid fa-comment"></i> ${commentCount} Comments
         </span>
       </div>
@@ -442,12 +409,17 @@ function renderFeed() {
   });
 }
 
-function toggleLikePost(id) {
+async function toggleLikePost(id) {
   const post = campusFeed.find(p => p.id === id);
-  if (post) {
-    post.liked = !post.liked;
-    post.likes += post.liked ? 1 : -1;
-    saveFeed();
+  if (!post) return;
+
+  post.liked = !post.liked;
+  const newLikes = Math.max(0, (post.likes || 0) + (post.liked ? 1 : -1));
+
+  if (isSupabaseConnected) {
+    await supabaseClient.from('campus_feed').update({ likes: newLikes }).eq('id', id);
+  } else {
+    post.likes = newLikes;
     renderFeed();
   }
 }
@@ -483,19 +455,23 @@ function openCommentsModal(postId) {
   modal.style.display = 'flex';
 }
 
-function addCommentToPost() {
+async function addCommentToPost() {
   const input = document.getElementById('new-comment-input');
   if (!input || !input.value.trim() || !currentPostCommentId) return;
 
   const post = campusFeed.find(p => p.id === currentPostCommentId);
   if (post) {
-    if (!post.comments) post.comments = [];
-    post.comments.push({
-      author: appSettings.anonymous ? "Anonymous Student" : (currentUser || "Student"),
+    const updatedComments = post.comments || [];
+    updatedComments.push({
+      author: appSettings.anonymous ? "Anonymous Student" : (currentUser ? currentUser.split('@')[0] : "Student"),
       text: input.value.trim()
     });
-    saveFeed();
-    renderFeed();
+
+    if (isSupabaseConnected) {
+      await supabaseClient.from('campus_feed').update({ comments: updatedComments }).eq('id', currentPostCommentId);
+    } else {
+      renderFeed();
+    }
     openCommentsModal(currentPostCommentId);
   }
 }
@@ -503,29 +479,32 @@ function addCommentToPost() {
 function openNewPostModal() { document.getElementById('postModal').style.display = 'flex'; }
 function closePostModal() { document.getElementById('postModal').style.display = 'none'; }
 
-function submitPost(event) {
+async function submitPost(event) {
   event.preventDefault();
   const title = document.getElementById('post-title').value;
   const text = document.getElementById('post-text').value;
 
-  campusFeed.unshift({
-    id: Date.now(),
-    author: appSettings.anonymous ? "Anonymous Student" : (currentUser || "Student"),
+  const newPost = {
+    author: appSettings.anonymous ? "Anonymous Student" : (currentUser ? currentUser.split('@')[0] : "Student"),
     title,
     text,
     likes: 0,
-    liked: false,
     time: "Just now",
     comments: []
-  });
+  };
 
-  saveFeed();
-  renderFeed();
+  if (isSupabaseConnected) {
+    await supabaseClient.from('campus_feed').insert([newPost]);
+  } else {
+    campusFeed.unshift({ id: String(Date.now()), ...newPost });
+    renderFeed();
+  }
+
   closePostModal();
   event.target.reset();
 }
 
-// Study Groups
+// Study Groups Engine
 function renderGroups(filter = 'all') {
   const container = document.getElementById('groups-list');
   if (!container) return;
@@ -545,13 +524,13 @@ function renderGroups(filter = 'all') {
         <span style="font-weight:800; color:var(--accent-color);">${group.course}</span>
         <span style="font-size:0.75rem; color:var(--sub-text-color);">${group.members}/${group.max} Members</span>
       </div>
-      <div style="font-weight:700; margin-bottom:6px; cursor:pointer;" onclick="openGroupDetailModal(${group.id})">${group.name}</div>
+      <div style="font-weight:700; margin-bottom:6px; cursor:pointer;" onclick="openGroupDetailModal('${group.id}')">${group.name}</div>
       <div style="font-size:0.75rem; color:var(--sub-text-color); margin-bottom:10px;">
         <i class="fa-solid fa-location-dot"></i> ${group.location || 'Campus Center'} • <i class="fa-solid fa-clock"></i> ${group.schedule || 'TBD'}
       </div>
       <div style="display:flex; gap:8px;">
-        <button class="secondary-btn" style="flex:1; padding:8px; font-size:0.8rem;" onclick="openGroupDetailModal(${group.id})">Details</button>
-        <button class="${group.joined ? 'secondary-btn active-state' : 'primary-btn'}" style="flex:1; padding:8px; font-size:0.8rem;" onclick="toggleGroupJoin(${group.id})">
+        <button class="secondary-btn" style="flex:1; padding:8px; font-size:0.8rem;" onclick="openGroupDetailModal('${group.id}')">Details</button>
+        <button class="${group.joined ? 'secondary-btn active-state' : 'primary-btn'}" style="flex:1; padding:8px; font-size:0.8rem;" onclick="toggleGroupJoin('${group.id}')">
           ${group.joined ? 'Leave' : 'Join'}
         </button>
       </div>
@@ -564,7 +543,7 @@ function openGroupDetailModal(groupId) {
   const group = studyGroups.find(g => g.id === groupId);
   if (!group) return;
 
-  const topicsList = (group.topics || []).map(t => `<li style="font-size:0.8rem; color:var(--main-text-color);">${t}</li>`).join('') || '<li>General study & review</li>';
+  const topicsList = (group.topics || []).map(t => `<li style="font-size:0.8rem; color:var(--main-text-color);">${t}</li>`).join('') || '<li>General study</li>';
   const rosterList = (group.roster || []).map(r => `<span style="font-size:0.72rem; background:var(--card-bg); border:1px solid var(--card-border); padding:2px 8px; border-radius:10px;">${r}</span>`).join(' ');
 
   openModal(
@@ -590,23 +569,25 @@ function filterGroups(type, btn) {
   renderGroups(type);
 }
 
-function toggleGroupJoin(id) {
+async function toggleGroupJoin(id) {
   const group = studyGroups.find(g => g.id === id);
-  if (group) {
-    if (!group.joined && group.members >= group.max) return alert("Group is full!");
-    group.joined = !group.joined;
-    group.members += group.joined ? 1 : -1;
-    if (group.joined && group.roster && !group.roster.includes("You")) {
-      group.roster.push("You");
-    } else if (!group.joined && group.roster) {
-      group.roster = group.roster.filter(r => r !== "You");
-    }
-    saveGroups();
+  if (!group) return;
+
+  if (!group.joined && group.members >= group.max) return alert("Group is full!");
+
+  const isJoining = !group.joined;
+  const newMembers = Math.max(0, group.members + (isJoining ? 1 : -1));
+
+  if (isSupabaseConnected) {
+    await supabaseClient.from('study_groups').update({ joined: isJoining, members: newMembers }).eq('id', id);
+  } else {
+    group.joined = isJoining;
+    group.members = newMembers;
     renderGroups();
   }
 }
 
-// Events
+// Events Engine
 function renderEvents() {
   const container = document.getElementById('events-list');
   if (!container) return;
@@ -630,12 +611,7 @@ function renderEvents() {
 
 function toggleRsvp(idx) {
   campusEvents[idx].rsvp = !campusEvents[idx].rsvp;
-  if (campusEvents[idx].rsvp) {
-    campusEvents[idx].attendeesCount = (campusEvents[idx].attendeesCount || 0) + 1;
-  } else {
-    campusEvents[idx].attendeesCount = Math.max(0, (campusEvents[idx].attendeesCount || 0) - 1);
-  }
-  saveEvents();
+  campusEvents[idx].attendeesCount += campusEvents[idx].rsvp ? 1 : -1;
   renderEvents();
 }
 
@@ -664,20 +640,24 @@ function renderGpaRows() {
 
 function addGpaRow() {
   gpaCourses.push({ name: "New Course", grade: "A", credits: 3 });
-  saveGpa();
+  saveGpaLocal();
   renderGpaRows();
 }
 
 function updateGpaData(idx, key, val) {
   gpaCourses[idx][key] = val;
-  saveGpa();
+  saveGpaLocal();
   calculateGPA();
 }
 
 function deleteGpaRow(idx) {
   gpaCourses.splice(idx, 1);
-  saveGpa();
+  saveGpaLocal();
   renderGpaRows();
+}
+
+function saveGpaLocal() {
+  if (currentUser) localStorage.setItem(`gpa_${currentUser}`, JSON.stringify(gpaCourses));
 }
 
 function calculateGPA() {
@@ -693,9 +673,10 @@ function calculateGPA() {
   const gpa = totalCredits > 0 ? (totalPts / totalCredits).toFixed(2) : "0.00";
   document.getElementById('calculated-gpa').textContent = gpa;
   document.getElementById('gpa-summary-val').textContent = gpa;
+  document.getElementById('total-credits-val').textContent = totalCredits;
 }
 
-// Timer Modal
+// Timer Engine
 function openTimerModal() { document.getElementById('timerModal').style.display = 'flex'; }
 function closeTimerModal() { document.getElementById('timerModal').style.display = 'none'; clearInterval(timerInterval); timerInterval = null; }
 
@@ -742,18 +723,24 @@ function updateTimerDisplay() {
 function openReviewModal() { document.getElementById('reviewModal').style.display = 'flex'; }
 function closeReviewModal() { document.getElementById('reviewModal').style.display = 'none'; }
 
-function submitReview(event) {
+async function submitReview(event) {
   event.preventDefault();
   const teacher = document.getElementById('review-teacher').value;
   const rating = document.getElementById('review-rating').value;
   const text = document.getElementById('review-text').value;
 
-  userReviews.unshift({ teacher, rating, text });
-  saveReviewsToStorage();
+  const revObj = { teacher, rating, text };
+
+  if (isSupabaseConnected) {
+    await supabaseClient.from('instructor_reviews').insert([revObj]);
+  } else {
+    userReviews.unshift({ id: String(Date.now()), ...revObj });
+    renderReviews();
+    updateAnalytics();
+  }
+
   event.target.reset();
   closeReviewModal();
-  renderReviews();
-  updateAnalytics();
   switchTab('profile-view');
 }
 
@@ -765,7 +752,7 @@ function renderReviews() {
   container.innerHTML = '';
   const filtered = userReviews.filter(rev => filterVal === 'all' || rev.rating === filterVal);
 
-  filtered.forEach((rev, idx) => {
+  filtered.forEach(rev => {
     const card = document.createElement('div');
     card.className = 'info-card';
     card.innerHTML = `
@@ -775,26 +762,29 @@ function renderReviews() {
       </div>
       <p style="font-size:0.82rem; color:var(--sub-text-color);">${rev.text}</p>
       <div style="text-align:right; margin-top:8px;">
-        <i class="fa-solid fa-trash" style="color:#ff3b30; cursor:pointer;" onclick="deleteReview(${idx})"></i>
+        <i class="fa-solid fa-trash" style="color:#ff3b30; cursor:pointer;" onclick="deleteReview('${rev.id}')"></i>
       </div>
     `;
     container.appendChild(card);
   });
 }
 
-function deleteReview(idx) {
-  userReviews.splice(idx, 1);
-  saveReviewsToStorage();
-  renderReviews();
-  updateAnalytics();
+async function deleteReview(id) {
+  if (isSupabaseConnected) {
+    await supabaseClient.from('instructor_reviews').delete().eq('id', id);
+  } else {
+    userReviews = userReviews.filter(r => r.id !== id);
+    renderReviews();
+    updateAnalytics();
+  }
 }
 
 function updateAnalytics() {
   const countEl = document.getElementById('total-reviews-count');
-  if (countEl) countEl.textContent = 140 + userReviews.length;
+  if (countEl) countEl.textContent = userReviews.length;
 }
 
-// Filter Mechanics
+// Search Engine
 function filterChip(cat, el) {
   document.querySelectorAll('#search-view .chip').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
@@ -812,13 +802,11 @@ function filterCards() {
 
 function openModal(title, text) {
   document.getElementById('modalTitle').textContent = title;
-  
   if (typeof text === 'string' && text.trim().startsWith('<')) {
     document.getElementById('modalBody').innerHTML = text;
   } else {
     document.getElementById('modalBody').textContent = text;
   }
-
   document.getElementById('detailModal').style.display = 'flex';
 }
 

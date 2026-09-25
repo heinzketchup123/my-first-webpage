@@ -1,0 +1,16 @@
+{
+  "short_name": "CampusPulse",
+  "name": "Campus Pulse & Knowledge Hub",
+  "icons": [
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/graduation-cap.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#080d14",
+  "theme_color": "#00f3ff",
+  "display": "standalone",
+  "orientation": "portrait"
+}
