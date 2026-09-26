@@ -68,6 +68,36 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Backfill: any auth.users that already exist without a profile row (e.g.
+-- signed up before the trigger was installed) get one created now so they
+-- can be found by handle in the Add Friend flow.
+do $$
+declare
+  u record;
+  base_handle text;
+  final_handle text;
+  n int;
+begin
+  for u in
+    select id, email, raw_user_meta_data
+    from auth.users
+    where id not in (select user_id from public.profiles)
+  loop
+    base_handle := lower(regexp_replace(split_part(u.email, '@', 1), '[^a-z0-9_]', '', 'g'));
+    if char_length(base_handle) < 3 then
+      base_handle := 'user' || substr(replace(u.id::text, '-', ''), 1, 6);
+    end if;
+    n := 0;
+    final_handle := base_handle;
+    while exists (select 1 from public.profiles where handle = final_handle) loop
+      n := n + 1;
+      final_handle := base_handle || n;
+    end loop;
+    insert into public.profiles (user_id, handle, display_name)
+    values (u.id, final_handle, coalesce(u.raw_user_meta_data->>'display_name', final_handle));
+  end loop;
+end $$;
+
 -- ============================================================
 -- 2. FRIENDSHIPS  (symmetric relation, stored once per pair)
 -- ============================================================
