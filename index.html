@@ -218,22 +218,27 @@
         </div>
       </section>
 
-      <!-- Tab 4: Live Campus Chat -->
+      <!-- Tab 4: Direct Messages (friends-only) -->
       <section id="chat-view" class="view">
         <div class="chat-header-row">
-          <h1 class="page-title" style="margin:0;">Campus Chat</h1>
-          <span id="chat-online-count" class="online-pill">
-            <span class="online-dot"></span> <span id="chat-online-num">1</span> active
-          </span>
+          <h1 class="page-title" style="margin:0;">Messages</h1>
+          <button class="icon-header-btn" onclick="openFriendsModal()" aria-label="Manage friends">
+            <i class="fa-solid fa-user-group"></i>
+            <span id="friends-badge" class="notif-badge" style="display:none;">0</span>
+          </button>
         </div>
-        <p class="description">Cross-device real-time multi-user student chat.</p>
+        <p class="description">Private direct messages between friends.</p>
+
+        <div id="friends-strip" class="friends-strip">
+          <!-- friend chips render here -->
+        </div>
 
         <div class="chat-container">
           <div id="app-chat-messages" class="chat-messages-box">
-            <!-- Messages load dynamically via Supabase -->
+            <!-- DM thread renders here -->
           </div>
-          <form id="app-chat-form" class="chat-form-row" onsubmit="sendAppChatMessage(event)">
-            <input type="text" id="app-chat-input" class="auth-input" placeholder="Type a message..." required autocomplete="off" maxlength="280" oninput="updateChatCounter()" />
+          <form id="app-chat-form" class="chat-form-row" onsubmit="sendDM(event)">
+            <input type="text" id="app-chat-input" class="auth-input" placeholder="Message..." required autocomplete="off" maxlength="280" oninput="updateChatCounter()" />
             <button type="submit" class="primary-btn chat-send-btn">Send</button>
           </form>
           <div id="chat-char-counter" class="chat-char-counter">0/280</div>
@@ -485,6 +490,42 @@
         <button id="timer-start-btn" class="primary-btn" onclick="toggleTimer()">Start Focus</button>
         <button class="secondary-btn" onclick="resetTimer()">Reset</button>
         <button class="secondary-btn" onclick="closeTimerModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Friends Modal -->
+  <div id="friendsModal" class="modal-overlay">
+    <div class="modal-content text-left friends-modal">
+      <div class="friends-modal-head">
+        <h2 class="modal-title" style="margin:0;">Friends</h2>
+        <i class="fa-solid fa-xmark friends-close" onclick="closeFriendsModal()"></i>
+      </div>
+
+      <div class="friends-tabs">
+        <button class="friends-tab active" data-tab="list" onclick="setFriendsTab('list', this)">My Friends</button>
+        <button class="friends-tab" data-tab="requests" onclick="setFriendsTab('requests', this)">
+          Requests <span id="friends-tab-badge" class="tab-badge" style="display:none;">0</span>
+        </button>
+        <button class="friends-tab" data-tab="add" onclick="setFriendsTab('add', this)">Add</button>
+      </div>
+
+      <div id="friends-tab-list" class="friends-tab-body">
+        <div id="friends-list-body"></div>
+      </div>
+      <div id="friends-tab-requests" class="friends-tab-body hidden">
+        <div class="friends-subheading">Incoming</div>
+        <div id="friends-requests-in"></div>
+        <div class="friends-subheading" style="margin-top:12px;">Sent</div>
+        <div id="friends-requests-out"></div>
+      </div>
+      <div id="friends-tab-add" class="friends-tab-body hidden">
+        <p class="friends-hint">Find someone by their handle (the part before <code>@</code> in their email).</p>
+        <div class="friends-add-row">
+          <input type="text" id="friends-add-input" class="auth-input" placeholder="alice, bob, ..." maxlength="24" autocomplete="off" />
+          <button class="primary-btn" onclick="sendFriendRequestFromInput()">Send</button>
+        </div>
+        <p id="friends-add-status" class="friends-status"></p>
       </div>
     </div>
   </div>

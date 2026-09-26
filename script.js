@@ -74,15 +74,38 @@ const THEME_META = [
 
 const FONT_SIZE_LABELS = ['Small', 'Medium', 'Large'];
 
-let currentUser = null;
+let currentUser = null;       // display email string
+let currentUserId = null;     // Supabase auth.users.id when signed in
+let currentHandle = null;     // profile.handle when signed in
 let userReviews = [];
 let campusFeed = [];
 let studyGroups = [];
 let gpaCourses = [];
 let campusEvents = [];
-let chatMessages = [];
+let chatMessages = [];         // legacy — no longer rendered directly; kept for online-count
+let dmMessages = [];           // messages for the currently-selected friend thread
+let selectedFriendId = null;
+let friends = [];              // [{friend_id, handle, display_name}]
+let pendingIncoming = [];      // [{id, requester_id, handle, display_name}]
+let pendingOutgoing = [];      // [{id, addressee_id, handle, display_name}]
+let profileMap = {};           // user_id -> {handle, display_name}
 let appSettings = { ...defaultSettings };
 let appTheme = { ...THEME_PRESETS.cyber };
+
+// Guest-mode seed friends so the UI is explorable without a real account.
+const GUEST_FRIENDS = [
+  { friend_id: 'guest-alice', handle: 'alice', display_name: 'Alice (demo)' },
+  { friend_id: 'guest-bob',   handle: 'bob',   display_name: 'Bob (demo)' }
+];
+const GUEST_SEED_DMS = {
+  'guest-alice': [
+    { sender_id: 'guest-alice', recipient_id: 'guest', text: 'Hey! Ready for the midterm review?', time: '10:15 AM' },
+    { sender_id: 'guest',       recipient_id: 'guest-alice', text: 'Almost — one more chapter to go.', time: '10:17 AM' }
+  ],
+  'guest-bob': [
+    { sender_id: 'guest-bob', recipient_id: 'guest', text: 'Yo, coffee before class?', time: '9:02 AM' }
+  ]
+};
 
 let currentPostCommentId = null;
 let timerSeconds = 1500;
@@ -124,34 +147,26 @@ document.addEventListener("DOMContentLoaded", () => {
   initSystemThemeListener();
 
   if (isSupabaseConnected) {
-    // Check initial Auth session
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+    const boot = (session) => {
       if (session) {
         currentUser = session.user.email;
+        currentUserId = session.user.id;
         document.getElementById('auth-screen').style.display = 'none';
         const nameDisplay = currentUser.split('@')[0];
         document.getElementById('user-welcome-title').textContent = `Welcome Back, ${nameDisplay}`;
-        initSupabaseRealtime();
-        loadAllSupabaseData();
-      } else {
-        document.getElementById('auth-screen').style.display = 'flex';
-      }
-    });
-
-    supabaseClient.auth.onAuthStateChange((event, session) => {
-      if (session) {
-        currentUser = session.user.email;
-        document.getElementById('auth-screen').style.display = 'none';
-        const nameDisplay = currentUser.split('@')[0];
-        document.getElementById('user-welcome-title').textContent = `Welcome Back, ${nameDisplay}`;
-        initSupabaseRealtime();
-        loadAllSupabaseData();
+        ensureProfile().finally(() => {
+          initSupabaseRealtime();
+          loadAllSupabaseData();
+        });
       } else {
         currentUser = null;
+        currentUserId = null;
+        currentHandle = null;
         document.getElementById('auth-screen').style.display = 'flex';
-        loadLocalFallbackData();
       }
-    });
+    };
+    supabaseClient.auth.getSession().then(({ data: { session } }) => boot(session));
+    supabaseClient.auth.onAuthStateChange((_ev, session) => boot(session));
   } else {
     currentUser = localStorage.getItem('knowledge_app_current_user') || 'guest@campus.edu';
     if (currentUser !== 'guest@campus.edu') {
@@ -181,7 +196,10 @@ function initSupabaseRealtime() {
 
   realtimeChannel = supabaseClient
     .channel('public-db-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_chat' }, () => fetchChat())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_chat' }, () => {
+      if (selectedFriendId) fetchDMs(selectedFriendId);
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => fetchFriendships())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_feed' }, () => fetchFeed())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'study_groups' }, () => fetchGroups())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_reviews' }, () => fetchReviews())
@@ -189,7 +207,7 @@ function initSupabaseRealtime() {
 }
 
 async function loadAllSupabaseData() {
-  await Promise.all([fetchFeed(), fetchChat(), fetchGroups(), fetchReviews()]);
+  await Promise.all([fetchFeed(), fetchGroups(), fetchReviews(), fetchFriendships()]);
   const savedGpa = localStorage.getItem(`gpa_${currentUser}`);
   gpaCourses = savedGpa ? JSON.parse(savedGpa) : [...defaultGpaCourses];
   campusEvents = [...defaultEvents];
@@ -207,14 +225,6 @@ async function fetchFeed() {
     campusFeed = data.length ? [...data, ...localSeed] : localSeed;
     renderFeed();
     updateAnalytics();
-  }
-}
-
-async function fetchChat() {
-  const { data, error } = await supabaseClient.from('campus_chat').select('*').order('created_at', { ascending: true }).limit(50);
-  if (!error && data) {
-    chatMessages = data;
-    renderChat();
   }
 }
 
@@ -242,13 +252,18 @@ function loadLocalFallbackData() {
   studyGroups = loadLocalGroups() || [...defaultGroups];
   gpaCourses = [...defaultGpaCourses];
   campusEvents = [...defaultEvents];
-  chatMessages = [{ user: "Campus Bot", text: "Welcome to Live Campus Chat!", time: "12:00 PM" }];
+  // Guest mode: expose the demo friends so the Messages tab is explorable.
+  friends = [];
+  pendingIncoming = [];
+  pendingOutgoing = [];
   renderFeed();
   renderGroups();
   renderEvents();
   renderGpaRows();
   renderReviews();
-  renderChat();
+  renderFriendsStrip();
+  renderDMThread();
+  renderFriendsBadge();
   updateAnalytics();
   updateNotifBadge();
 }
@@ -512,7 +527,7 @@ function switchTab(viewId, element) {
     if (idx !== -1 && btns[idx]) btns[idx].classList.add('active');
   }
 
-  if (viewId === 'chat-view') renderChat();
+  if (viewId === 'chat-view') { renderFriendsStrip(); renderDMThread(); }
 }
 
 function toggleNotifications() {
@@ -564,41 +579,6 @@ function sanitizeName(name) {
   return cleaned || 'Student';
 }
 
-function isSelfMessage(msg, myHandle) {
-  return msg.user === myHandle
-      || msg.user === currentUser
-      || msg.user === 'You'
-      || (msg.user_id && currentUser && msg.user_id === currentUser);
-}
-
-function renderChat() {
-  const box = document.getElementById('app-chat-messages');
-  if (!box) return;
-
-  box.innerHTML = '';
-  const myHandle = appSettings.anonymous ? "You" : (currentUser ? currentUser.split('@')[0] : "You");
-
-  chatMessages.forEach(msg => {
-    const isMine = isSelfMessage(msg, myHandle);
-    const safeUser = escapeHtml(sanitizeName(isMine ? 'You' : msg.user));
-    const safeText = renderSafeMessage(String(msg.text || '').slice(0, CHAT_MAX_LEN));
-    const safeTime = escapeHtml(String(msg.time || ''));
-
-    const msgEl = document.createElement('div');
-    msgEl.className = `chat-bubble ${isMine ? 'chat-bubble-mine' : 'chat-bubble-other'}`;
-    msgEl.innerHTML = `
-      <span class="chat-user">${safeUser}</span>
-      <div class="chat-text">${safeText}</div>
-      <span class="chat-time">${safeTime}</span>
-    `;
-    box.appendChild(msgEl);
-  });
-
-  box.scrollTop = box.scrollHeight;
-  updateChatOnlineCount();
-  updateChatCounter();
-}
-
 function updateChatCounter() {
   const input = document.getElementById('app-chat-input');
   const counter = document.getElementById('chat-char-counter');
@@ -608,55 +588,334 @@ function updateChatCounter() {
   counter.classList.toggle('over-limit', len >= CHAT_MAX_LEN);
 }
 
-async function sendAppChatMessage(event) {
+// -------------------- Profiles + Friends ---------------------
+
+async function ensureProfile() {
+  if (!isSupabaseConnected || !currentUserId) return;
+  const { data, error } = await supabaseClient
+    .from('profiles')
+    .select('handle, display_name')
+    .eq('user_id', currentUserId)
+    .maybeSingle();
+  if (!error && data) {
+    currentHandle = data.handle;
+    profileMap[currentUserId] = data;
+  }
+}
+
+async function fetchProfilesByIds(ids) {
+  const missing = ids.filter(id => id && !profileMap[id]);
+  if (!missing.length || !isSupabaseConnected) return;
+  const { data } = await supabaseClient
+    .from('profiles')
+    .select('user_id, handle, display_name')
+    .in('user_id', missing);
+  (data || []).forEach(p => { profileMap[p.user_id] = { handle: p.handle, display_name: p.display_name }; });
+}
+
+async function fetchFriendships() {
+  if (!isSupabaseConnected || !currentUserId) return;
+  const { data, error } = await supabaseClient
+    .from('friendships')
+    .select('*')
+    .or(`requester_id.eq.${currentUserId},addressee_id.eq.${currentUserId}`);
+  if (error) { console.warn('friendships fetch failed:', error.message); return; }
+
+  const ids = new Set();
+  (data || []).forEach(f => { ids.add(f.requester_id); ids.add(f.addressee_id); });
+  await fetchProfilesByIds([...ids]);
+
+  friends = []; pendingIncoming = []; pendingOutgoing = [];
+  (data || []).forEach(f => {
+    const otherId = f.requester_id === currentUserId ? f.addressee_id : f.requester_id;
+    const prof = profileMap[otherId] || { handle: otherId.slice(0,8), display_name: 'Unknown' };
+    if (f.status === 'accepted') {
+      friends.push({ friend_id: otherId, ...prof });
+    } else if (f.status === 'pending') {
+      if (f.addressee_id === currentUserId) {
+        pendingIncoming.push({ id: f.id, requester_id: f.requester_id, ...prof });
+      } else {
+        pendingOutgoing.push({ id: f.id, addressee_id: f.addressee_id, ...prof });
+      }
+    }
+  });
+
+  renderFriendsStrip();
+  renderFriendsBadge();
+  renderFriendsModalIfOpen();
+}
+
+async function sendFriendRequestFromInput() {
+  const input = document.getElementById('friends-add-input');
+  const status = document.getElementById('friends-add-status');
+  const raw = (input?.value || '').trim().toLowerCase().replace(/^@/, '');
+  if (!raw) return;
+  status.textContent = '';
+  if (!isSupabaseConnected || !currentUserId) {
+    status.textContent = 'Sign in with an account to send real friend requests.';
+    status.className = 'friends-status err';
+    return;
+  }
+  if (raw === currentHandle) {
+    status.textContent = "You can't friend yourself.";
+    status.className = 'friends-status err';
+    return;
+  }
+  const { data: prof } = await supabaseClient
+    .from('profiles').select('user_id, handle, display_name').eq('handle', raw).maybeSingle();
+  if (!prof) {
+    status.textContent = `No user found with handle "${escapeHtml(raw)}".`;
+    status.className = 'friends-status err';
+    return;
+  }
+  const { error } = await supabaseClient.from('friendships').insert([{
+    requester_id: currentUserId, addressee_id: prof.user_id, status: 'pending'
+  }]);
+  if (error) {
+    status.textContent = 'Could not send request: ' + error.message;
+    status.className = 'friends-status err';
+    return;
+  }
+  status.textContent = `Request sent to ${escapeHtml(prof.display_name || raw)}.`;
+  status.className = 'friends-status ok';
+  input.value = '';
+  fetchFriendships();
+}
+
+async function respondFriendRequest(id, accept) {
+  if (!isSupabaseConnected) return;
+  const { error } = await supabaseClient
+    .from('friendships')
+    .update({ status: accept ? 'accepted' : 'blocked', responded_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) return alert('Could not update request: ' + error.message);
+  fetchFriendships();
+}
+
+async function cancelFriendRequest(id) {
+  if (!isSupabaseConnected) return;
+  await supabaseClient.from('friendships').delete().eq('id', id);
+  fetchFriendships();
+}
+
+async function unfriend(friendId) {
+  if (!isSupabaseConnected) return;
+  if (!confirm('Unfriend this person? Your message history stays visible to both of you until deleted.')) return;
+  await supabaseClient
+    .from('friendships')
+    .delete()
+    .or(
+      `and(requester_id.eq.${currentUserId},addressee_id.eq.${friendId}),`+
+      `and(requester_id.eq.${friendId},addressee_id.eq.${currentUserId})`
+    );
+  if (selectedFriendId === friendId) { selectedFriendId = null; dmMessages = []; renderDMThread(); }
+  fetchFriendships();
+}
+
+// -------------------- Friend UI rendering --------------------
+
+function renderFriendsStrip() {
+  const strip = document.getElementById('friends-strip');
+  if (!strip) return;
+  const list = currentUserId ? friends : (currentUser ? GUEST_FRIENDS : []);
+  if (!list.length) {
+    strip.innerHTML = `
+      <div class="friends-empty">
+        <i class="fa-solid fa-user-plus"></i>
+        <span>${currentUserId ? 'No friends yet — tap the group icon to add one.' : 'Sign in with an account to add real friends. (Guest mode shows demo friends below.)'}</span>
+      </div>`;
+    return;
+  }
+  strip.innerHTML = list.map(f => `
+    <button class="friend-chip ${f.friend_id === selectedFriendId ? 'active' : ''}" onclick="selectFriend('${escapeAttr(f.friend_id)}')">
+      <span class="friend-avatar">${escapeHtml((f.display_name || f.handle || '?')[0].toUpperCase())}</span>
+      <span class="friend-name">${escapeHtml(f.display_name || f.handle)}</span>
+    </button>
+  `).join('');
+}
+
+function escapeAttr(v) { return String(v).replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
+
+function renderFriendsBadge() {
+  const badge = document.getElementById('friends-badge');
+  const tabBadge = document.getElementById('friends-tab-badge');
+  const count = pendingIncoming.length;
+  [badge, tabBadge].forEach(el => {
+    if (!el) return;
+    if (count > 0) { el.textContent = count > 9 ? '9+' : String(count); el.style.display = 'inline-flex'; }
+    else el.style.display = 'none';
+  });
+}
+
+function openFriendsModal() {
+  document.getElementById('friendsModal').style.display = 'flex';
+  setFriendsTab('list', document.querySelector('.friends-tab[data-tab="list"]'));
+}
+function closeFriendsModal() {
+  document.getElementById('friendsModal').style.display = 'none';
+}
+
+function setFriendsTab(tab, btn) {
+  document.querySelectorAll('.friends-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  ['list','requests','add'].forEach(k => {
+    document.getElementById(`friends-tab-${k}`).classList.toggle('hidden', k !== tab);
+  });
+  renderFriendsModalIfOpen();
+}
+
+function renderFriendsModalIfOpen() {
+  const modal = document.getElementById('friendsModal');
+  if (!modal || modal.style.display !== 'flex') { renderFriendsBadge(); return; }
+  const listBody = document.getElementById('friends-list-body');
+  const rin = document.getElementById('friends-requests-in');
+  const rout = document.getElementById('friends-requests-out');
+
+  const emptyMsg = (m) => `<p class="friends-empty-inner">${escapeHtml(m)}</p>`;
+  if (listBody) {
+    listBody.innerHTML = friends.length
+      ? friends.map(f => `
+          <div class="friend-row">
+            <span class="friend-avatar">${escapeHtml((f.display_name || f.handle)[0].toUpperCase())}</span>
+            <div class="friend-row-text">
+              <strong>${escapeHtml(f.display_name || f.handle)}</strong>
+              <small>@${escapeHtml(f.handle)}</small>
+            </div>
+            <button class="secondary-btn friend-btn-sm" onclick="unfriend('${escapeAttr(f.friend_id)}')">Unfriend</button>
+          </div>`).join('')
+      : emptyMsg(currentUserId ? "No friends yet — send a request from the Add tab." : "Sign in to see your friends.");
+  }
+  if (rin) {
+    rin.innerHTML = pendingIncoming.length
+      ? pendingIncoming.map(r => `
+          <div class="friend-row">
+            <span class="friend-avatar">${escapeHtml((r.display_name || r.handle)[0].toUpperCase())}</span>
+            <div class="friend-row-text">
+              <strong>${escapeHtml(r.display_name || r.handle)}</strong>
+              <small>@${escapeHtml(r.handle)}</small>
+            </div>
+            <button class="primary-btn friend-btn-sm"   onclick="respondFriendRequest('${escapeAttr(r.id)}', true)">Accept</button>
+            <button class="secondary-btn friend-btn-sm" onclick="respondFriendRequest('${escapeAttr(r.id)}', false)">Decline</button>
+          </div>`).join('')
+      : emptyMsg('No incoming requests.');
+  }
+  if (rout) {
+    rout.innerHTML = pendingOutgoing.length
+      ? pendingOutgoing.map(r => `
+          <div class="friend-row">
+            <span class="friend-avatar">${escapeHtml((r.display_name || r.handle)[0].toUpperCase())}</span>
+            <div class="friend-row-text">
+              <strong>${escapeHtml(r.display_name || r.handle)}</strong>
+              <small>@${escapeHtml(r.handle)} · pending</small>
+            </div>
+            <button class="secondary-btn friend-btn-sm" onclick="cancelFriendRequest('${escapeAttr(r.id)}')">Cancel</button>
+          </div>`).join('')
+      : emptyMsg('No outgoing requests.');
+  }
+  renderFriendsBadge();
+}
+
+// -------------------- Direct Messages ------------------------
+
+async function selectFriend(friendId) {
+  selectedFriendId = friendId;
+  renderFriendsStrip();
+  await fetchDMs(friendId);
+}
+
+async function fetchDMs(friendId) {
+  if (!friendId) { dmMessages = []; renderDMThread(); return; }
+  if (currentUserId && isSupabaseConnected) {
+    const { data, error } = await supabaseClient
+      .from('campus_chat')
+      .select('*')
+      .or(
+        `and(sender_id.eq.${currentUserId},recipient_id.eq.${friendId}),`+
+        `and(sender_id.eq.${friendId},recipient_id.eq.${currentUserId})`
+      )
+      .order('created_at', { ascending: true })
+      .limit(200);
+    dmMessages = error ? [] : (data || []);
+  } else {
+    dmMessages = [...(GUEST_SEED_DMS[friendId] || [])];
+  }
+  renderDMThread();
+}
+
+function renderDMThread() {
+  const box = document.getElementById('app-chat-messages');
+  if (!box) return;
+
+  if (!selectedFriendId) {
+    box.innerHTML = `
+      <div class="empty-state">
+        <i class="fa-solid fa-comments"></i>
+        <p>Pick a friend above to start chatting.</p>
+        ${currentUserId ? '' : '<p style="font-size:0.75rem; margin-top:6px;">Guest mode uses demo friends — sign in to message real ones.</p>'}
+      </div>`;
+    updateChatCounter();
+    return;
+  }
+
+  const meId = currentUserId || 'guest';
+  box.innerHTML = '';
+  dmMessages.forEach(msg => {
+    const isMine = msg.sender_id === meId;
+    const safeText = renderSafeMessage(String(msg.text || '').slice(0, CHAT_MAX_LEN));
+    const safeTime = escapeHtml(String(msg.time || (msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '')));
+    const el = document.createElement('div');
+    el.className = `chat-bubble ${isMine ? 'chat-bubble-mine' : 'chat-bubble-other'}`;
+    el.innerHTML = `<div class="chat-text">${safeText}</div><span class="chat-time">${safeTime}</span>`;
+    box.appendChild(el);
+  });
+  box.scrollTop = box.scrollHeight;
+  updateChatOnlineCount();
+  updateChatCounter();
+}
+
+async function sendDM(event) {
   event.preventDefault();
   const input = document.getElementById('app-chat-input');
   if (!input) return;
 
-  // 1) Normalize: trim + collapse whitespace + cap length.
+  if (!selectedFriendId) return alert('Pick a friend first.');
+
   let text = String(input.value || '').replace(/\s+/g, ' ').trim();
   if (!text) return;
   if (text.length > CHAT_MAX_LEN) text = text.slice(0, CHAT_MAX_LEN);
 
-  // 2) Rate limit: block if too many recent sends from this client.
   const now = performance.now();
   chatSendTimestamps = chatSendTimestamps.filter(t => now - t < CHAT_RATE_WINDOW_MS);
   if (chatSendTimestamps.length >= CHAT_RATE_MAX) {
     const waitMs = CHAT_RATE_WINDOW_MS - (now - chatSendTimestamps[0]);
-    alert(`Slow down — you can send up to ${CHAT_RATE_MAX} messages every ${CHAT_RATE_WINDOW_MS/1000}s. Try again in ${Math.ceil(waitMs/1000)}s.`);
+    alert(`Slow down — up to ${CHAT_RATE_MAX} messages every ${CHAT_RATE_WINDOW_MS/1000}s. Try again in ${Math.ceil(waitMs/1000)}s.`);
     return;
   }
 
-  // 3) Determine sender identity. Anonymous mode picks a canonical label
-  // that anyone can share. When signed in with Supabase, include user_id
-  // so a future RLS policy can verify the sender server-side; the local
-  // renderer trusts user_id over the display name for "is this mine?".
-  const rawName = appSettings.anonymous
-    ? 'Anonymous Student'
-    : (currentUser ? currentUser.split('@')[0] : 'Student');
-  const senderName = sanitizeName(rawName);
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const msgObj = { user: senderName, text, time: timeStr };
-  if (isSupabaseConnected) {
-    try {
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      if (session?.user?.id) msgObj.user_id = session.user.id;
-    } catch (_) { /* not signed in */ }
-  }
-
-  chatSendTimestamps.push(now);
-  input.value = '';
-  updateChatCounter();
-
-  if (isSupabaseConnected) {
+  if (currentUserId && isSupabaseConnected) {
+    const msgObj = {
+      sender_id: currentUserId,
+      recipient_id: selectedFriendId,
+      user: sanitizeName(currentHandle || currentUser.split('@')[0]),
+      text, time: timeStr
+    };
+    chatSendTimestamps.push(now);
+    input.value = ''; updateChatCounter();
     const { error } = await supabaseClient.from('campus_chat').insert([msgObj]);
-    if (error) alert('Message failed to send: ' + error.message);
+    if (error) return alert('Message blocked: ' + error.message + '\n(Make sure you and this person are friends.)');
   } else {
-    chatMessages.push(msgObj);
-    renderChat();
+    dmMessages.push({ sender_id: 'guest', recipient_id: selectedFriendId, text, time: timeStr });
+    chatSendTimestamps.push(now);
+    input.value = ''; updateChatCounter();
+    renderDMThread();
   }
 }
+
+// Back-compat shim: older code paths / a stale HTML cache may still call
+// sendAppChatMessage(event) — route it to the new DM sender.
+async function sendAppChatMessage(event) { return sendDM(event); }
+function renderChat() { renderDMThread(); }
 
 // Feed Engine
 const REACTION_EMOJIS = ['👍','❤️','😂','🎉','🔥'];
@@ -860,10 +1119,12 @@ async function submitPost(event) {
     comments: []
   };
 
-  if (isSupabaseConnected) {
-    await supabaseClient.from('campus_feed').insert([newPost]);
+  if (isSupabaseConnected && currentUserId) {
+    const { error } = await supabaseClient.from('campus_feed').insert([{ ...newPost, author_id: currentUserId }]);
+    if (error) alert('Post blocked: ' + error.message);
   } else {
     campusFeed.unshift({ id: String(Date.now()), ...newPost });
+    saveLocalFeed();
     renderFeed();
   }
 
@@ -1099,8 +1360,9 @@ async function submitReview(event) {
 
   const revObj = { teacher, rating, text };
 
-  if (isSupabaseConnected) {
-    await supabaseClient.from('instructor_reviews').insert([revObj]);
+  if (isSupabaseConnected && currentUserId) {
+    const { error } = await supabaseClient.from('instructor_reviews').insert([{ ...revObj, author_id: currentUserId }]);
+    if (error) alert('Review blocked: ' + error.message);
   } else {
     userReviews.unshift({ id: String(Date.now()), ...revObj });
     renderReviews();

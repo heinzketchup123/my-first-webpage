@@ -875,6 +875,195 @@ body.light-mode .nav-btn { color: #555555; }
   font-size: 0.85rem;
 }
 
+/* ---------- Friends strip + Friends modal ---------- */
+
+.friends-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 6px 2px 10px;
+  margin-bottom: 6px;
+  scrollbar-width: none;
+}
+.friends-strip::-webkit-scrollbar { display: none; }
+
+.friend-chip {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  color: var(--main-text-color);
+  cursor: pointer;
+  min-width: 62px;
+  max-width: 84px;
+  transition: transform 0.12s ease, border-color 0.2s ease;
+}
+.friend-chip:hover { transform: translateY(-1px); border-color: var(--accent-color); }
+.friend-chip.active {
+  border-color: var(--accent-color);
+  box-shadow: var(--glow-shadow);
+}
+
+.friend-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  color: var(--text-on-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.friend-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--main-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 68px;
+}
+
+.friends-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--sub-text-color);
+  background: var(--card-bg);
+  border: 1px dashed var(--card-border);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  flex: 1;
+}
+.friends-empty i { color: var(--accent-color); font-size: 1rem; }
+
+.friends-modal {
+  width: min(92%, 380px);
+}
+.friends-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.friends-close {
+  cursor: pointer;
+  color: var(--sub-text-color);
+  font-size: 1.1rem;
+  padding: 4px 6px;
+}
+.friends-close:hover { color: var(--accent-color); }
+
+.friends-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--input-bg);
+  padding: 4px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+.friends-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--sub-text-color);
+  padding: 6px 4px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  position: relative;
+}
+.friends-tab.active {
+  background: var(--accent-color);
+  color: var(--text-on-accent);
+}
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ff3b30;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  margin-left: 4px;
+}
+
+.friends-tab-body { max-height: 260px; overflow-y: auto; }
+.friends-tab-body.hidden { display: none; }
+.friends-subheading {
+  font-size: 0.7rem;
+  color: var(--sub-text-color);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+.friends-empty-inner {
+  color: var(--sub-text-color);
+  font-size: 0.8rem;
+  padding: 12px;
+  text-align: center;
+}
+
+.friend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--card-border);
+}
+.friend-row:last-child { border-bottom: none; }
+.friend-row-text { flex: 1; display: flex; flex-direction: column; }
+.friend-row-text strong { font-size: 0.85rem; color: var(--main-text-color); }
+.friend-row-text small { font-size: 0.7rem; color: var(--sub-text-color); }
+.friend-btn-sm {
+  padding: 6px 10px !important;
+  font-size: 0.72rem !important;
+  min-width: 0 !important;
+  width: auto !important;
+}
+
+.friends-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.friends-add-row .auth-input { flex: 1; margin: 0; }
+.friends-hint {
+  font-size: 0.75rem;
+  color: var(--sub-text-color);
+  margin-bottom: 10px;
+}
+.friends-hint code {
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+}
+.friends-status {
+  margin-top: 10px;
+  font-size: 0.78rem;
+  min-height: 1em;
+}
+.friends-status.ok  { color: #2ecc71; }
+.friends-status.err { color: #ff3b30; }
+
 .chat-char-counter {
   align-self: flex-end;
   font-size: 0.7rem;
