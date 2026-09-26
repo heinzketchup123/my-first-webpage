@@ -722,7 +722,10 @@ function renderFriendsStrip() {
     strip.innerHTML = `
       <div class="friends-empty">
         <i class="fa-solid fa-user-plus"></i>
-        <span>${currentUserId ? 'No friends yet — tap the group icon to add one.' : 'Sign in with an account to add real friends. (Guest mode shows demo friends below.)'}</span>
+        <div class="friends-empty-text">
+          <span>${currentUserId ? 'No friends yet.' : 'Sign in to add real friends. Guest mode shows demo friends only.'}</span>
+          ${currentUserId ? '<button class="primary-btn friends-empty-btn" onclick="openFriendsModal()">+ Add Friend</button>' : ''}
+        </div>
       </div>`;
     return;
   }
