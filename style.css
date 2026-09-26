@@ -1094,6 +1094,219 @@ body.light-mode .nav-btn { color: #555555; }
 .school-row-text strong { font-size: 0.9rem; }
 .school-row-text small { color: var(--sub-text-color); font-size: 0.7rem; }
 
+/* =====================================================
+   POLISH PASS — toasts, nav labels, smoother interactions
+   ===================================================== */
+
+/* --- Toast notifications --- */
+.toast-container {
+  position: fixed;
+  /* Sit above the bottom nav so labels stay visible */
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  padding: 0 16px;
+  max-width: 420px;
+  width: 100%;
+  align-items: center;
+}
+.toast { max-width: 92%; }
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--nav-bg);
+  border: 1px solid var(--card-border);
+  color: var(--main-text-color);
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  backdrop-filter: var(--glass-blur);
+  opacity: 0;
+  transform: translateY(20px) scale(0.96);
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  pointer-events: auto;
+  max-width: 100%;
+}
+.toast.show { opacity: 1; transform: translateY(0) scale(1); }
+.toast i { font-size: 1.05rem; flex-shrink: 0; }
+.toast-info    i { color: var(--accent-color); }
+.toast-success i { color: #2ecc71; }
+.toast-warn    i { color: #ffb142; }
+.toast-error   i { color: #ff3b30; }
+.toast-error   { border-color: rgba(255, 59, 48, 0.4); }
+.toast-success { border-color: rgba(46, 204, 113, 0.4); }
+
+/* --- Nav bar labels + bigger touch targets --- */
+.bottom-nav {
+  padding: 8px 6px calc(8px + env(safe-area-inset-bottom, 0px));
+  gap: 2px;
+}
+.nav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px 4px;
+  min-width: 0;
+  min-height: 46px;
+  font-size: 1.02rem;
+  transition: color 0.18s ease, transform 0.15s ease;
+}
+.nav-btn.active {
+  background: transparent;
+  color: var(--accent-color);
+  transform: none;
+  box-shadow: none;
+}
+.nav-btn.active .nav-label { color: var(--accent-color); }
+.nav-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--sub-text-color);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  transition: color 0.18s ease;
+}
+.nav-btn i { transition: transform 0.15s ease; }
+.nav-btn.active i {
+  transform: translateY(-1px);
+  filter: drop-shadow(0 0 6px var(--accent-color));
+}
+
+/* --- Modal entrance animation --- */
+.modal-overlay {
+  animation: modalFade 0.18s ease;
+}
+.modal-content {
+  animation: modalPop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+@keyframes modalFade {
+  from { background: rgba(0, 0, 0, 0); backdrop-filter: blur(0); }
+  to   { }
+}
+@keyframes modalPop {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+/* --- Card press feedback (mobile-friendly tap animation) --- */
+.info-card, .theme-swatch, .friend-chip, .school-row, .card, .stat-box, .tool-btn, .pref-card {
+  transition: transform 0.12s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.info-card:active, .card:active, .stat-box:active, .tool-btn:active,
+.theme-swatch:active, .friend-chip:active, .school-row:active {
+  transform: scale(0.98);
+}
+
+/* --- Chat bubble refinement --- */
+.chat-bubble {
+  animation: bubbleIn 0.2s ease;
+  max-width: 78%;
+  border-radius: 16px;
+}
+.chat-bubble-mine  { border-bottom-right-radius: 4px; }
+.chat-bubble-other { border-bottom-left-radius: 4px; }
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.chat-messages-box {
+  scroll-behavior: smooth;
+}
+
+/* --- Feed post refinement --- */
+.info-card {
+  transition: transform 0.12s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.info-card:hover { border-color: var(--accent-color); }
+.post-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.post-author::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  box-shadow: 0 0 6px var(--accent-color);
+}
+
+/* --- Buttons: consistent hierarchy --- */
+.primary-btn {
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+.primary-btn:not(:disabled):active { transform: translateY(1px); }
+.secondary-btn:not(:disabled):active { transform: translateY(1px); }
+
+/* --- Header polish --- */
+.app-header {
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.25s ease;
+}
+.content-container:not(:hover) + .app-header,
+.app-header { backdrop-filter: var(--glass-blur); }
+
+/* --- Empty states everywhere: consistent look --- */
+.empty-state {
+  padding: 32px 20px;
+}
+.empty-state i {
+  font-size: 2.2rem;
+  margin-bottom: 12px;
+  opacity: 0.9;
+}
+.empty-state .primary-btn { width: auto; padding: 10px 20px; }
+
+/* --- Segmented control: cleaner active glow --- */
+.seg-btn.active {
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* --- Filter chip active state consistency --- */
+.chip {
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.chip:active { transform: scale(0.97); }
+
+/* --- Scrollbar (Firefox) --- */
+* { scrollbar-width: thin; scrollbar-color: var(--card-border) transparent; }
+
+/* --- Focus visibility for keyboard users --- */
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* --- Reaction chips: slightly bouncier --- */
+.reaction-chip {
+  transition: transform 0.15s cubic-bezier(0.2, 0.9, 0.3, 1.4), background 0.15s ease, border-color 0.15s ease;
+}
+.reaction-chip:active { transform: scale(1.14); }
+
+/* --- Small screens: keep nav labels but shrink font --- */
+@media (max-width: 380px) {
+  .nav-label { font-size: 0.56rem; }
+  .nav-btn i { font-size: 0.95rem; }
+}
+
+/* --- Feed sort chips: less crowded on tiny screens --- */
+.feed-section .filter-chips {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .chat-char-counter {
   align-self: flex-end;
   font-size: 0.7rem;

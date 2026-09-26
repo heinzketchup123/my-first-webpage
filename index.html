@@ -426,23 +426,29 @@
 
     <!-- Navigation Bar -->
     <nav class="bottom-nav">
-      <button class="nav-btn active" onclick="switchTab('home-view', this)">
+      <button class="nav-btn active" onclick="switchTab('home-view', this)" aria-label="Home">
         <i class="fa-solid fa-house"></i>
+        <span class="nav-label">Home</span>
       </button>
-      <button class="nav-btn" onclick="switchTab('search-view', this)">
+      <button class="nav-btn" onclick="switchTab('search-view', this)" aria-label="Explore">
         <i class="fa-solid fa-compass"></i>
+        <span class="nav-label">Explore</span>
       </button>
-      <button class="nav-btn" onclick="switchTab('groups-view', this)">
+      <button class="nav-btn" onclick="switchTab('groups-view', this)" aria-label="Groups">
         <i class="fa-solid fa-user-group"></i>
+        <span class="nav-label">Groups</span>
       </button>
-      <button class="nav-btn" onclick="switchTab('chat-view', this)">
+      <button class="nav-btn" onclick="switchTab('chat-view', this)" aria-label="Messages">
         <i class="fa-solid fa-comments"></i>
+        <span class="nav-label">Chat</span>
       </button>
-      <button class="nav-btn" onclick="switchTab('profile-view', this)">
+      <button class="nav-btn" onclick="switchTab('profile-view', this)" aria-label="Reviews">
         <i class="fa-solid fa-star"></i>
+        <span class="nav-label">Reviews</span>
       </button>
-      <button class="nav-btn" onclick="switchTab('settings-view', this)">
+      <button class="nav-btn" onclick="switchTab('settings-view', this)" aria-label="Settings">
         <i class="fa-solid fa-gear"></i>
+        <span class="nav-label">Me</span>
       </button>
     </nav>
 
@@ -566,6 +572,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
   <script src="script.js"></script>
 </body>

@@ -294,7 +294,7 @@ async function handleAuth(event) {
         const password = document.getElementById('signup-password').value;
         const { data, error } = await supabaseClient.auth.signUp({ email, password });
         if (error) {
-          alert("Sign up failed: " + error.message + "\n\nTip: use \"Continue as Guest\" to explore without an account.");
+          showToast("Sign up failed: " + error.message + ' — try Continue as Guest.', 'error', 5000);
           return;
         }
         // If Supabase returned a session, we're auto-logged in.
@@ -312,7 +312,7 @@ async function handleAuth(event) {
         const email = document.getElementById('login-email').value;
         const password = document.getElementById('login-password').value;
         const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-        if (error) alert("Login failed: " + error.message);
+        if (error) showToast("Login failed: " + error.message, 'error', 4500);
       }
     } catch (err) {
       alert("Auth error: " + err.message);
@@ -673,7 +673,7 @@ function renderSchoolPicker() {
 async function pickSchool(schoolId) {
   if (!isSupabaseConnected || !currentUserId) return;
   const { error } = await supabaseClient.from('profiles').update({ school_id: schoolId }).eq('user_id', currentUserId);
-  if (error) return alert('Could not set school: ' + error.message);
+  if (error) return showToast('Could not set school: ' + error.message, 'error');
   currentSchoolId = schoolId;
   currentSchool = schoolsCache.find(s => s.id === schoolId) || null;
   updateSchoolChrome();
@@ -809,7 +809,7 @@ async function respondFriendRequest(id, accept) {
     .from('friendships')
     .update({ status: accept ? 'accepted' : 'blocked', responded_at: new Date().toISOString() })
     .eq('id', id);
-  if (error) return alert('Could not update request: ' + error.message);
+  if (error) return showToast('Could not update request: ' + error.message, 'error');
   fetchFriendships();
 }
 
@@ -1001,7 +1001,7 @@ async function sendDM(event) {
   const input = document.getElementById('app-chat-input');
   if (!input) return;
 
-  if (!selectedFriendId) return alert('Pick a friend first.');
+  if (!selectedFriendId) return showToast('Pick a friend to message first.', 'warn');
 
   let text = String(input.value || '').replace(/\s+/g, ' ').trim();
   if (!text) return;
@@ -1011,7 +1011,7 @@ async function sendDM(event) {
   chatSendTimestamps = chatSendTimestamps.filter(t => now - t < CHAT_RATE_WINDOW_MS);
   if (chatSendTimestamps.length >= CHAT_RATE_MAX) {
     const waitMs = CHAT_RATE_WINDOW_MS - (now - chatSendTimestamps[0]);
-    alert(`Slow down — up to ${CHAT_RATE_MAX} messages every ${CHAT_RATE_WINDOW_MS/1000}s. Try again in ${Math.ceil(waitMs/1000)}s.`);
+    showToast(`Slow down — ${Math.ceil(waitMs/1000)}s until you can message again.`, 'warn', 3000);
     return;
   }
 
@@ -1027,7 +1027,7 @@ async function sendDM(event) {
     chatSendTimestamps.push(now);
     input.value = ''; updateChatCounter();
     const { error } = await supabaseClient.from('campus_chat').insert([msgObj]);
-    if (error) return alert('Message blocked: ' + error.message + '\n(Make sure you and this person are friends.)');
+    if (error) return showToast('Message blocked — make sure you two are friends.', 'error', 4500);
   } else {
     dmMessages.push({ sender_id: 'guest', recipient_id: selectedFriendId, text, time: timeStr });
     chatSendTimestamps.push(now);
@@ -1065,6 +1065,25 @@ function setFeedSort(mode, btn) {
 
 function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// -------------------- Toast notifications --------------------
+// Lightweight toast so we can retire the browser's native alert() for
+// user-facing feedback. Kind is 'info' | 'success' | 'warn' | 'error'.
+function showToast(message, kind = 'info', durationMs = 3500) {
+  const container = document.getElementById('toast-container');
+  if (!container) { /* fallback for very early errors */ alert(message); return; }
+  const t = document.createElement('div');
+  t.className = `toast toast-${kind}`;
+  const icons = { info: 'circle-info', success: 'circle-check', warn: 'triangle-exclamation', error: 'circle-xmark' };
+  t.innerHTML = `<i class="fa-solid fa-${icons[kind] || icons.info}"></i><span>${escapeHtml(message)}</span>`;
+  container.appendChild(t);
+  // trigger enter animation
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => {
+    t.classList.remove('show');
+    setTimeout(() => t.remove(), 250);
+  }, durationMs);
 }
 
 function renderFeed() {
@@ -1246,7 +1265,8 @@ async function submitPost(event) {
   if (isSupabaseConnected && currentUserId) {
     if (!currentSchoolId) return openSchoolPicker(true);
     const { error } = await supabaseClient.from('campus_feed').insert([{ ...newPost, author_id: currentUserId, school_id: currentSchoolId }]);
-    if (error) alert('Post blocked: ' + error.message);
+    if (error) showToast('Post blocked: ' + error.message, 'error');
+    else showToast('Posted to your school feed.', 'success');
   } else {
     campusFeed.unshift({ id: String(Date.now()), ...newPost });
     saveLocalFeed();
@@ -1326,7 +1346,7 @@ async function toggleGroupJoin(id) {
   const group = studyGroups.find(g => g.id === id);
   if (!group) return;
 
-  if (!group.joined && group.members >= group.max) return alert("Group is full!");
+  if (!group.joined && group.members >= group.max) return showToast('Group is full.', 'warn');
 
   const isJoining = !group.joined;
   const newMembers = Math.max(0, group.members + (isJoining ? 1 : -1));
@@ -1450,7 +1470,7 @@ function toggleTimer() {
         updateTimerDisplay();
       } else {
         clearInterval(timerInterval);
-        alert("Pomodoro complete! Take a break.");
+        showToast('🍅 Pomodoro complete — take a 5-minute break.', 'success', 6000);
         resetTimer();
       }
     }, 1000);
@@ -1488,7 +1508,8 @@ async function submitReview(event) {
   if (isSupabaseConnected && currentUserId) {
     if (!currentSchoolId) return openSchoolPicker(true);
     const { error } = await supabaseClient.from('instructor_reviews').insert([{ ...revObj, author_id: currentUserId, school_id: currentSchoolId }]);
-    if (error) alert('Review blocked: ' + error.message);
+    if (error) showToast('Review blocked: ' + error.message, 'error');
+    else showToast('Review posted.', 'success');
   } else {
     userReviews.unshift({ id: String(Date.now()), ...revObj });
     renderReviews();
