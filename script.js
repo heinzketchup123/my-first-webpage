@@ -77,6 +77,10 @@ const FONT_SIZE_LABELS = ['Small', 'Medium', 'Large'];
 let currentUser = null;       // display email string
 let currentUserId = null;     // Supabase auth.users.id when signed in
 let currentHandle = null;     // profile.handle when signed in
+let currentSchoolId = null;   // profile.school_id when signed in
+let currentSchool = null;     // {id, name, slug}
+let schoolsCache = [];        // all schools known
+let reviewSchoolFilterId = 'mine'; // 'mine' | '<school_id>' — for reviews lookup
 let userReviews = [];
 let campusFeed = [];
 let studyGroups = [];
@@ -238,9 +242,14 @@ async function fetchGroups() {
 }
 
 async function fetchReviews() {
-  const { data, error } = await supabaseClient.from('instructor_reviews').select('*').order('created_at', { ascending: false });
-  if (!error && data) {
-    userReviews = data.length ? data : [...defaultReviews];
+  // Reviews are globally readable, but the UI defaults to the caller's own
+  // school; user can flip the filter to look up any school's reviews.
+  let q = supabaseClient.from('instructor_reviews').select('*').order('created_at', { ascending: false });
+  const wantSchool = reviewSchoolFilterId === 'mine' ? currentSchoolId : reviewSchoolFilterId;
+  if (wantSchool) q = q.eq('school_id', wantSchool);
+  const { data, error } = await q;
+  if (!error) {
+    userReviews = (data && data.length) ? data : (wantSchool ? [] : [...defaultReviews]);
     renderReviews();
     updateAnalytics();
   }
@@ -594,13 +603,125 @@ async function ensureProfile() {
   if (!isSupabaseConnected || !currentUserId) return;
   const { data, error } = await supabaseClient
     .from('profiles')
-    .select('handle, display_name')
+    .select('handle, display_name, school_id')
     .eq('user_id', currentUserId)
     .maybeSingle();
   if (!error && data) {
     currentHandle = data.handle;
-    profileMap[currentUserId] = data;
+    currentSchoolId = data.school_id || null;
+    profileMap[currentUserId] = { handle: data.handle, display_name: data.display_name };
   }
+  await refreshSchoolsCache();
+  if (currentSchoolId) {
+    currentSchool = schoolsCache.find(s => s.id === currentSchoolId) || null;
+  }
+  updateSchoolChrome();
+  // If signed in without a school, open the picker before doing anything else.
+  if (currentUserId && !currentSchoolId) openSchoolPicker(true);
+}
+
+async function refreshSchoolsCache() {
+  if (!isSupabaseConnected) return;
+  const { data } = await supabaseClient.from('schools').select('id, name, slug').order('name');
+  schoolsCache = data || [];
+}
+
+function updateSchoolChrome() {
+  const welcome = document.getElementById('user-welcome-title');
+  if (welcome && currentUser) {
+    const name = currentUser.split('@')[0];
+    welcome.textContent = currentSchool
+      ? `${name} · ${currentSchool.name}`
+      : `Welcome Back, ${name}`;
+  }
+  const label = document.getElementById('current-school-label');
+  if (label) label.textContent = currentSchool ? currentSchool.name : 'No school set';
+}
+
+// -------------------- School picker --------------------
+
+function openSchoolPicker(required) {
+  const modal = document.getElementById('schoolModal');
+  if (!modal) return;
+  modal.dataset.required = required ? '1' : '0';
+  document.getElementById('school-picker-cancel').style.display = required ? 'none' : 'inline-flex';
+  renderSchoolPicker();
+  modal.style.display = 'flex';
+}
+function closeSchoolPicker() {
+  const modal = document.getElementById('schoolModal');
+  if (!modal || modal.dataset.required === '1') return; // must pick
+  modal.style.display = 'none';
+}
+
+function renderSchoolPicker() {
+  const filterEl = document.getElementById('school-picker-search');
+  const list = document.getElementById('school-picker-list');
+  if (!list) return;
+  const q = (filterEl?.value || '').toLowerCase();
+  const rows = schoolsCache.filter(s => !q || s.name.toLowerCase().includes(q) || s.slug.includes(q));
+  list.innerHTML = rows.length
+    ? rows.map(s => `
+        <button class="school-row ${s.id === currentSchoolId ? 'active' : ''}" onclick="pickSchool('${escapeAttr(s.id)}')">
+          <i class="fa-solid fa-graduation-cap"></i>
+          <div class="school-row-text"><strong>${escapeHtml(s.name)}</strong><small>@${escapeHtml(s.slug)}</small></div>
+          ${s.id === currentSchoolId ? '<i class="fa-solid fa-check"></i>' : ''}
+        </button>`).join('')
+    : `<p class="friends-empty-inner">No schools match "${escapeHtml(q)}".</p>`;
+}
+
+async function pickSchool(schoolId) {
+  if (!isSupabaseConnected || !currentUserId) return;
+  const { error } = await supabaseClient.from('profiles').update({ school_id: schoolId }).eq('user_id', currentUserId);
+  if (error) return alert('Could not set school: ' + error.message);
+  currentSchoolId = schoolId;
+  currentSchool = schoolsCache.find(s => s.id === schoolId) || null;
+  updateSchoolChrome();
+  document.getElementById('schoolModal').dataset.required = '0';
+  document.getElementById('schoolModal').style.display = 'none';
+  // Reload everything now that the RLS view of the world changed.
+  loadAllSupabaseData();
+}
+
+// Reviews view: pick which school's reviews to browse.
+function setReviewSchool(value) {
+  reviewSchoolFilterId = value || 'mine';
+  if (isSupabaseConnected) fetchReviews();
+}
+function renderReviewSchoolOptions() {
+  const sel = document.getElementById('review-school-filter');
+  if (!sel) return;
+  const cur = sel.value;
+  const opts = [
+    `<option value="mine">${currentSchool ? 'My school (' + escapeHtml(currentSchool.name) + ')' : 'My school'}</option>`,
+    ...schoolsCache.filter(s => s.id !== currentSchoolId).map(s => `<option value="${escapeAttr(s.id)}">${escapeHtml(s.name)}</option>`)
+  ];
+  sel.innerHTML = opts.join('');
+  sel.value = (cur && [...sel.options].some(o => o.value === cur)) ? cur : reviewSchoolFilterId;
+}
+
+async function createSchoolFromInput() {
+  if (!isSupabaseConnected || !currentUserId) return;
+  const nameInput = document.getElementById('school-picker-new');
+  const status = document.getElementById('school-picker-status');
+  const name = (nameInput?.value || '').trim();
+  status.textContent = '';
+  if (name.length < 2) { status.textContent = 'Give the school a real name.'; status.className = 'friends-status err'; return; }
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+  if (slug.length < 2) { status.textContent = "That name doesn't produce a valid handle."; status.className = 'friends-status err'; return; }
+  const { data, error } = await supabaseClient
+    .from('schools')
+    .insert([{ name, slug, created_by: currentUserId }])
+    .select().single();
+  if (error) {
+    // Handle unique conflict gracefully
+    const existing = schoolsCache.find(s => s.name.toLowerCase() === name.toLowerCase() || s.slug === slug);
+    if (existing) return pickSchool(existing.id);
+    status.textContent = 'Could not create: ' + error.message; status.className = 'friends-status err'; return;
+  }
+  schoolsCache.push(data);
+  await pickSchool(data.id);
+  nameInput.value = '';
 }
 
 async function fetchProfilesByIds(ids) {
@@ -1123,7 +1244,8 @@ async function submitPost(event) {
   };
 
   if (isSupabaseConnected && currentUserId) {
-    const { error } = await supabaseClient.from('campus_feed').insert([{ ...newPost, author_id: currentUserId }]);
+    if (!currentSchoolId) return openSchoolPicker(true);
+    const { error } = await supabaseClient.from('campus_feed').insert([{ ...newPost, author_id: currentUserId, school_id: currentSchoolId }]);
     if (error) alert('Post blocked: ' + error.message);
   } else {
     campusFeed.unshift({ id: String(Date.now()), ...newPost });
@@ -1364,7 +1486,8 @@ async function submitReview(event) {
   const revObj = { teacher, rating, text };
 
   if (isSupabaseConnected && currentUserId) {
-    const { error } = await supabaseClient.from('instructor_reviews').insert([{ ...revObj, author_id: currentUserId }]);
+    if (!currentSchoolId) return openSchoolPicker(true);
+    const { error } = await supabaseClient.from('instructor_reviews').insert([{ ...revObj, author_id: currentUserId, school_id: currentSchoolId }]);
     if (error) alert('Review blocked: ' + error.message);
   } else {
     userReviews.unshift({ id: String(Date.now()), ...revObj });
@@ -1381,6 +1504,7 @@ function renderReviews() {
   const container = document.getElementById('user-reviews-list');
   const filterVal = document.getElementById('rating-filter') ? document.getElementById('rating-filter').value : 'all';
   if (!container) return;
+  renderReviewSchoolOptions();
 
   container.innerHTML = '';
   const filtered = userReviews.filter(rev => filterVal === 'all' || rev.rating === filterVal);

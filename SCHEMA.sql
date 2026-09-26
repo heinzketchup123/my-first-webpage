@@ -311,6 +311,128 @@ create policy "groups: everyone reads"
 -- (Group creation / joining semantics can be layered on later.)
 
 -- ============================================================
+-- 6b. SCHOOLS (per-school scoping)
+-- ============================================================
+-- Every signed-in user picks a school. Feed / groups / friends / chat
+-- are all restricted to the same school. Instructor reviews are readable
+-- by anyone (you can look up any school), but the writer's school is
+-- attached to each row so the UI can filter by school.
+
+create table if not exists public.schools (
+  id         uuid primary key default gen_random_uuid(),
+  name       text unique not null check (char_length(name) between 2 and 80),
+  slug       text unique not null check (char_length(slug) between 2 and 40 and slug ~ '^[a-z0-9-]+$'),
+  created_at timestamptz not null default now(),
+  created_by uuid references auth.users(id) on delete set null
+);
+alter table public.schools enable row level security;
+
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='schools' loop
+    execute format('drop policy if exists %I on public.schools', p.policyname);
+  end loop;
+end $$;
+
+create policy "schools: everyone reads"
+  on public.schools for select using (true);
+
+create policy "schools: signed-in creates"
+  on public.schools for insert
+  with check (auth.uid() is not null and created_by = auth.uid());
+
+-- Seed a demo school so the app works out of the box.
+insert into public.schools (name, slug)
+values ('Demo University', 'demo-university')
+on conflict do nothing;
+
+-- School_id columns on scoped tables
+alter table public.profiles          add column if not exists school_id uuid references public.schools(id) on delete set null;
+alter table public.campus_feed       add column if not exists school_id uuid references public.schools(id) on delete set null;
+alter table public.study_groups      add column if not exists school_id uuid references public.schools(id) on delete set null;
+alter table public.instructor_reviews add column if not exists school_id uuid references public.schools(id) on delete set null;
+
+-- Helper: return the caller's school_id (used inside policies).
+create or replace function public.my_school_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select school_id from public.profiles where user_id = auth.uid();
+$$;
+
+-- Rewrite feed / groups / reviews / friendships policies to enforce school.
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='campus_feed' loop
+    execute format('drop policy if exists %I on public.campus_feed', p.policyname);
+  end loop;
+end $$;
+
+create policy "feed: same-school reads"
+  on public.campus_feed for select
+  using (school_id is null or school_id = public.my_school_id());
+create policy "feed: signed-in creates own"
+  on public.campus_feed for insert
+  with check (
+    auth.uid() is not null
+    and auth.uid() = author_id
+    and school_id  = public.my_school_id()
+    and char_length(title) between 1 and 120
+    and char_length(text)  between 1 and 2000
+  );
+create policy "feed: author edits own"
+  on public.campus_feed for update
+  using (auth.uid() = author_id)
+  with check (auth.uid() = author_id);
+create policy "feed: author deletes own"
+  on public.campus_feed for delete
+  using (auth.uid() = author_id);
+
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='study_groups' loop
+    execute format('drop policy if exists %I on public.study_groups', p.policyname);
+  end loop;
+end $$;
+create policy "groups: same-school reads"
+  on public.study_groups for select
+  using (school_id is null or school_id = public.my_school_id());
+
+-- Reviews are globally readable (that's the point of "look up any school").
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='instructor_reviews' loop
+    execute format('drop policy if exists %I on public.instructor_reviews', p.policyname);
+  end loop;
+end $$;
+create policy "reviews: everyone reads"
+  on public.instructor_reviews for select using (true);
+create policy "reviews: signed-in creates own"
+  on public.instructor_reviews for insert
+  with check (
+    auth.uid() is not null
+    and auth.uid() = author_id
+    and school_id  = public.my_school_id()
+    and char_length(text) between 1 and 2000
+    and rating in ('1','2','3','4','5')
+  );
+create policy "reviews: author deletes own"
+  on public.instructor_reviews for delete
+  using (auth.uid() = author_id);
+
+-- Friendships: only same-school users can friend each other.
+drop policy if exists "friendships: send request" on public.friendships;
+create policy "friendships: send request"
+  on public.friendships for insert
+  with check (
+    auth.uid() = requester_id
+    and status = 'pending'
+    and public.my_school_id() is not null
+    and public.my_school_id() = (
+      select school_id from public.profiles where user_id = addressee_id
+    )
+  );
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.

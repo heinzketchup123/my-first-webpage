@@ -1073,6 +1073,27 @@ body.light-mode .nav-btn { color: #555555; }
 .friends-status.ok  { color: #2ecc71; }
 .friends-status.err { color: #ff3b30; }
 
+.school-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  border-radius: 10px;
+  margin-bottom: 6px;
+  width: 100%;
+  cursor: pointer;
+  color: var(--main-text-color);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.school-row:hover { border-color: var(--accent-color); }
+.school-row.active { border-color: var(--accent-color); box-shadow: var(--glow-shadow); }
+.school-row i:first-child { color: var(--accent-color); font-size: 1.05rem; }
+.school-row-text { flex: 1; display: flex; flex-direction: column; text-align: left; }
+.school-row-text strong { font-size: 0.9rem; }
+.school-row-text small { color: var(--sub-text-color); font-size: 0.7rem; }
+
 .chat-char-counter {
   align-self: flex-end;
   font-size: 0.7rem;
