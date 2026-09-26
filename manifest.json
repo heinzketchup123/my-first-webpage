@@ -8,7 +8,7 @@
       "type": "image/svg+xml"
     }
   ],
-  "start_url": "/",
+  "start_url": "./index.html",
   "background_color": "#080d14",
   "theme_color": "#00f3ff",
   "display": "standalone",

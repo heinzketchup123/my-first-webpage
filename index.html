@@ -30,6 +30,7 @@
           <input type="email" id="login-email" class="auth-input" placeholder="Email Address" required />
           <input type="password" id="login-password" class="auth-input" placeholder="Password" required />
           <button type="submit" class="primary-btn">Sign In</button>
+          <button type="button" class="secondary-btn guest-btn" onclick="enterGuestMode('guest@campus.edu')">Continue as Guest</button>
           <p class="auth-toggle-text">Need an account? <span onclick="toggleAuthMode()">Sign Up</span></p>
         </form>
 
@@ -40,6 +41,7 @@
           <input type="email" id="signup-email" class="auth-input" placeholder="Email Address" required />
           <input type="password" id="signup-password" class="auth-input" placeholder="Password" required />
           <button type="submit" class="primary-btn">Create Account</button>
+          <button type="button" class="secondary-btn guest-btn" onclick="enterGuestMode('guest@campus.edu')">Continue as Guest</button>
           <p class="auth-toggle-text">Already have an account? <span onclick="toggleAuthMode()">Sign In</span></p>
         </form>
       </div>
@@ -55,7 +57,7 @@
         <button class="review-trigger-btn" onclick="openReviewModal()">+ Review</button>
         <button class="icon-header-btn" onclick="toggleNotifications()">
           <i class="fa-solid fa-bell"></i>
-          <span class="dot"></span>
+          <span id="notif-badge" class="notif-badge">2</span>
         </button>
       </div>
     </header>
@@ -137,6 +139,12 @@
             <button class="text-btn" onclick="openNewPostModal()">+ New Post</button>
           </div>
 
+          <div class="filter-chips">
+            <button class="chip active" onclick="setFeedSort('new', this)">Newest</button>
+            <button class="chip" onclick="setFeedSort('top', this)">Most Liked</button>
+            <button class="chip" onclick="setFeedSort('comments', this)">Most Discussed</button>
+          </div>
+
           <div id="feed-container" class="stack-list">
             <!-- Dynamic Feed Items -->
           </div>
@@ -212,7 +220,12 @@
 
       <!-- Tab 4: Live Campus Chat -->
       <section id="chat-view" class="view">
-        <h1 class="page-title">Campus Chat</h1>
+        <div class="chat-header-row">
+          <h1 class="page-title" style="margin:0;">Campus Chat</h1>
+          <span id="chat-online-count" class="online-pill">
+            <span class="online-dot"></span> <span id="chat-online-num">1</span> active
+          </span>
+        </div>
         <p class="description">Cross-device real-time multi-user student chat.</p>
 
         <div class="chat-container">
@@ -220,7 +233,7 @@
             <!-- Messages load dynamically via Supabase -->
           </div>
           <form id="app-chat-form" class="chat-form-row" onsubmit="sendAppChatMessage(event)">
-            <input type="text" id="app-chat-input" class="auth-input" placeholder="Type a message..." required autocomplete="off" />
+            <input type="text" id="app-chat-input" class="auth-input" placeholder="Type a message..." required autocomplete="off" maxlength="280" />
             <button type="submit" class="primary-btn chat-send-btn">Send</button>
           </form>
         </div>
@@ -274,42 +287,55 @@
         </div>
       </section>
 
-      <!-- Tab 8: Settings & Theme Studio -->
+      <!-- Tab 8: Settings & Appearance -->
       <section id="settings-view" class="view">
         <h1 class="page-title">Settings</h1>
 
-        <div id="theme-studio-box" class="customization-box expandable-theme">
-          <div class="theme-header-row" onclick="toggleThemeStudio()">
-            <div>
-              <h2 class="custom-title">Theme Studio</h2>
-              <p class="custom-sub-inline">Presets & Custom Color Customizer</p>
-            </div>
-            <i id="theme-chevron" class="fa-solid fa-chevron-down theme-chevron"></i>
+        <!-- Appearance Mode -->
+        <div class="pref-card">
+          <div class="pref-header">
+            <i class="fa-solid fa-circle-half-stroke"></i>
+            <h3>Appearance</h3>
           </div>
+          <div class="segmented" id="mode-segmented">
+            <button class="seg-btn active" data-mode="dark" onclick="setColorMode('dark', this)">
+              <i class="fa-solid fa-moon"></i><span>Dark</span>
+            </button>
+            <button class="seg-btn" data-mode="light" onclick="setColorMode('light', this)">
+              <i class="fa-solid fa-sun"></i><span>Light</span>
+            </button>
+            <button class="seg-btn" data-mode="auto" onclick="setColorMode('auto', this)">
+              <i class="fa-solid fa-desktop"></i><span>Auto</span>
+            </button>
+          </div>
+        </div>
 
-          <div class="theme-body-content">
-            <p class="custom-sub">Presets</p>
-            <div class="preset-row">
-              <button class="preset-btn p-cyber" onclick="setCyberTheme()">Cyber</button>
-              <button class="preset-btn p-synthwave" onclick="setSynthwaveTheme()">Synth</button>
-              <button class="preset-btn p-matrix" onclick="setMatrixTheme()">Matrix</button>
-              <button class="preset-btn p-dracula" onclick="setDraculaTheme()">Dracula</button>
-              <button class="preset-btn p-nordic" onclick="setNordicTheme()">Nordic</button>
-              <button class="preset-btn p-orange" onclick="setOrangeTheme()">Solar</button>
-              <button class="preset-btn p-crimson" onclick="setCrimsonTheme()">Ruby</button>
-              <button class="preset-btn p-gold" onclick="setGoldTheme()">Gold</button>
-              <button class="preset-btn p-emerald" onclick="setEmeraldTheme()">Mint</button>
-              <button class="preset-btn p-monochrome" onclick="setMonochromeTheme()">Mono</button>
-            </div>
+        <!-- Color Theme Presets -->
+        <div class="pref-card">
+          <div class="pref-header">
+            <i class="fa-solid fa-palette"></i>
+            <h3>Color Theme</h3>
+          </div>
+          <div id="theme-swatch-grid" class="theme-swatch-grid">
+            <!-- rendered by JS -->
+          </div>
+        </div>
 
-            <p class="custom-sub">Custom Colors</p>
+        <!-- Custom Colors -->
+        <div class="pref-card">
+          <div class="pref-header collapsible" onclick="togglePrefSection(this)">
+            <i class="fa-solid fa-eye-dropper"></i>
+            <h3>Custom Colors</h3>
+            <i class="fa-solid fa-chevron-down pref-chevron"></i>
+          </div>
+          <div class="pref-body">
             <div class="color-picker-grid">
               <div class="picker-item">
-                <label for="picker-main">Accent Color</label>
+                <label for="picker-main">Accent</label>
                 <input type="color" id="picker-main" value="#00f3ff" onchange="updateTheme()" />
               </div>
               <div class="picker-item">
-                <label for="picker-light">Highlight Accent</label>
+                <label for="picker-light">Highlight</label>
                 <input type="color" id="picker-light" value="#80f9ff" onchange="updateTheme()" />
               </div>
               <div class="picker-item">
@@ -317,21 +343,42 @@
                 <input type="color" id="picker-card" value="#001a24" onchange="updateTheme()" />
               </div>
               <div class="picker-item">
-                <label for="picker-nav">Nav / Bar Tint</label>
+                <label for="picker-nav">Nav Tint</label>
                 <input type="color" id="picker-nav" value="#081018" onchange="updateTheme()" />
               </div>
             </div>
           </div>
         </div>
 
+        <!-- Text Size -->
+        <div class="pref-card">
+          <div class="pref-header">
+            <i class="fa-solid fa-text-height"></i>
+            <h3>Text Size</h3>
+            <span class="pref-value" id="font-size-label">Medium</span>
+          </div>
+          <div class="size-slider-row">
+            <span class="size-label-small">Aa</span>
+            <input type="range" min="0" max="2" step="1" value="1" id="font-size-slider" class="pref-slider" oninput="setFontSize(this.value)" />
+            <span class="size-label-large">Aa</span>
+          </div>
+        </div>
+
+        <!-- Density -->
+        <div class="pref-card">
+          <div class="pref-header">
+            <i class="fa-solid fa-grip-lines"></i>
+            <h3>Density</h3>
+          </div>
+          <div class="segmented" id="density-segmented">
+            <button class="seg-btn" data-density="compact" onclick="setDensity('compact', this)">Compact</button>
+            <button class="seg-btn active" data-density="normal" onclick="setDensity('normal', this)">Comfy</button>
+            <button class="seg-btn" data-density="spacious" onclick="setDensity('spacious', this)">Spacious</button>
+          </div>
+        </div>
+
+        <!-- Privacy / misc toggles -->
         <ul class="settings-list">
-          <li onclick="toggleLightMode(this)">
-            <div class="setting-text">
-              <span>Light Mode</span>
-              <small>Switch to bright background interface</small>
-            </div>
-            <div id="lightmode-toggle" class="toggle-btn"></div>
-          </li>
           <li onclick="toggleSettingSwitch(this, 'anonymous')">
             <div class="setting-text">
               <span>Anonymous Mode</span>
@@ -339,18 +386,16 @@
             </div>
             <div id="anon-toggle" class="toggle-btn active"></div>
           </li>
-          <li onclick="toggleSettingSwitch(this, 'autoSystemTheme')">
-            <div class="setting-text">
-              <span>Sync System Dark Mode</span>
-              <small>Automatically switch light/dark mode with OS</small>
-            </div>
-            <div id="system-theme-toggle" class="toggle-btn"></div>
-          </li>
         </ul>
 
-        <button class="secondary-btn logout-btn" onclick="logout()">
-          <i class="fa-solid fa-right-from-bracket"></i> Sign Out
-        </button>
+        <div class="settings-btn-row">
+          <button class="secondary-btn" onclick="resetAppearance()">
+            <i class="fa-solid fa-rotate-left"></i> Reset Appearance
+          </button>
+          <button class="secondary-btn logout-btn" onclick="logout()">
+            <i class="fa-solid fa-right-from-bracket"></i> Sign Out
+          </button>
+        </div>
       </section>
 
     </main>

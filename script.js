@@ -56,6 +56,23 @@ const defaultReviews = [
 ];
 
 const defaultSettings = { lightMode: false, anonymous: true, autoSystemTheme: false };
+const defaultAppearance = { themeName: 'cyber', mode: 'dark', fontSize: 1, density: 'normal', customColors: null };
+
+// Human-facing metadata for the theme swatch grid.
+const THEME_META = [
+  { key: 'cyber',      label: 'Cyber' },
+  { key: 'synthwave',  label: 'Synth' },
+  { key: 'matrix',     label: 'Matrix' },
+  { key: 'dracula',    label: 'Dracula' },
+  { key: 'nordic',     label: 'Nordic' },
+  { key: 'orange',     label: 'Solar' },
+  { key: 'crimson',    label: 'Ruby' },
+  { key: 'gold',       label: 'Gold' },
+  { key: 'emerald',    label: 'Mint' },
+  { key: 'monochrome', label: 'Mono' }
+];
+
+const FONT_SIZE_LABELS = ['Small', 'Medium', 'Large'];
 
 let currentUser = null;
 let userReviews = [];
@@ -71,9 +88,39 @@ let currentPostCommentId = null;
 let timerSeconds = 1500;
 let timerInterval = null;
 let realtimeChannel = null;
+let feedSort = 'new'; // 'new' | 'top' | 'comments'
+let unreadNotifs = 2;
+let appAppearance = { ...defaultAppearance };
+
+// A row that lives only in the local seed uses ids like "1"/"2"; a row that
+// actually exists in Supabase has a UUID. Only UUID-backed rows should be
+// pushed to the DB — otherwise updates silently match zero rows and the UI
+// looks broken.
+function isDbRow(id) {
+  return typeof id === 'string' && id.length >= 32 && id.includes('-');
+}
+
+function saveLocalGroups() {
+  if (currentUser) localStorage.setItem(`groups_${currentUser}`, JSON.stringify(studyGroups));
+}
+function loadLocalGroups() {
+  if (!currentUser) return null;
+  const raw = localStorage.getItem(`groups_${currentUser}`);
+  return raw ? JSON.parse(raw) : null;
+}
+function saveLocalFeed() {
+  if (currentUser) localStorage.setItem(`feed_${currentUser}`, JSON.stringify(campusFeed));
+}
+function loadLocalFeed() {
+  if (!currentUser) return null;
+  const raw = localStorage.getItem(`feed_${currentUser}`);
+  return raw ? JSON.parse(raw) : null;
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   registerServiceWorker();
+  loadAppearance();
+  applyAppearance();
   initSystemThemeListener();
 
   if (isSupabaseConnected) {
@@ -122,11 +169,9 @@ function registerServiceWorker() {
 
 function initSystemThemeListener() {
   const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-  darkModeMediaQuery.addEventListener('change', e => {
-    if (appSettings.autoSystemTheme) {
-      appSettings.lightMode = !e.matches;
-      loadSavedSettings();
-    }
+  darkModeMediaQuery.addEventListener('change', () => {
+    // In "Auto" mode, follow the OS whenever it flips.
+    if (appAppearance.mode === 'auto') applyAppearance();
   });
 }
 
@@ -150,13 +195,18 @@ async function loadAllSupabaseData() {
   campusEvents = [...defaultEvents];
   renderGpaRows();
   renderEvents();
+  updateNotifBadge();
 }
 
 async function fetchFeed() {
   const { data, error } = await supabaseClient.from('campus_feed').select('*').order('created_at', { ascending: false }).limit(30);
   if (!error && data) {
-    campusFeed = data;
+    // Merge DB rows with local seed content: DB rows first, then any locally
+    // saved edits (likes/reactions on seed rows) fall back to defaults.
+    const localSeed = loadLocalFeed() || [...defaultFeed];
+    campusFeed = data.length ? [...data, ...localSeed] : localSeed;
     renderFeed();
+    updateAnalytics();
   }
 }
 
@@ -171,7 +221,8 @@ async function fetchChat() {
 async function fetchGroups() {
   const { data, error } = await supabaseClient.from('study_groups').select('*');
   if (!error && data) {
-    studyGroups = data.length ? data : [...defaultGroups];
+    const localSeed = loadLocalGroups() || [...defaultGroups];
+    studyGroups = data.length ? [...data, ...localSeed.filter(g => !isDbRow(g.id))] : localSeed;
     renderGroups();
   }
 }
@@ -179,7 +230,7 @@ async function fetchGroups() {
 async function fetchReviews() {
   const { data, error } = await supabaseClient.from('instructor_reviews').select('*').order('created_at', { ascending: false });
   if (!error && data) {
-    userReviews = data;
+    userReviews = data.length ? data : [...defaultReviews];
     renderReviews();
     updateAnalytics();
   }
@@ -187,8 +238,8 @@ async function fetchReviews() {
 
 function loadLocalFallbackData() {
   userReviews = [...defaultReviews];
-  campusFeed = [...defaultFeed];
-  studyGroups = [...defaultGroups];
+  campusFeed = loadLocalFeed() || [...defaultFeed];
+  studyGroups = loadLocalGroups() || [...defaultGroups];
   gpaCourses = [...defaultGpaCourses];
   campusEvents = [...defaultEvents];
   chatMessages = [{ user: "Campus Bot", text: "Welcome to Live Campus Chat!", time: "12:00 PM" }];
@@ -199,6 +250,7 @@ function loadLocalFallbackData() {
   renderReviews();
   renderChat();
   updateAnalytics();
+  updateNotifBadge();
 }
 
 // Authentication Handlers
@@ -216,9 +268,22 @@ async function handleAuth(event) {
       if (isSignup) {
         const email = document.getElementById('signup-email').value;
         const password = document.getElementById('signup-password').value;
-        const { error } = await supabaseClient.auth.signUp({ email, password });
-        if (error) alert("Sign up failed: " + error.message);
-        else alert("Account created! Check your email to confirm registration.");
+        const { data, error } = await supabaseClient.auth.signUp({ email, password });
+        if (error) {
+          alert("Sign up failed: " + error.message + "\n\nTip: use \"Continue as Guest\" to explore without an account.");
+          return;
+        }
+        // If Supabase returned a session, we're auto-logged in.
+        // If not, email confirmation is required — try to sign in anyway
+        // (works when the project has confirmation disabled), otherwise
+        // tell the user and drop them into guest mode so they aren't stuck.
+        if (!data?.session) {
+          const { error: signInErr } = await supabaseClient.auth.signInWithPassword({ email, password });
+          if (signInErr) {
+            alert("Account created. If your Supabase project requires email confirmation, check your inbox before signing in. Continuing as guest for now.");
+            enterGuestMode(email);
+          }
+        }
       } else {
         const email = document.getElementById('login-email').value;
         const password = document.getElementById('login-password').value;
@@ -229,34 +294,89 @@ async function handleAuth(event) {
       alert("Auth error: " + err.message);
     }
   } else {
-    currentUser = document.getElementById('login-email').value || 'student@campus.edu';
-    localStorage.setItem('knowledge_app_current_user', currentUser);
-    document.getElementById('auth-screen').style.display = 'none';
-    loadLocalFallbackData();
+    enterGuestMode(document.getElementById('login-email').value || 'student@campus.edu');
   }
 }
 
+function enterGuestMode(email) {
+  currentUser = email || 'guest@campus.edu';
+  localStorage.setItem('knowledge_app_current_user', currentUser);
+  document.getElementById('auth-screen').style.display = 'none';
+  const nameDisplay = currentUser.split('@')[0];
+  const welcome = document.getElementById('user-welcome-title');
+  if (welcome) welcome.textContent = `Welcome, ${nameDisplay}`;
+  loadLocalFallbackData();
+}
+
 async function logout() {
+  // Always clear form fields + local user + hard-reset auth screen so a
+  // second sign-in works cleanly regardless of Supabase's async callback.
+  ['login-email','login-password','signup-name','signup-email','signup-password']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  localStorage.removeItem('knowledge_app_current_user');
+
   if (isSupabaseConnected) {
-    await supabaseClient.auth.signOut();
-  } else {
-    currentUser = null;
-    localStorage.removeItem('knowledge_app_current_user');
-    document.getElementById('auth-screen').style.display = 'flex';
+    try { await supabaseClient.auth.signOut(); } catch (_) {}
+  }
+  currentUser = null;
+  const authScreen = document.getElementById('auth-screen');
+  if (authScreen) authScreen.style.display = 'flex';
+  // Ensure the login form (not signup) is showing after logout.
+  const loginForm = document.getElementById('login-form');
+  const signupForm = document.getElementById('signup-form');
+  if (loginForm && signupForm) {
+    loginForm.classList.remove('hidden');
+    signupForm.classList.add('hidden');
   }
 }
 
 // Theme Engine
-function setCyberTheme() { applyPresetConfig(THEME_PRESETS.cyber); }
-function setSynthwaveTheme() { applyPresetConfig(THEME_PRESETS.synthwave); }
-function setMatrixTheme() { applyPresetConfig(THEME_PRESETS.matrix); }
-function setDraculaTheme() { applyPresetConfig(THEME_PRESETS.dracula); }
-function setNordicTheme() { applyPresetConfig(THEME_PRESETS.nordic); }
-function setOrangeTheme() { applyPresetConfig(THEME_PRESETS.orange); }
-function setCrimsonTheme() { applyPresetConfig(THEME_PRESETS.crimson); }
-function setGoldTheme() { applyPresetConfig(THEME_PRESETS.gold); }
-function setEmeraldTheme() { applyPresetConfig(THEME_PRESETS.emerald); }
-function setMonochromeTheme() { applyPresetConfig(THEME_PRESETS.monochrome); }
+function saveAppearance() {
+  localStorage.setItem('appearance', JSON.stringify(appAppearance));
+}
+
+function loadAppearance() {
+  const raw = localStorage.getItem('appearance');
+  if (!raw) return;
+  try { appAppearance = { ...defaultAppearance, ...JSON.parse(raw) }; }
+  catch (_) { appAppearance = { ...defaultAppearance }; }
+}
+
+function applyAppearance() {
+  // 1) Light/dark mode (respects "auto" via prefers-color-scheme)
+  const wantsLight = appAppearance.mode === 'light'
+    || (appAppearance.mode === 'auto' && window.matchMedia('(prefers-color-scheme: light)').matches);
+  appSettings.lightMode = wantsLight;
+  document.body.classList.toggle('light-mode', wantsLight);
+
+  // 2) Theme palette (custom colors override the preset if present)
+  const preset = THEME_PRESETS[appAppearance.themeName] || THEME_PRESETS.cyber;
+  const config = appAppearance.customColors ? { ...preset, ...appAppearance.customColors } : preset;
+  applyPresetConfig(config);
+
+  // 3) Font size scale (0/1/2 → small/medium/large)
+  document.body.classList.remove('fs-small','fs-medium','fs-large');
+  document.body.classList.add(['fs-small','fs-medium','fs-large'][Number(appAppearance.fontSize) || 1]);
+  const fsLabel = document.getElementById('font-size-label');
+  if (fsLabel) fsLabel.textContent = FONT_SIZE_LABELS[Number(appAppearance.fontSize) || 1];
+  const fsSlider = document.getElementById('font-size-slider');
+  if (fsSlider) fsSlider.value = String(appAppearance.fontSize);
+
+  // 4) Density
+  document.body.classList.remove('density-compact','density-normal','density-spacious');
+  document.body.classList.add(`density-${appAppearance.density}`);
+
+  // 5) Sync the active-state on segmented controls
+  document.querySelectorAll('#mode-segmented .seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === appAppearance.mode);
+  });
+  document.querySelectorAll('#density-segmented .seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.density === appAppearance.density);
+  });
+
+  renderThemeSwatchGrid();
+  syncCustomColorPickers();
+}
 
 function applyPresetConfig(config) {
   const root = document.documentElement;
@@ -268,8 +388,55 @@ function applyPresetConfig(config) {
     root.style.setProperty('--card-bg', config.card);
     root.style.setProperty('--nav-bg', config.nav);
     root.style.setProperty('--bg-color', config.bg);
+  } else {
+    // In light mode, only the accent should follow the theme — clear
+    // any prior dark-mode overrides so the light palette shows through.
+    root.style.removeProperty('--card-bg');
+    root.style.removeProperty('--nav-bg');
+    root.style.removeProperty('--bg-color');
   }
   appTheme = { ...config };
+}
+
+function renderThemeSwatchGrid() {
+  const grid = document.getElementById('theme-swatch-grid');
+  if (!grid) return;
+  grid.innerHTML = THEME_META.map(t => {
+    const p = THEME_PRESETS[t.key];
+    const active = t.key === appAppearance.themeName && !appAppearance.customColors;
+    return `
+      <button class="theme-swatch ${active ? 'active' : ''}" onclick="applyTheme('${t.key}')" aria-label="${t.label} theme">
+        <span class="swatch-preview" style="background:${p.bg};">
+          <span class="swatch-dot" style="background:${p.main}; box-shadow:0 0 8px ${p.main};"></span>
+          <span class="swatch-dot" style="background:${p.light};"></span>
+        </span>
+        <span class="swatch-label">${t.label}</span>
+        ${active ? '<i class="fa-solid fa-check swatch-check"></i>' : ''}
+      </button>
+    `;
+  }).join('');
+}
+
+function syncCustomColorPickers() {
+  const preset = THEME_PRESETS[appAppearance.themeName] || THEME_PRESETS.cyber;
+  const src = appAppearance.customColors || preset;
+  const set = (id, val) => { const el = document.getElementById(id); if (el && /^#[0-9a-fA-F]{6}$/.test(val)) el.value = val; };
+  set('picker-main', src.main);
+  set('picker-light', src.light);
+  // card/nav are rgba by default; show a reasonable hex fallback
+  set('picker-card', hexish(src.card, '#001a24'));
+  set('picker-nav',  hexish(src.nav,  '#081018'));
+}
+
+function hexish(val, fallback) {
+  return typeof val === 'string' && /^#[0-9a-fA-F]{6}$/.test(val) ? val : fallback;
+}
+
+function applyTheme(name) {
+  appAppearance.themeName = name;
+  appAppearance.customColors = null;
+  saveAppearance();
+  applyAppearance();
 }
 
 function updateTheme() {
@@ -277,35 +444,52 @@ function updateTheme() {
   const light = document.getElementById('picker-light').value;
   const card = document.getElementById('picker-card').value;
   const nav = document.getElementById('picker-nav').value;
-
-  applyPresetConfig({ main, light, card, nav, bg: appTheme.bg, textOnAccent: '#ffffff' });
+  appAppearance.customColors = { main, light, card, nav, bg: appTheme.bg, textOnAccent: '#ffffff' };
+  saveAppearance();
+  applyAppearance();
 }
 
-function toggleThemeStudio() {
-  document.getElementById('theme-studio-box').classList.toggle('open');
+function setColorMode(mode, btn) {
+  appAppearance.mode = mode;
+  saveAppearance();
+  applyAppearance();
 }
 
-function loadSavedSettings() {
-  const lightToggle = document.getElementById('lightmode-toggle');
-  if (appSettings.lightMode) {
-    if (lightToggle) lightToggle.classList.add('active');
-    document.body.classList.add('light-mode');
-  } else {
-    if (lightToggle) lightToggle.classList.remove('active');
-    document.body.classList.remove('light-mode');
-  }
+function setFontSize(size) {
+  appAppearance.fontSize = Number(size);
+  saveAppearance();
+  applyAppearance();
 }
 
-function toggleLightMode(listItem) {
-  const toggle = listItem.querySelector('.toggle-btn');
-  toggle.classList.toggle('active');
-  appSettings.lightMode = toggle.classList.contains('active');
-
-  if (appSettings.lightMode) document.body.classList.add('light-mode');
-  else document.body.classList.remove('light-mode');
-
-  applyPresetConfig(appTheme);
+function setDensity(mode, btn) {
+  appAppearance.density = mode;
+  saveAppearance();
+  applyAppearance();
 }
+
+function resetAppearance() {
+  appAppearance = { ...defaultAppearance };
+  saveAppearance();
+  applyAppearance();
+}
+
+function togglePrefSection(headerEl) {
+  headerEl.parentElement.classList.toggle('collapsed');
+}
+
+// Keep the legacy per-preset function names since older HTML may still call them.
+function setCyberTheme()      { applyTheme('cyber'); }
+function setSynthwaveTheme()  { applyTheme('synthwave'); }
+function setMatrixTheme()     { applyTheme('matrix'); }
+function setDraculaTheme()    { applyTheme('dracula'); }
+function setNordicTheme()     { applyTheme('nordic'); }
+function setOrangeTheme()     { applyTheme('orange'); }
+function setCrimsonTheme()    { applyTheme('crimson'); }
+function setGoldTheme()       { applyTheme('gold'); }
+function setEmeraldTheme()    { applyTheme('emerald'); }
+function setMonochromeTheme() { applyTheme('monochrome'); }
+
+function loadSavedSettings() { applyAppearance(); }
 
 function toggleSettingSwitch(listItem, key) {
   const toggle = listItem.querySelector('.toggle-btn');
@@ -333,6 +517,9 @@ function switchTab(viewId, element) {
 
 function toggleNotifications() {
   document.getElementById('notif-drawer').classList.toggle('open');
+  // Opening the drawer clears the unread badge.
+  unreadNotifs = 0;
+  updateNotifBadge();
 }
 
 // Chat Engine
@@ -356,6 +543,7 @@ function renderChat() {
   });
 
   box.scrollTop = box.scrollHeight;
+  updateChatOnlineCount();
 }
 
 async function sendAppChatMessage(event) {
@@ -380,22 +568,65 @@ async function sendAppChatMessage(event) {
 }
 
 // Feed Engine
+const REACTION_EMOJIS = ['👍','❤️','😂','🎉','🔥'];
+
+function sortedFeed() {
+  const list = [...campusFeed];
+  if (feedSort === 'top') {
+    list.sort((a,b) => (b.likes||0) - (a.likes||0));
+  } else if (feedSort === 'comments') {
+    list.sort((a,b) => ((b.comments||[]).length) - ((a.comments||[]).length));
+  } else {
+    // 'new': DB rows come pre-sorted by created_at desc; keep as-is.
+  }
+  return list;
+}
+
+function setFeedSort(mode, btn) {
+  feedSort = mode;
+  document.querySelectorAll('#home-view .feed-section .chip').forEach(c => c.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderFeed();
+}
+
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 function renderFeed() {
   const container = document.getElementById('feed-container');
   if (!container) return;
   container.innerHTML = '';
 
-  campusFeed.forEach(post => {
+  const list = sortedFeed();
+  if (!list.length) {
+    container.innerHTML = `<div class="empty-state">
+      <i class="fa-solid fa-bullhorn"></i>
+      <p>No posts yet. Be the first to share something!</p>
+      <button class="primary-btn" onclick="openNewPostModal()">+ Create Post</button>
+    </div>`;
+    return;
+  }
+
+  list.forEach(post => {
     const commentCount = post.comments ? post.comments.length : 0;
+    const reactions = post.reactions || {};
+    const reactionRow = REACTION_EMOJIS.map(em => `
+      <button class="reaction-chip ${reactions[em] ? 'has-count' : ''}" onclick="reactToPost('${post.id}','${em}')">
+        ${em} <span>${reactions[em] || ''}</span>
+      </button>
+    `).join('');
+
     const el = document.createElement('div');
     el.className = 'info-card';
     el.innerHTML = `
       <div class="post-meta">
-        <span class="post-author">${post.author}</span>
-        <span>${post.time}</span>
+        <span class="post-author">${escapeHtml(post.author)}</span>
+        <span>${escapeHtml(post.time || '')}</span>
       </div>
-      <div class="post-title">${post.title}</div>
-      <p class="post-body">${post.text}</p>
+      <div class="post-title">${escapeHtml(post.title)}</div>
+      <p class="post-body">${escapeHtml(post.text)}</p>
+      <div class="reaction-row">${reactionRow}</div>
       <div class="post-actions">
         <span class="post-action-btn ${post.liked ? 'liked' : ''}" onclick="toggleLikePost('${post.id}')">
           <i class="fa-solid fa-heart"></i> ${post.likes || 0}
@@ -409,19 +640,62 @@ function renderFeed() {
   });
 }
 
+function updateNotifBadge() {
+  const badge = document.getElementById('notif-badge');
+  if (!badge) return;
+  if (unreadNotifs > 0) {
+    badge.textContent = unreadNotifs > 9 ? '9+' : String(unreadNotifs);
+    badge.style.display = 'inline-flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function updateChatOnlineCount() {
+  const el = document.getElementById('chat-online-num');
+  if (!el) return;
+  // Approximate "active now" as unique authors who sent a message in the
+  // last 15 minutes. Real presence would need Supabase Realtime presence
+  // channels; this is a light-weight proxy that updates for free with chat.
+  const cutoff = Date.now() - 15 * 60 * 1000;
+  const seen = new Set();
+  (chatMessages || []).forEach(m => {
+    const t = m.created_at ? Date.parse(m.created_at) : NaN;
+    if (!isNaN(t) && t >= cutoff) seen.add(m.user);
+  });
+  // Always count "you" as active once logged in.
+  if (currentUser) seen.add('__self__');
+  el.textContent = String(Math.max(1, seen.size));
+}
+
 async function toggleLikePost(id) {
   const post = campusFeed.find(p => p.id === id);
   if (!post) return;
 
   post.liked = !post.liked;
   const newLikes = Math.max(0, (post.likes || 0) + (post.liked ? 1 : -1));
+  post.likes = newLikes;
 
-  if (isSupabaseConnected) {
+  if (isSupabaseConnected && isDbRow(id)) {
     await supabaseClient.from('campus_feed').update({ likes: newLikes }).eq('id', id);
   } else {
-    post.likes = newLikes;
-    renderFeed();
+    saveLocalFeed();
   }
+  renderFeed();
+}
+
+async function reactToPost(id, emoji) {
+  const post = campusFeed.find(p => p.id === id);
+  if (!post) return;
+  post.reactions = post.reactions || {};
+  post.reactions[emoji] = (post.reactions[emoji] || 0) + 1;
+
+  if (isSupabaseConnected && isDbRow(id)) {
+    await supabaseClient.from('campus_feed').update({ reactions: post.reactions }).eq('id', id);
+  } else {
+    saveLocalFeed();
+  }
+  renderFeed();
 }
 
 function openCommentsModal(postId) {
@@ -466,12 +740,14 @@ async function addCommentToPost() {
       author: appSettings.anonymous ? "Anonymous Student" : (currentUser ? currentUser.split('@')[0] : "Student"),
       text: input.value.trim()
     });
+    post.comments = updatedComments;
 
-    if (isSupabaseConnected) {
+    if (isSupabaseConnected && isDbRow(currentPostCommentId)) {
       await supabaseClient.from('campus_feed').update({ comments: updatedComments }).eq('id', currentPostCommentId);
     } else {
-      renderFeed();
+      saveLocalFeed();
     }
+    renderFeed();
     openCommentsModal(currentPostCommentId);
   }
 }
@@ -577,14 +853,15 @@ async function toggleGroupJoin(id) {
 
   const isJoining = !group.joined;
   const newMembers = Math.max(0, group.members + (isJoining ? 1 : -1));
+  group.joined = isJoining;
+  group.members = newMembers;
 
-  if (isSupabaseConnected) {
+  if (isSupabaseConnected && isDbRow(id)) {
     await supabaseClient.from('study_groups').update({ joined: isJoining, members: newMembers }).eq('id', id);
   } else {
-    group.joined = isJoining;
-    group.members = newMembers;
-    renderGroups();
+    saveLocalGroups();
   }
+  renderGroups();
 }
 
 // Events Engine
