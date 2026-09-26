@@ -522,7 +522,55 @@ function toggleNotifications() {
   updateNotifBadge();
 }
 
-// Chat Engine
+// Chat Engine — security-hardened
+//
+// Client-side we defend against the attacks we CAN defend against here:
+// XSS via HTML injection in message text or username, dangerous link
+// targets, spam, and oversized payloads. The Supabase anon key is public,
+// so anyone can insert rows — for real trust guarantees, add Row Level
+// Security in Supabase so INSERTs must satisfy:
+//   auth.uid() IS NOT NULL
+//   AND length(text) BETWEEN 1 AND 280
+//   AND user_id = auth.uid()
+// Everything below assumes the DB may still hand us malicious rows.
+
+const CHAT_MAX_LEN = 280;
+const CHAT_MAX_NAME_LEN = 32;
+const CHAT_RATE_MAX = 5;             // messages
+const CHAT_RATE_WINDOW_MS = 30_000;  // per 30s window
+let chatSendTimestamps = [];         // sliding window of recent send times
+
+// Turn arbitrary user content into safe HTML: escape first, then autolink
+// only http/https URLs, and mark every anchor as noopener/noreferrer so a
+// target page can never reach back into the opener.
+function renderSafeMessage(text) {
+  const escaped = escapeHtml(text);
+  return escaped.replace(
+    /\b(https?:\/\/[^\s<]+)/gi,
+    (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer nofollow ugc">${url}</a>`
+  );
+}
+
+// Sanitize a displayed username: strip everything that isn't printable
+// text, collapse whitespace, cap length. Prevents markup and control
+// characters even before HTML escaping catches the rest.
+function sanitizeName(name) {
+  if (typeof name !== 'string') return 'Student';
+  const cleaned = name
+    .replace(/[ -<>]/g, '')  // controls + angle brackets
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, CHAT_MAX_NAME_LEN);
+  return cleaned || 'Student';
+}
+
+function isSelfMessage(msg, myHandle) {
+  return msg.user === myHandle
+      || msg.user === currentUser
+      || msg.user === 'You'
+      || (msg.user_id && currentUser && msg.user_id === currentUser);
+}
+
 function renderChat() {
   const box = document.getElementById('app-chat-messages');
   if (!box) return;
@@ -531,40 +579,83 @@ function renderChat() {
   const myHandle = appSettings.anonymous ? "You" : (currentUser ? currentUser.split('@')[0] : "You");
 
   chatMessages.forEach(msg => {
-    const isMine = msg.user === myHandle || msg.user === currentUser || msg.user === 'You';
+    const isMine = isSelfMessage(msg, myHandle);
+    const safeUser = escapeHtml(sanitizeName(isMine ? 'You' : msg.user));
+    const safeText = renderSafeMessage(String(msg.text || '').slice(0, CHAT_MAX_LEN));
+    const safeTime = escapeHtml(String(msg.time || ''));
+
     const msgEl = document.createElement('div');
     msgEl.className = `chat-bubble ${isMine ? 'chat-bubble-mine' : 'chat-bubble-other'}`;
     msgEl.innerHTML = `
-      <span class="chat-user">${isMine ? 'You' : msg.user}</span>
-      <div class="chat-text">${msg.text}</div>
-      <span class="chat-time">${msg.time || ''}</span>
+      <span class="chat-user">${safeUser}</span>
+      <div class="chat-text">${safeText}</div>
+      <span class="chat-time">${safeTime}</span>
     `;
     box.appendChild(msgEl);
   });
 
   box.scrollTop = box.scrollHeight;
   updateChatOnlineCount();
+  updateChatCounter();
+}
+
+function updateChatCounter() {
+  const input = document.getElementById('app-chat-input');
+  const counter = document.getElementById('chat-char-counter');
+  if (!input || !counter) return;
+  const len = input.value.length;
+  counter.textContent = `${len}/${CHAT_MAX_LEN}`;
+  counter.classList.toggle('over-limit', len >= CHAT_MAX_LEN);
 }
 
 async function sendAppChatMessage(event) {
   event.preventDefault();
   const input = document.getElementById('app-chat-input');
-  if (!input || !input.value.trim()) return;
+  if (!input) return;
 
-  const text = input.value.trim();
-  const senderName = appSettings.anonymous ? "Anonymous Student" : (currentUser ? currentUser.split('@')[0] : "Student");
+  // 1) Normalize: trim + collapse whitespace + cap length.
+  let text = String(input.value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return;
+  if (text.length > CHAT_MAX_LEN) text = text.slice(0, CHAT_MAX_LEN);
+
+  // 2) Rate limit: block if too many recent sends from this client.
+  const now = performance.now();
+  chatSendTimestamps = chatSendTimestamps.filter(t => now - t < CHAT_RATE_WINDOW_MS);
+  if (chatSendTimestamps.length >= CHAT_RATE_MAX) {
+    const waitMs = CHAT_RATE_WINDOW_MS - (now - chatSendTimestamps[0]);
+    alert(`Slow down — you can send up to ${CHAT_RATE_MAX} messages every ${CHAT_RATE_WINDOW_MS/1000}s. Try again in ${Math.ceil(waitMs/1000)}s.`);
+    return;
+  }
+
+  // 3) Determine sender identity. Anonymous mode picks a canonical label
+  // that anyone can share. When signed in with Supabase, include user_id
+  // so a future RLS policy can verify the sender server-side; the local
+  // renderer trusts user_id over the display name for "is this mine?".
+  const rawName = appSettings.anonymous
+    ? 'Anonymous Student'
+    : (currentUser ? currentUser.split('@')[0] : 'Student');
+  const senderName = sanitizeName(rawName);
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const msgObj = { user: senderName, text, time: timeStr };
+  if (isSupabaseConnected) {
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (session?.user?.id) msgObj.user_id = session.user.id;
+    } catch (_) { /* not signed in */ }
+  }
+
+  chatSendTimestamps.push(now);
+  input.value = '';
+  updateChatCounter();
 
   if (isSupabaseConnected) {
-    await supabaseClient.from('campus_chat').insert([msgObj]);
+    const { error } = await supabaseClient.from('campus_chat').insert([msgObj]);
+    if (error) alert('Message failed to send: ' + error.message);
   } else {
     chatMessages.push(msgObj);
     renderChat();
   }
-
-  input.value = '';
 }
 
 // Feed Engine

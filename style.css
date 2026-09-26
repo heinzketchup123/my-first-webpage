@@ -875,6 +875,23 @@ body.light-mode .nav-btn { color: #555555; }
   font-size: 0.85rem;
 }
 
+.chat-char-counter {
+  align-self: flex-end;
+  font-size: 0.7rem;
+  color: var(--sub-text-color);
+  font-weight: 700;
+  padding: 4px 6px 0;
+  letter-spacing: 0.02em;
+}
+.chat-char-counter.over-limit { color: #ff3b30; }
+
+.chat-text a {
+  color: var(--accent-color);
+  text-decoration: underline;
+  word-break: break-all;
+}
+.chat-text a:hover { opacity: 0.85; }
+
 .chat-header-row {
   display: flex;
   align-items: center;

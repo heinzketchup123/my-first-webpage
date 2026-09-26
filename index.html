@@ -233,9 +233,10 @@
             <!-- Messages load dynamically via Supabase -->
           </div>
           <form id="app-chat-form" class="chat-form-row" onsubmit="sendAppChatMessage(event)">
-            <input type="text" id="app-chat-input" class="auth-input" placeholder="Type a message..." required autocomplete="off" maxlength="280" />
+            <input type="text" id="app-chat-input" class="auth-input" placeholder="Type a message..." required autocomplete="off" maxlength="280" oninput="updateChatCounter()" />
             <button type="submit" class="primary-btn chat-send-btn">Send</button>
           </form>
+          <div id="chat-char-counter" class="chat-char-counter">0/280</div>
         </div>
       </section>
 
