@@ -284,6 +284,15 @@ create policy "groups: everyone reads"
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
-alter publication supabase_realtime add table public.campus_chat;
-alter publication supabase_realtime add table public.campus_feed;
-alter publication supabase_realtime add table public.friendships;
+-- Postgres has no "IF NOT EXISTS" for ALTER PUBLICATION, so each ADD is
+-- wrapped in its own block that swallows the duplicate_object error (SQLSTATE
+-- 42710) so re-running this script is safe.
+do $$
+begin
+  begin alter publication supabase_realtime add table public.campus_chat;
+    exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.campus_feed;
+    exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.friendships;
+    exception when duplicate_object then null; end;
+end $$;
