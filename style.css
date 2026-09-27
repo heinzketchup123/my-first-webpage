@@ -2951,6 +2951,55 @@ html.layout-desktop #settings-view > .page-header { margin-bottom: 6px; }
   50%, 100% { transform: rotate(0deg); }
 }
 
+/* ---------- Edge to edge on real phones ----------
+   With viewport-fit=cover the app draws behind the status bar (clock,
+   battery, camera) and the home bar, instead of leaving a flat dark strip.
+   These insets keep content clear of them; they're 0 on computers. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  /* Gap under the floating tab bar: clears the home bar without floating too high */
+  --nav-gap: max(clamp(8px, 2vh, 14px), calc(var(--safe-bottom) - 6px));
+}
+html.layout-phone .app-header {
+  position: relative;
+  padding-top: calc(clamp(12px, 3vh, 18px) + var(--safe-top));
+  padding-left: calc(20px + var(--safe-left));
+  padding-right: calc(20px + var(--safe-right));
+}
+html.layout-phone .bottom-nav {
+  padding-bottom: 8px;
+  margin-bottom: var(--nav-gap);
+}
+html.layout-phone .notif-drawer { padding-top: calc(16px + var(--safe-top)); }
+html.layout-phone .auth-overlay {
+  padding-top: calc(24px + var(--safe-top));
+  padding-bottom: calc(24px + var(--safe-bottom));
+}
+.modal-overlay {
+  padding-top: calc(20px + var(--safe-top));
+  padding-bottom: calc(20px + var(--safe-bottom));
+}
+html.layout-phone .toast-container { bottom: calc(var(--nav-gap) + 70px); }
+html.layout-desktop .app-header { padding-top: calc(14px + var(--safe-top)); }
+html.layout-desktop .bottom-nav { padding-top: calc(20px + var(--safe-top)); }
+.rotate-overlay { padding: calc(24px + var(--safe-top)) calc(24px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(24px + var(--safe-left)); }
+
+/* Installed on an iPhone the status bar text is always white, so in light
+   mode a soft shade behind it keeps the clock and battery readable. */
+html.standalone.layout-phone body.light-mode .app-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(var(--safe-top) + 8px);
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+
 /* ---------- Phone layout on a computer: shown inside a phone ----------
    Only with a mouse/trackpad (pointer: fine), so real phones and tablets
    still use the whole screen. Nothing is drawn outside the phone; switch
