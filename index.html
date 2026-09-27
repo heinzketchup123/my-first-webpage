@@ -26,22 +26,20 @@
       <div class="auth-box">
         <form id="login-form" class="auth-form" onsubmit="handleAuth(event)">
           <h2>Welcome Back</h2>
-          <p class="auth-sub">Access your campus ecosystem</p>
+          <p class="auth-sub">Sign in to your school's Campus Pulse</p>
           <input type="email" id="login-email" class="auth-input" placeholder="Email Address" required />
           <input type="password" id="login-password" class="auth-input" placeholder="Password" required />
           <button type="submit" class="primary-btn">Sign In</button>
-          <button type="button" class="secondary-btn guest-btn" onclick="enterGuestMode('guest@campus.edu')">Continue as Guest</button>
           <p class="auth-toggle-text">Need an account? <span onclick="toggleAuthMode()">Sign Up</span></p>
         </form>
 
         <form id="signup-form" class="auth-form hidden" onsubmit="handleAuth(event)">
           <h2>Create Account</h2>
-          <p class="auth-sub">Join thousands of active students</p>
+          <p class="auth-sub">Pick your school right after — feed, chat and study groups all stay scoped to it</p>
           <input type="text" id="signup-name" class="auth-input" placeholder="Full Name" required />
           <input type="email" id="signup-email" class="auth-input" placeholder="Email Address" required />
           <input type="password" id="signup-password" class="auth-input" placeholder="Password" required />
           <button type="submit" class="primary-btn">Create Account</button>
-          <button type="button" class="secondary-btn guest-btn" onclick="enterGuestMode('guest@campus.edu')">Continue as Guest</button>
           <p class="auth-toggle-text">Already have an account? <span onclick="toggleAuthMode()">Sign In</span></p>
         </form>
       </div>
@@ -55,9 +53,9 @@
       </div>
       <div class="header-actions">
         <button class="review-trigger-btn" onclick="openReviewModal()">+ Review</button>
-        <button class="icon-header-btn" onclick="toggleNotifications()">
+        <button class="icon-header-btn" onclick="toggleNotifications()" aria-label="Notifications">
           <i class="fa-solid fa-bell"></i>
-          <span id="notif-badge" class="notif-badge">2</span>
+          <span id="notif-badge" class="notif-badge" style="display:none;">0</span>
         </button>
       </div>
     </header>
@@ -68,21 +66,8 @@
         <span>Notifications</span>
         <i class="fa-solid fa-xmark" onclick="toggleNotifications()"></i>
       </div>
-      <div class="notif-body">
-        <div class="notif-item">
-          <i class="fa-solid fa-calendar-day notif-icon"></i>
-          <div>
-            <strong>Midterm Review Session</strong>
-            <p>Physics 101 review starts at 6:00 PM today in Science Hall 204.</p>
-          </div>
-        </div>
-        <div class="notif-item">
-          <i class="fa-solid fa-comments notif-icon"></i>
-          <div>
-            <strong>New Reply on Study Group</strong>
-            <p>Alex accepted your request to join CS101 Prep Team.</p>
-          </div>
-        </div>
+      <div id="notif-body" class="notif-body">
+        <!-- populated dynamically -->
       </div>
     </div>
 

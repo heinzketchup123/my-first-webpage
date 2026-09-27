@@ -1094,6 +1094,21 @@ body.light-mode .nav-btn { color: #555555; }
 .school-row-text strong { font-size: 0.9rem; }
 .school-row-text small { color: var(--sub-text-color); font-size: 0.7rem; }
 
+/* Notification drawer empty state */
+.notif-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--sub-text-color);
+}
+.notif-empty i {
+  display: block;
+  font-size: 1.6rem;
+  color: var(--accent-color);
+  margin-bottom: 8px;
+  opacity: 0.9;
+}
+.notif-empty p { font-size: 0.82rem; }
+
 /* =====================================================
    POLISH PASS — toasts, nav labels, smoother interactions
    ===================================================== */

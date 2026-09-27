@@ -30,29 +30,12 @@ const THEME_PRESETS = {
   monochrome: { main: '#222222', light: '#444444', card: 'rgba(255, 255, 255, 0.08)', nav: 'rgba(20, 20, 20, 0.95)', bg: '#0a0a0a', textOnAccent: '#ffffff' }
 };
 
-const defaultFeed = [
-  { id: "1", author: "Campus News", title: "Library Extended Hours for Finals Week", text: "Main Campus Library will remain open 24 hours starting next Monday.", likes: 24, time: "2h ago", comments: [] },
-  { id: "2", author: "Physics Club", title: "Quantum Physics Guest Lecture", text: "Dr. Aris Thorne joins us virtually this Thursday at 5:00 PM.", likes: 15, time: "5h ago", comments: [] }
-];
-
-const defaultGroups = [
-  { id: "1", name: "Physics 101 Midterm Squad", course: "Physics 101", members: 4, max: 6, joined: false, host: "Elena Vance", location: "Science Hall Rm 204", schedule: "Tue/Thu 5:00 PM", topics: ["Thermodynamics", "Lab Quiz Prep"], roster: ["Elena V.", "Mark K."] },
-  { id: "2", name: "Calculus Problem Solvers", course: "Calculus II", members: 5, max: 5, joined: false, host: "Marcus Brody", location: "Library Pod B", schedule: "Mondays 6:30 PM", topics: ["Integration by Parts"], roster: ["Marcus B.", "Priya N."] }
-];
-
+// Campus-wide events are curated content, kept as a small static seed so
+// the Events tab is not empty on first launch. Everything else (feed,
+// study groups, reviews, GPA) starts empty and is authored by real users.
 const defaultEvents = [
   { id: "1", title: "Career Fair 2026", date: "Sept 28, 10:00 AM", location: "Student Union", rsvp: false, attendeesCount: 142, description: "Connect with over 40 hiring partners, tech startups, and research institutes." },
   { id: "2", title: "CS Hackathon Warmup", date: "Oct 2, 4:00 PM", location: "Tech Lab 3", rsvp: true, attendeesCount: 38, description: "Practice rapid prototyping and meet team partners." }
-];
-
-const defaultGpaCourses = [
-  { name: "Physics 101", grade: "A", credits: 4 },
-  { name: "Calculus II", grade: "B+", credits: 4 },
-  { name: "World History", grade: "A-", credits: 3 }
-];
-
-const defaultReviews = [
-  { id: "1", teacher: "Mr. Smith (Physics)", rating: "5", text: "Fair grader and clear study sheets provided before midterms." }
 ];
 
 const defaultSettings = { lightMode: false, anonymous: true, autoSystemTheme: false };
@@ -86,7 +69,7 @@ let campusFeed = [];
 let studyGroups = [];
 let gpaCourses = [];
 let campusEvents = [];
-let chatMessages = [];         // legacy — no longer rendered directly; kept for online-count
+let chatMessages = [];         // (legacy — no longer rendered directly)
 let dmMessages = [];           // messages for the currently-selected friend thread
 let selectedFriendId = null;
 let friends = [];              // [{friend_id, handle, display_name}]
@@ -96,89 +79,71 @@ let profileMap = {};           // user_id -> {handle, display_name}
 let appSettings = { ...defaultSettings };
 let appTheme = { ...THEME_PRESETS.cyber };
 
-// Guest-mode seed friends so the UI is explorable without a real account.
-const GUEST_FRIENDS = [
-  { friend_id: 'guest-alice', handle: 'alice', display_name: 'Alice (demo)' },
-  { friend_id: 'guest-bob',   handle: 'bob',   display_name: 'Bob (demo)' }
-];
-const GUEST_SEED_DMS = {
-  'guest-alice': [
-    { sender_id: 'guest-alice', recipient_id: 'guest', text: 'Hey! Ready for the midterm review?', time: '10:15 AM' },
-    { sender_id: 'guest',       recipient_id: 'guest-alice', text: 'Almost — one more chapter to go.', time: '10:17 AM' }
-  ],
-  'guest-bob': [
-    { sender_id: 'guest-bob', recipient_id: 'guest', text: 'Yo, coffee before class?', time: '9:02 AM' }
-  ]
-};
-
 let currentPostCommentId = null;
 let timerSeconds = 1500;
 let timerInterval = null;
 let realtimeChannel = null;
 let feedSort = 'new'; // 'new' | 'top' | 'comments'
-let unreadNotifs = 2;
+let unreadNotifs = 0;
 let appAppearance = { ...defaultAppearance };
-
-// A row that lives only in the local seed uses ids like "1"/"2"; a row that
-// actually exists in Supabase has a UUID. Only UUID-backed rows should be
-// pushed to the DB — otherwise updates silently match zero rows and the UI
-// looks broken.
-function isDbRow(id) {
-  return typeof id === 'string' && id.length >= 32 && id.includes('-');
-}
-
-function saveLocalGroups() {
-  if (currentUser) localStorage.setItem(`groups_${currentUser}`, JSON.stringify(studyGroups));
-}
-function loadLocalGroups() {
-  if (!currentUser) return null;
-  const raw = localStorage.getItem(`groups_${currentUser}`);
-  return raw ? JSON.parse(raw) : null;
-}
-function saveLocalFeed() {
-  if (currentUser) localStorage.setItem(`feed_${currentUser}`, JSON.stringify(campusFeed));
-}
-function loadLocalFeed() {
-  if (!currentUser) return null;
-  const raw = localStorage.getItem(`feed_${currentUser}`);
-  return raw ? JSON.parse(raw) : null;
-}
 
 document.addEventListener("DOMContentLoaded", () => {
   registerServiceWorker();
   loadAppearance();
   applyAppearance();
   initSystemThemeListener();
+  // The Events tab is curated campus-life content; not user-generated.
+  campusEvents = [...defaultEvents];
+  renderEvents();
+  renderEmptyStates();
 
-  if (isSupabaseConnected) {
-    const boot = (session) => {
-      if (session) {
-        currentUser = session.user.email;
-        currentUserId = session.user.id;
-        document.getElementById('auth-screen').style.display = 'none';
-        const nameDisplay = currentUser.split('@')[0];
-        document.getElementById('user-welcome-title').textContent = `Welcome Back, ${nameDisplay}`;
-        ensureProfile().finally(() => {
-          initSupabaseRealtime();
-          loadAllSupabaseData();
-        });
-      } else {
-        currentUser = null;
-        currentUserId = null;
-        currentHandle = null;
-        document.getElementById('auth-screen').style.display = 'flex';
-      }
-    };
-    supabaseClient.auth.getSession().then(({ data: { session } }) => boot(session));
-    supabaseClient.auth.onAuthStateChange((_ev, session) => boot(session));
-  } else {
-    currentUser = localStorage.getItem('knowledge_app_current_user') || 'guest@campus.edu';
-    if (currentUser !== 'guest@campus.edu') {
-      document.getElementById('auth-screen').style.display = 'none';
-    }
-    loadLocalFallbackData();
+  if (!isSupabaseConnected) {
+    // Supabase misconfigured — surface it instead of silently degrading.
+    showToast('Supabase not configured — sign-in disabled.', 'error', 6000);
+    document.getElementById('auth-screen').style.display = 'flex';
+    return;
   }
+
+  const boot = (session) => {
+    if (session) {
+      currentUser = session.user.email;
+      currentUserId = session.user.id;
+      document.getElementById('auth-screen').style.display = 'none';
+      const nameDisplay = currentUser.split('@')[0];
+      document.getElementById('user-welcome-title').textContent = `Welcome, ${nameDisplay}`;
+      ensureProfile().finally(() => {
+        initSupabaseRealtime();
+        loadAllSupabaseData();
+      });
+    } else {
+      currentUser = null;
+      currentUserId = null;
+      currentHandle = null;
+      currentSchool = null;
+      currentSchoolId = null;
+      friends = []; pendingIncoming = []; pendingOutgoing = [];
+      campusFeed = []; studyGroups = []; userReviews = [];
+      document.getElementById('auth-screen').style.display = 'flex';
+      renderEmptyStates();
+    }
+  };
+  supabaseClient.auth.getSession().then(({ data: { session } }) => boot(session));
+  supabaseClient.auth.onAuthStateChange((_ev, session) => boot(session));
 });
+
+// Paint empty states so the app is never a blank screen even before a
+// fetch returns (or when the user is truly at zero rows).
+function renderEmptyStates() {
+  renderFeed();
+  renderGroups();
+  renderReviews();
+  renderGpaRows();
+  renderFriendsStrip();
+  renderDMThread();
+  renderFriendsBadge();
+  updateAnalytics();
+  updateNotifBadge();
+}
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
@@ -212,69 +177,43 @@ function initSupabaseRealtime() {
 
 async function loadAllSupabaseData() {
   await Promise.all([fetchFeed(), fetchGroups(), fetchReviews(), fetchFriendships()]);
-  const savedGpa = localStorage.getItem(`gpa_${currentUser}`);
-  gpaCourses = savedGpa ? JSON.parse(savedGpa) : [...defaultGpaCourses];
-  campusEvents = [...defaultEvents];
+  const savedGpa = localStorage.getItem(`gpa_${currentUserId}`);
+  gpaCourses = savedGpa ? JSON.parse(savedGpa) : [];
   renderGpaRows();
-  renderEvents();
   updateNotifBadge();
 }
 
 async function fetchFeed() {
-  const { data, error } = await supabaseClient.from('campus_feed').select('*').order('created_at', { ascending: false }).limit(30);
-  if (!error && data) {
-    // Merge DB rows with local seed content: DB rows first, then any locally
-    // saved edits (likes/reactions on seed rows) fall back to defaults.
-    const localSeed = loadLocalFeed() || [...defaultFeed];
-    campusFeed = data.length ? [...data, ...localSeed] : localSeed;
-    renderFeed();
-    updateAnalytics();
-  }
+  const { data, error } = await supabaseClient
+    .from('campus_feed')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) { showToast('Feed load failed: ' + error.message, 'error'); return; }
+  campusFeed = data || [];
+  renderFeed();
+  updateAnalytics();
 }
 
 async function fetchGroups() {
-  const { data, error } = await supabaseClient.from('study_groups').select('*');
-  if (!error && data) {
-    const localSeed = loadLocalGroups() || [...defaultGroups];
-    studyGroups = data.length ? [...data, ...localSeed.filter(g => !isDbRow(g.id))] : localSeed;
-    renderGroups();
-  }
+  const { data, error } = await supabaseClient
+    .from('study_groups')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) { showToast('Groups load failed: ' + error.message, 'error'); return; }
+  studyGroups = data || [];
+  renderGroups();
 }
 
 async function fetchReviews() {
-  // Reviews are globally readable, but the UI defaults to the caller's own
-  // school; user can flip the filter to look up any school's reviews.
   let q = supabaseClient.from('instructor_reviews').select('*').order('created_at', { ascending: false });
   const wantSchool = reviewSchoolFilterId === 'mine' ? currentSchoolId : reviewSchoolFilterId;
   if (wantSchool) q = q.eq('school_id', wantSchool);
   const { data, error } = await q;
-  if (!error) {
-    userReviews = (data && data.length) ? data : (wantSchool ? [] : [...defaultReviews]);
-    renderReviews();
-    updateAnalytics();
-  }
-}
-
-function loadLocalFallbackData() {
-  userReviews = [...defaultReviews];
-  campusFeed = loadLocalFeed() || [...defaultFeed];
-  studyGroups = loadLocalGroups() || [...defaultGroups];
-  gpaCourses = [...defaultGpaCourses];
-  campusEvents = [...defaultEvents];
-  // Guest mode: expose the demo friends so the Messages tab is explorable.
-  friends = [];
-  pendingIncoming = [];
-  pendingOutgoing = [];
-  renderFeed();
-  renderGroups();
-  renderEvents();
-  renderGpaRows();
+  if (error) { showToast('Reviews load failed: ' + error.message, 'error'); return; }
+  userReviews = data || [];
   renderReviews();
-  renderFriendsStrip();
-  renderDMThread();
-  renderFriendsBadge();
   updateAnalytics();
-  updateNotifBadge();
 }
 
 // Authentication Handlers
@@ -285,73 +224,61 @@ function toggleAuthMode() {
 
 async function handleAuth(event) {
   event.preventDefault();
-  const isSignup = !document.getElementById('signup-form').classList.contains('hidden');
+  if (!isSupabaseConnected) return showToast('Sign-in is not available right now.', 'error');
 
-  if (isSupabaseConnected) {
-    try {
-      if (isSignup) {
-        const email = document.getElementById('signup-email').value;
-        const password = document.getElementById('signup-password').value;
-        const { data, error } = await supabaseClient.auth.signUp({ email, password });
-        if (error) {
-          showToast("Sign up failed: " + error.message + ' — try Continue as Guest.', 'error', 5000);
-          return;
+  const isSignup = !document.getElementById('signup-form').classList.contains('hidden');
+  try {
+    if (isSignup) {
+      const email = document.getElementById('signup-email').value.trim();
+      const password = document.getElementById('signup-password').value;
+      const display_name = document.getElementById('signup-name').value.trim() || email.split('@')[0];
+      const { data, error } = await supabaseClient.auth.signUp({
+        email, password,
+        options: { data: { display_name } }
+      });
+      if (error) return showToast('Sign up failed: ' + error.message, 'error', 5000);
+      if (!data?.session) {
+        // Project may require email confirmation. Try to sign in anyway;
+        // if that fails, tell the user to confirm and try again.
+        const { error: signInErr } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (signInErr) {
+          showToast('Account created — check your inbox to confirm, then sign in.', 'info', 6000);
         }
-        // If Supabase returned a session, we're auto-logged in.
-        // If not, email confirmation is required — try to sign in anyway
-        // (works when the project has confirmation disabled), otherwise
-        // tell the user and drop them into guest mode so they aren't stuck.
-        if (!data?.session) {
-          const { error: signInErr } = await supabaseClient.auth.signInWithPassword({ email, password });
-          if (signInErr) {
-            alert("Account created. If your Supabase project requires email confirmation, check your inbox before signing in. Continuing as guest for now.");
-            enterGuestMode(email);
-          }
-        }
-      } else {
-        const email = document.getElementById('login-email').value;
-        const password = document.getElementById('login-password').value;
-        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-        if (error) showToast("Login failed: " + error.message, 'error', 4500);
       }
-    } catch (err) {
-      alert("Auth error: " + err.message);
+    } else {
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) return showToast('Login failed: ' + error.message, 'error', 4500);
     }
-  } else {
-    enterGuestMode(document.getElementById('login-email').value || 'student@campus.edu');
+  } catch (err) {
+    showToast('Auth error: ' + err.message, 'error');
   }
 }
 
-function enterGuestMode(email) {
-  currentUser = email || 'guest@campus.edu';
-  localStorage.setItem('knowledge_app_current_user', currentUser);
-  document.getElementById('auth-screen').style.display = 'none';
-  const nameDisplay = currentUser.split('@')[0];
-  const welcome = document.getElementById('user-welcome-title');
-  if (welcome) welcome.textContent = `Welcome, ${nameDisplay}`;
-  loadLocalFallbackData();
-}
-
 async function logout() {
-  // Always clear form fields + local user + hard-reset auth screen so a
-  // second sign-in works cleanly regardless of Supabase's async callback.
   ['login-email','login-password','signup-name','signup-email','signup-password']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  localStorage.removeItem('knowledge_app_current_user');
 
   if (isSupabaseConnected) {
     try { await supabaseClient.auth.signOut(); } catch (_) {}
   }
-  currentUser = null;
+  currentUser = null; currentUserId = null; currentHandle = null;
+  currentSchool = null; currentSchoolId = null;
+  friends = []; pendingIncoming = []; pendingOutgoing = [];
+  campusFeed = []; studyGroups = []; userReviews = []; gpaCourses = [];
+  selectedFriendId = null; dmMessages = [];
+  renderEmptyStates();
+
   const authScreen = document.getElementById('auth-screen');
   if (authScreen) authScreen.style.display = 'flex';
-  // Ensure the login form (not signup) is showing after logout.
   const loginForm = document.getElementById('login-form');
   const signupForm = document.getElementById('signup-form');
   if (loginForm && signupForm) {
     loginForm.classList.remove('hidden');
     signupForm.classList.add('hidden');
   }
+  showToast('Signed out.', 'info');
 }
 
 // Theme Engine
@@ -541,10 +468,32 @@ function switchTab(viewId, element) {
 
 function toggleNotifications() {
   document.getElementById('notif-drawer').classList.toggle('open');
-  // Opening the drawer clears the unread badge.
+  renderNotifications();
   unreadNotifs = 0;
   updateNotifBadge();
 }
+
+function renderNotifications() {
+  const body = document.getElementById('notif-body');
+  if (!body) return;
+  const items = [];
+  pendingIncoming.forEach(r => {
+    items.push(`
+      <div class="notif-item">
+        <i class="fa-solid fa-user-plus notif-icon"></i>
+        <div>
+          <strong>Friend request</strong>
+          <p>${escapeHtml(r.display_name || r.handle)} wants to connect.</p>
+        </div>
+      </div>`);
+  });
+  body.innerHTML = items.length ? items.join('') : `
+    <div class="notif-empty">
+      <i class="fa-solid fa-bell-slash"></i>
+      <p>You're all caught up.</p>
+    </div>`;
+}
+function updateNotifBadgeFromState() { unreadNotifs = pendingIncoming.length; updateNotifBadge(); }
 
 // Chat Engine — security-hardened
 //
@@ -764,6 +713,8 @@ async function fetchFriendships() {
   renderFriendsStrip();
   renderFriendsBadge();
   renderFriendsModalIfOpen();
+  updateNotifBadgeFromState();
+  renderNotifications();
 }
 
 async function sendFriendRequestFromInput() {
@@ -838,13 +789,13 @@ async function unfriend(friendId) {
 function renderFriendsStrip() {
   const strip = document.getElementById('friends-strip');
   if (!strip) return;
-  const list = currentUserId ? friends : (currentUser ? GUEST_FRIENDS : []);
+  const list = currentUserId ? friends : [];
   if (!list.length) {
     strip.innerHTML = `
       <div class="friends-empty">
         <i class="fa-solid fa-user-plus"></i>
         <div class="friends-empty-text">
-          <span>${currentUserId ? 'No friends yet.' : 'Sign in to add real friends. Guest mode shows demo friends only.'}</span>
+          <span>${currentUserId ? 'No friends yet — add someone to start a private conversation.' : 'Sign in to message your friends.'}</span>
           ${currentUserId ? '<button class="primary-btn friends-empty-btn" onclick="openFriendsModal()">+ Add Friend</button>' : ''}
         </div>
       </div>`;
@@ -947,21 +898,20 @@ async function selectFriend(friendId) {
 }
 
 async function fetchDMs(friendId) {
-  if (!friendId) { dmMessages = []; renderDMThread(); return; }
-  if (currentUserId && isSupabaseConnected) {
-    const { data, error } = await supabaseClient
-      .from('campus_chat')
-      .select('*')
-      .or(
-        `and(sender_id.eq.${currentUserId},recipient_id.eq.${friendId}),`+
-        `and(sender_id.eq.${friendId},recipient_id.eq.${currentUserId})`
-      )
-      .order('created_at', { ascending: true })
-      .limit(200);
-    dmMessages = error ? [] : (data || []);
-  } else {
-    dmMessages = [...(GUEST_SEED_DMS[friendId] || [])];
+  if (!friendId || !currentUserId || !isSupabaseConnected) {
+    dmMessages = []; renderDMThread(); return;
   }
+  const { data, error } = await supabaseClient
+    .from('campus_chat')
+    .select('*')
+    .or(
+      `and(sender_id.eq.${currentUserId},recipient_id.eq.${friendId}),`+
+      `and(sender_id.eq.${friendId},recipient_id.eq.${currentUserId})`
+    )
+    .order('created_at', { ascending: true })
+    .limit(200);
+  if (error) showToast('Could not load messages: ' + error.message, 'error');
+  dmMessages = data || [];
   renderDMThread();
 }
 
@@ -1017,23 +967,18 @@ async function sendDM(event) {
 
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  if (currentUserId && isSupabaseConnected) {
-    const msgObj = {
-      sender_id: currentUserId,
-      recipient_id: selectedFriendId,
-      user: sanitizeName(currentHandle || currentUser.split('@')[0]),
-      text, time: timeStr
-    };
-    chatSendTimestamps.push(now);
-    input.value = ''; updateChatCounter();
-    const { error } = await supabaseClient.from('campus_chat').insert([msgObj]);
-    if (error) return showToast('Message blocked — make sure you two are friends.', 'error', 4500);
-  } else {
-    dmMessages.push({ sender_id: 'guest', recipient_id: selectedFriendId, text, time: timeStr });
-    chatSendTimestamps.push(now);
-    input.value = ''; updateChatCounter();
-    renderDMThread();
-  }
+  if (!currentUserId || !isSupabaseConnected) return showToast('Sign in to send messages.', 'warn');
+
+  const msgObj = {
+    sender_id: currentUserId,
+    recipient_id: selectedFriendId,
+    user: sanitizeName(currentHandle || currentUser.split('@')[0]),
+    text, time: timeStr
+  };
+  chatSendTimestamps.push(now);
+  input.value = ''; updateChatCounter();
+  const { error } = await supabaseClient.from('campus_chat').insert([msgObj]);
+  if (error) return showToast('Message blocked — make sure you two are friends.', 'error', 4500);
 }
 
 // Back-compat shim: older code paths / a stale HTML cache may still call
@@ -1169,10 +1114,8 @@ async function toggleLikePost(id) {
   const newLikes = Math.max(0, (post.likes || 0) + (post.liked ? 1 : -1));
   post.likes = newLikes;
 
-  if (isSupabaseConnected && isDbRow(id)) {
+  if (isSupabaseConnected && currentUserId) {
     await supabaseClient.from('campus_feed').update({ likes: newLikes }).eq('id', id);
-  } else {
-    saveLocalFeed();
   }
   renderFeed();
 }
@@ -1183,10 +1126,8 @@ async function reactToPost(id, emoji) {
   post.reactions = post.reactions || {};
   post.reactions[emoji] = (post.reactions[emoji] || 0) + 1;
 
-  if (isSupabaseConnected && isDbRow(id)) {
+  if (isSupabaseConnected && currentUserId) {
     await supabaseClient.from('campus_feed').update({ reactions: post.reactions }).eq('id', id);
-  } else {
-    saveLocalFeed();
   }
   renderFeed();
 }
@@ -1204,8 +1145,8 @@ function openCommentsModal(postId) {
   
   const commentsList = (post.comments || []).map(c => `
     <div style="background:var(--input-bg); padding:10px; border-radius:10px; margin-bottom:8px; border:1px solid var(--card-border);">
-      <div style="font-weight:700; color:var(--accent-color); font-size:0.75rem;">${c.author}</div>
-      <div style="font-size:0.82rem; color:var(--main-text-color); margin-top:2px;">${c.text}</div>
+      <div style="font-weight:700; color:var(--accent-color); font-size:0.75rem;">${escapeHtml(c.author || 'Anonymous')}</div>
+      <div style="font-size:0.82rem; color:var(--main-text-color); margin-top:2px;">${renderSafeMessage(String(c.text || '').slice(0, 500))}</div>
     </div>
   `).join('') || '<p style="color:var(--sub-text-color); font-size:0.8rem;">No comments yet. Start the conversation!</p>';
 
@@ -1235,10 +1176,9 @@ async function addCommentToPost() {
     });
     post.comments = updatedComments;
 
-    if (isSupabaseConnected && isDbRow(currentPostCommentId)) {
-      await supabaseClient.from('campus_feed').update({ comments: updatedComments }).eq('id', currentPostCommentId);
-    } else {
-      saveLocalFeed();
+    if (isSupabaseConnected && currentUserId) {
+      const { error } = await supabaseClient.from('campus_feed').update({ comments: updatedComments }).eq('id', currentPostCommentId);
+      if (error) showToast('Comment failed: ' + error.message, 'error');
     }
     renderFeed();
     openCommentsModal(currentPostCommentId);
@@ -1250,29 +1190,25 @@ function closePostModal() { document.getElementById('postModal').style.display =
 
 async function submitPost(event) {
   event.preventDefault();
-  const title = document.getElementById('post-title').value;
-  const text = document.getElementById('post-text').value;
+  if (!currentUserId) { closePostModal(); return showToast('Sign in to post.', 'warn'); }
+  if (!currentSchoolId) { closePostModal(); return openSchoolPicker(true); }
+
+  const title = document.getElementById('post-title').value.trim();
+  const text  = document.getElementById('post-text').value.trim();
+  if (!title || !text) return showToast('Add a title and body first.', 'warn');
+  if (title.length > 120 || text.length > 2000) return showToast('Post is too long.', 'warn');
 
   const newPost = {
-    author: appSettings.anonymous ? "Anonymous Student" : (currentUser ? currentUser.split('@')[0] : "Student"),
-    title,
-    text,
-    likes: 0,
-    time: "Just now",
-    comments: []
+    author: appSettings.anonymous ? 'Anonymous Student' : (currentHandle || currentUser.split('@')[0]),
+    title, text,
+    likes: 0, time: 'Just now', comments: [], reactions: {},
+    author_id: currentUserId,
+    school_id: currentSchoolId
   };
 
-  if (isSupabaseConnected && currentUserId) {
-    if (!currentSchoolId) return openSchoolPicker(true);
-    const { error } = await supabaseClient.from('campus_feed').insert([{ ...newPost, author_id: currentUserId, school_id: currentSchoolId }]);
-    if (error) showToast('Post blocked: ' + error.message, 'error');
-    else showToast('Posted to your school feed.', 'success');
-  } else {
-    campusFeed.unshift({ id: String(Date.now()), ...newPost });
-    saveLocalFeed();
-    renderFeed();
-  }
-
+  const { error } = await supabaseClient.from('campus_feed').insert([newPost]);
+  if (error) return showToast('Post blocked: ' + error.message, 'error');
+  showToast('Posted to your school feed.', 'success');
   closePostModal();
   event.target.reset();
 }
@@ -1288,6 +1224,14 @@ function renderGroups(filter = 'all') {
     if (filter === 'mine') return g.joined;
     return true;
   });
+
+  if (!list.length) {
+    container.innerHTML = `<div class="empty-state">
+      <i class="fa-solid fa-user-group"></i>
+      <p>${filter === 'mine' ? "You haven't joined any groups yet." : filter === 'open' ? 'No groups with open seats right now.' : 'No study groups yet for your school.'}</p>
+    </div>`;
+    return;
+  }
 
   list.forEach(group => {
     const card = document.createElement('div');
@@ -1353,10 +1297,8 @@ async function toggleGroupJoin(id) {
   group.joined = isJoining;
   group.members = newMembers;
 
-  if (isSupabaseConnected && isDbRow(id)) {
+  if (isSupabaseConnected && currentUserId) {
     await supabaseClient.from('study_groups').update({ joined: isJoining, members: newMembers }).eq('id', id);
-  } else {
-    saveLocalGroups();
   }
   renderGroups();
 }
@@ -1395,6 +1337,16 @@ function renderGpaRows() {
   if (!container) return;
   container.innerHTML = '';
 
+  if (!gpaCourses.length) {
+    container.innerHTML = `<div class="empty-state">
+      <i class="fa-solid fa-calculator"></i>
+      <p>No courses added yet. Add your first course to start tracking.</p>
+      <button class="primary-btn" onclick="addGpaRow()">+ Add Course</button>
+    </div>`;
+    calculateGPA();
+    return;
+  }
+
   gpaCourses.forEach((c, idx) => {
     const row = document.createElement('div');
     row.className = 'gpa-row';
@@ -1431,7 +1383,7 @@ function deleteGpaRow(idx) {
 }
 
 function saveGpaLocal() {
-  if (currentUser) localStorage.setItem(`gpa_${currentUser}`, JSON.stringify(gpaCourses));
+  if (currentUserId) localStorage.setItem(`gpa_${currentUserId}`, JSON.stringify(gpaCourses));
 }
 
 function calculateGPA() {
@@ -1499,23 +1451,20 @@ function closeReviewModal() { document.getElementById('reviewModal').style.displ
 
 async function submitReview(event) {
   event.preventDefault();
-  const teacher = document.getElementById('review-teacher').value;
-  const rating = document.getElementById('review-rating').value;
-  const text = document.getElementById('review-text').value;
+  if (!currentUserId) { closeReviewModal(); return showToast('Sign in to leave a review.', 'warn'); }
+  if (!currentSchoolId) { closeReviewModal(); return openSchoolPicker(true); }
 
-  const revObj = { teacher, rating, text };
+  const teacher = document.getElementById('review-teacher').value.trim();
+  const rating  = document.getElementById('review-rating').value;
+  const text    = document.getElementById('review-text').value.trim();
+  if (!teacher || !text) return showToast('Fill in teacher and review text.', 'warn');
+  if (text.length > 2000) return showToast('Review is too long.', 'warn');
 
-  if (isSupabaseConnected && currentUserId) {
-    if (!currentSchoolId) return openSchoolPicker(true);
-    const { error } = await supabaseClient.from('instructor_reviews').insert([{ ...revObj, author_id: currentUserId, school_id: currentSchoolId }]);
-    if (error) showToast('Review blocked: ' + error.message, 'error');
-    else showToast('Review posted.', 'success');
-  } else {
-    userReviews.unshift({ id: String(Date.now()), ...revObj });
-    renderReviews();
-    updateAnalytics();
-  }
-
+  const { error } = await supabaseClient
+    .from('instructor_reviews')
+    .insert([{ teacher, rating, text, author_id: currentUserId, school_id: currentSchoolId }]);
+  if (error) return showToast('Review blocked: ' + error.message, 'error');
+  showToast('Review posted.', 'success');
   event.target.reset();
   closeReviewModal();
   switchTab('profile-view');
@@ -1530,17 +1479,28 @@ function renderReviews() {
   container.innerHTML = '';
   const filtered = userReviews.filter(rev => filterVal === 'all' || rev.rating === filterVal);
 
+  if (!filtered.length) {
+    const isOwn = reviewSchoolFilterId === 'mine' && currentSchool;
+    container.innerHTML = `<div class="empty-state">
+      <i class="fa-solid fa-star"></i>
+      <p>No reviews${isOwn ? ' for ' + escapeHtml(currentSchool.name) : ''} yet.</p>
+      ${currentUserId ? '<button class="primary-btn" onclick="openReviewModal()">+ Add Review</button>' : ''}
+    </div>`;
+    return;
+  }
+
   filtered.forEach(rev => {
+    const isMine = rev.author_id && rev.author_id === currentUserId;
     const card = document.createElement('div');
     card.className = 'info-card';
     card.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; font-weight:700; margin-bottom:6px;">
-        <span style="color:var(--accent-color);">${rev.teacher}</span>
-        <span>${'⭐'.repeat(parseInt(rev.rating))}</span>
+        <span style="color:var(--accent-color);">${escapeHtml(rev.teacher || '')}</span>
+        <span>${'⭐'.repeat(parseInt(rev.rating) || 0)}</span>
       </div>
-      <p style="font-size:0.82rem; color:var(--sub-text-color);">${rev.text}</p>
+      <p style="font-size:0.82rem; color:var(--sub-text-color);">${escapeHtml(rev.text || '')}</p>
       <div style="text-align:right; margin-top:8px;">
-        <i class="fa-solid fa-trash" style="color:#ff3b30; cursor:pointer;" onclick="deleteReview('${rev.id}')"></i>
+        ${isMine ? `<i class="fa-solid fa-trash" style="color:#ff3b30; cursor:pointer;" onclick="deleteReview('${escapeAttr(rev.id)}')"></i>` : ''}
       </div>
     `;
     container.appendChild(card);
@@ -1548,13 +1508,11 @@ function renderReviews() {
 }
 
 async function deleteReview(id) {
-  if (isSupabaseConnected) {
-    await supabaseClient.from('instructor_reviews').delete().eq('id', id);
-  } else {
-    userReviews = userReviews.filter(r => r.id !== id);
-    renderReviews();
-    updateAnalytics();
-  }
+  if (!currentUserId) return showToast('Sign in first.', 'warn');
+  if (!confirm('Delete this review?')) return;
+  const { error } = await supabaseClient.from('instructor_reviews').delete().eq('id', id);
+  if (error) return showToast('Could not delete: ' + error.message, 'error');
+  showToast('Review deleted.', 'success');
 }
 
 function updateAnalytics() {
