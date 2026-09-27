@@ -20,8 +20,9 @@
     (function () {
       var l = 'auto';
       try { l = (JSON.parse(localStorage.getItem('appearance') || '{}').layout) || 'auto'; } catch (e) {}
-      var desktop = l === 'desktop' || (l === 'auto' && window.innerWidth >= 960);
+      var desktop = window.innerWidth >= 700 && (l === 'desktop' || (l === 'auto' && window.innerWidth >= 960));
       document.documentElement.classList.add(desktop ? 'layout-desktop' : 'layout-phone');
+      if (window.innerWidth >= 700) document.documentElement.classList.add('wide-screen');
     })();
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
@@ -64,6 +65,10 @@
         <span class="brand-title">Campus Hub</span>
       </div>
       <div class="header-actions">
+        <!-- Shown in the phone layout on a wide screen: jump back to the computer layout -->
+        <button class="icon-header-btn layout-quick-btn wide-only phone-only" onclick="toggleLayoutQuick()" aria-label="Switch to computer layout" title="Switch to computer layout">
+          <i class="fa-solid fa-desktop"></i>
+        </button>
         <button class="review-trigger-btn phone-only" onclick="switchTab('search-view')"><i class="fa-solid fa-chalkboard-user"></i> Teachers</button>
         <button class="icon-header-btn" onclick="toggleNotifications()" aria-label="Notifications">
           <i class="fa-solid fa-bell"></i>
@@ -369,8 +374,8 @@
           </div>
         </div>
 
-        <!-- Layout: phone vs computer -->
-        <div class="pref-card">
+        <!-- Layout: phone vs computer (only offered on screens wide enough for both) -->
+        <div class="pref-card wide-only" id="layout-card">
           <div class="pref-header">
             <i class="fa-solid fa-display"></i>
             <h3>Layout</h3>
@@ -386,7 +391,7 @@
               <i class="fa-solid fa-desktop"></i><span>Computer</span>
             </button>
           </div>
-          <p class="admin-hint layout-hint">Auto uses the computer layout on wide screens and the phone layout on narrow ones.</p>
+          <p class="admin-hint layout-hint">Auto uses the computer layout on wide screens and the phone layout on narrow ones. You can also switch any time with the button in the sidebar or top bar.</p>
         </div>
 
         <!-- Color Theme Presets -->
@@ -513,6 +518,10 @@
       <button class="nav-btn desktop-only" onclick="openTimerModal()" aria-label="Focus timer">
         <i class="fa-solid fa-stopwatch"></i>
         <span class="nav-label">Focus Timer</span>
+      </button>
+      <button class="nav-btn nav-layout-switch desktop-only" onclick="toggleLayoutQuick()" aria-label="Switch to phone layout" title="Switch to phone layout">
+        <i class="fa-solid fa-mobile-screen"></i>
+        <span class="nav-label">Phone layout</span>
       </button>
       <button class="nav-btn nav-settings" data-view="settings-view" onclick="switchTab('settings-view', this)" aria-label="Settings">
         <i class="fa-solid fa-gear"></i>

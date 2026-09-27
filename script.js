@@ -124,6 +124,7 @@ function applyPalette(palette) {
 const defaultSettings = { lightMode: false, anonymous: true, autoSystemTheme: false };
 const defaultAppearance = { themeName: 'cyber', mode: 'dark', fontSize: 1, density: 'normal', customColors: null, layout: 'auto' };
 const DESKTOP_MIN_WIDTH = 960;   // Auto layout switches to the computer version at this width
+const WIDE_MIN_WIDTH = 700;      // below this (phones) only the phone layout is available
 
 // Human-facing metadata for the theme swatch grid.
 const THEME_META = [
@@ -582,7 +583,11 @@ function setDensity(mode, btn) {
 // a class on <html>, so it can follow the screen width or be picked by hand.
 function applyLayout() {
   const pref = ['auto', 'phone', 'desktop'].includes(appAppearance.layout) ? appAppearance.layout : 'auto';
-  const desktop = pref === 'desktop' || (pref === 'auto' && window.innerWidth >= DESKTOP_MIN_WIDTH);
+  // Phones are always too narrow for the sidebar, so the choice only
+  // applies (and is only offered) on screens at least WIDE_MIN_WIDTH wide.
+  const wide = window.innerWidth >= WIDE_MIN_WIDTH;
+  const desktop = wide && (pref === 'desktop' || (pref === 'auto' && window.innerWidth >= DESKTOP_MIN_WIDTH));
+  document.documentElement.classList.toggle('wide-screen', wide);
   document.documentElement.classList.toggle('layout-desktop', desktop);
   document.documentElement.classList.toggle('layout-phone', !desktop);
   document.querySelectorAll('#layout-segmented .seg-btn').forEach(b => {
@@ -594,6 +599,14 @@ function setLayout(layout) {
   appAppearance.layout = layout;
   saveAppearance();
   applyLayout();
+}
+
+// One-click switch from the sidebar / top bar: flip to the other layout.
+function toggleLayoutQuick() {
+  const toDesktop = !document.documentElement.classList.contains('layout-desktop');
+  setLayout(toDesktop ? 'desktop' : 'phone');
+  showToast(toDesktop ? 'Computer layout on. Switch back from the sidebar or Settings.'
+                      : 'Phone layout on. Switch back from the top bar or Settings.', 'info', 3500);
 }
 
 function resetAppearance() {

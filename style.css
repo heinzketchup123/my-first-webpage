@@ -2727,3 +2727,9 @@ html.layout-desktop .auth-box { max-width: 380px; }
 /* Toasts: centered in the content area, near the bottom */
 html.layout-desktop .toast-container { bottom: 28px; left: calc(50% + 124px); }
 .layout-hint { margin-top: 10px; }
+
+/* Layout switching is only offered on screens wide enough for both layouts */
+html:not(.wide-screen) .wide-only { display: none !important; }
+html.layout-phone.wide-screen .layout-quick-btn { display: inline-flex !important; align-items: center; justify-content: center; }
+html.layout-desktop .nav-layout-switch { margin-top: auto; }
+html.layout-desktop .nav-layout-switch + .nav-settings { margin-top: 0; }
