@@ -2480,3 +2480,9 @@ button.notif-item:hover { border-color: var(--accent-soft-border); }
   justify-content: center;
   border: 2px solid var(--card-bg-solid);
 }
+
+/* ---- Settings rows: text wraps on the left, switch keeps its own space ---- */
+.settings-list li { gap: 16px; padding: 14px 10px; }
+.settings-list li .setting-text { flex: 1; min-width: 0; gap: 2px; }
+.settings-list li .setting-text small { line-height: 1.35; }
+.settings-list li .toggle-btn { flex-shrink: 0; }
