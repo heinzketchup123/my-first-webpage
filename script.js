@@ -149,7 +149,6 @@ let schoolsCache = [];        // all schools known
 let campusFeed = [];
 let studyGroups = [];
 let gpaCourses = [];
-let chatMessages = [];         // (legacy — no longer rendered directly)
 let dmMessages = [];           // messages for the currently-selected friend thread
 let selectedFriendId = null;
 let friends = [];              // [{friend_id, handle, display_name}]
@@ -693,6 +692,7 @@ function updateChatCounter() {
   if (!input || !counter) return;
   const len = input.value.length;
   counter.textContent = `${len}/${CHAT_MAX_LEN}`;
+  counter.classList.toggle('near-limit', len >= CHAT_MAX_LEN - 60);   // only shown near the limit
   counter.classList.toggle('over-limit', len >= CHAT_MAX_LEN);
 }
 
@@ -1185,34 +1185,88 @@ async function fetchDMs(friendId) {
   renderDMThread();
 }
 
+function renderChatThreadHead() {
+  const head = document.getElementById('chat-thread-head');
+  if (!head) return;
+  const f = friends.find(x => x.friend_id === selectedFriendId);
+  if (!f) { head.style.display = 'none'; head.innerHTML = ''; return; }
+  const name = f.display_name || f.handle || 'Friend';
+  head.style.display = 'flex';
+  head.innerHTML = `
+    <span class="friend-avatar">${escapeHtml(name[0].toUpperCase())}</span>
+    <div class="chat-thread-who">
+      <strong>${escapeHtml(name)}</strong>
+      <small>${f.handle ? '@' + escapeHtml(f.handle) : 'Friend'}</small>
+    </div>`;
+}
+
+function chatDayLabel(d) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = new Date(d); day.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - day) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return day.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Messages from the same person within 5 minutes are grouped: tighter
+// spacing, and only the last one in a run shows the time.
+function sameRun(a, b) {
+  if (!a || !b || a.sender_id !== b.sender_id || !a.created_at || !b.created_at) return false;
+  const ta = new Date(a.created_at), tb = new Date(b.created_at);
+  return Math.abs(tb - ta) < 5 * 60e3 && ta.toDateString() === tb.toDateString();
+}
+
 function renderDMThread() {
   const box = document.getElementById('app-chat-messages');
   if (!box) return;
+  renderChatThreadHead();
+
+  const input = document.getElementById('app-chat-input');
+  if (input) {
+    input.disabled = !selectedFriendId;
+    input.placeholder = selectedFriendId ? 'Message…' : 'Pick a friend to message';
+  }
 
   if (!selectedFriendId) {
-    box.innerHTML = `
-      <div class="empty-state">
-        <i class="fa-solid fa-comments"></i>
-        <p>Pick a friend above to start chatting.</p>
-        ${currentUserId ? '' : '<p style="font-size:0.75rem; margin-top:6px;">Guest mode uses demo friends — sign in to message real ones.</p>'}
-      </div>`;
+    box.innerHTML = `<div class="chat-empty">
+      <i class="fa-regular fa-comments"></i>
+      <p>${friends.length ? 'Pick a friend above to start chatting.' : 'Add a friend to start a private conversation.'}</p>
+    </div>`;
     updateChatCounter();
     return;
   }
 
-  const meId = currentUserId || 'guest';
-  box.innerHTML = '';
-  dmMessages.forEach(msg => {
-    const isMine = msg.sender_id === meId;
-    const safeText = renderSafeMessage(String(msg.text || '').slice(0, CHAT_MAX_LEN));
-    const safeTime = escapeHtml(String(msg.time || (msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '')));
-    const el = document.createElement('div');
-    el.className = `chat-bubble ${isMine ? 'chat-bubble-mine' : 'chat-bubble-other'}`;
-    el.innerHTML = `<div class="chat-text">${safeText}</div><span class="chat-time">${safeTime}</span>`;
-    box.appendChild(el);
+  if (!dmMessages.length) {
+    const f = friends.find(x => x.friend_id === selectedFriendId);
+    box.innerHTML = `<div class="chat-empty">
+      <i class="fa-regular fa-hand"></i>
+      <p>Say hi to ${escapeHtml(f?.display_name || f?.handle || 'your friend')}!</p>
+    </div>`;
+    updateChatCounter();
+    return;
+  }
+
+  let html = '';
+  let lastDay = '';
+  dmMessages.forEach((msg, i) => {
+    const when = msg.created_at ? new Date(msg.created_at) : null;
+    if (when && when.toDateString() !== lastDay) {
+      lastDay = when.toDateString();
+      html += `<div class="chat-day"><span>${chatDayLabel(when)}</span></div>`;
+    }
+    const mine = msg.sender_id === currentUserId;
+    const withPrev = sameRun(dmMessages[i - 1], msg);
+    const withNext = sameRun(msg, dmMessages[i + 1]);
+    const time = escapeHtml(when ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : String(msg.time || ''));
+    html += `
+      <div class="chat-bubble ${mine ? 'chat-bubble-mine' : 'chat-bubble-other'}${withPrev ? ' grouped' : ''}${withNext ? ' has-next' : ''}">
+        <div class="chat-text">${renderSafeMessage(String(msg.text || '').slice(0, CHAT_MAX_LEN))}</div>
+        ${withNext ? '' : `<span class="chat-time">${time}</span>`}
+      </div>`;
   });
+  box.innerHTML = html;
   box.scrollTop = box.scrollHeight;
-  updateChatOnlineCount();
   updateChatCounter();
 }
 
@@ -1320,34 +1374,39 @@ function renderFeed() {
     const commentCount = post.comments ? post.comments.length : 0;
     const reactions = post.reactions || {};
     const reactionRow = REACTION_EMOJIS.map(em => `
-      <button class="reaction-chip ${reactions[em] ? 'has-count' : ''}" onclick="reactToPost('${post.id}','${em}')">
+      <button class="reaction-chip ${reactions[em] ? 'has-count' : ''}" onclick="reactToPost('${escapeAttr(post.id)}','${em}')">
         ${em} <span>${reactions[em] || ''}</span>
       </button>
     `).join('');
 
-    const el = document.createElement('div');
-    el.className = 'info-card';
+    const author = String(post.author || 'Student');
+    const anon = /^anonymous/i.test(author);
+    const mine = post.author_id && post.author_id === currentUserId;
+    const pid = escapeAttr(post.id);
+    const el = document.createElement('article');
+    el.className = 'info-card feed-post';
     el.innerHTML = `
-      <div class="post-meta">
-        <span class="post-author">${escapeHtml(post.author)}</span>
-        <span class="post-meta-right">
-          ${escapeHtml(post.created_at ? timeAgo(post.created_at) : (post.time || ''))}
-          ${isAdmin || (post.author_id && post.author_id === currentUserId)
-            ? `<button class="post-delete-btn" onclick="deleteFeedPost('${escapeAttr(post.id)}')" aria-label="Delete post"><i class="fa-solid fa-trash"></i></button>`
-            : ''}
-        </span>
-      </div>
-      <div class="post-title">${escapeHtml(post.title)}</div>
-      <p class="post-body">${escapeHtml(post.text)}</p>
+      <header class="post-head">
+        <span class="post-avatar">${anon ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(author[0].toUpperCase())}</span>
+        <div class="post-who">
+          <strong>${escapeHtml(author)}${mine ? ' <em>(you)</em>' : ''}</strong>
+          <small>${escapeHtml(post.created_at ? timeAgo(post.created_at) : (post.time || ''))}</small>
+        </div>
+        ${isAdmin || mine
+          ? `<button class="post-delete-btn" onclick="deleteFeedPost('${pid}')" aria-label="Delete post"><i class="fa-solid fa-trash"></i></button>`
+          : ''}
+      </header>
+      <h4 class="post-title">${escapeHtml(post.title)}</h4>
+      <p class="post-body">${renderSafeMessage(post.text || '')}</p>
       <div class="reaction-row">${reactionRow}</div>
-      <div class="post-actions">
-        <span class="post-action-btn ${post.liked ? 'liked' : ''}" onclick="toggleLikePost('${post.id}')">
-          <i class="fa-solid fa-heart"></i> ${post.likes || 0}
-        </span>
-        <span class="post-action-btn" onclick="openCommentsModal('${post.id}')">
-          <i class="fa-solid fa-comment"></i> ${commentCount} Comments
-        </span>
-      </div>
+      <footer class="post-actions">
+        <button class="post-action-btn ${post.liked ? 'liked' : ''}" onclick="toggleLikePost('${pid}')" aria-label="Like">
+          <i class="fa-${post.liked ? 'solid' : 'regular'} fa-heart"></i> ${post.likes || 0}
+        </button>
+        <button class="post-action-btn" onclick="openCommentsModal('${pid}')">
+          <i class="fa-regular fa-comment"></i> ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}
+        </button>
+      </footer>
     `;
     container.appendChild(el);
   });
@@ -1362,23 +1421,6 @@ function updateNotifBadge() {
   } else {
     badge.style.display = 'none';
   }
-}
-
-function updateChatOnlineCount() {
-  const el = document.getElementById('chat-online-num');
-  if (!el) return;
-  // Approximate "active now" as unique authors who sent a message in the
-  // last 15 minutes. Real presence would need Supabase Realtime presence
-  // channels; this is a light-weight proxy that updates for free with chat.
-  const cutoff = Date.now() - 15 * 60 * 1000;
-  const seen = new Set();
-  (chatMessages || []).forEach(m => {
-    const t = m.created_at ? Date.parse(m.created_at) : NaN;
-    if (!isNaN(t) && t >= cutoff) seen.add(m.user);
-  });
-  // Always count "you" as active once logged in.
-  if (currentUser) seen.add('__self__');
-  el.textContent = String(Math.max(1, seen.size));
 }
 
 async function toggleLikePost(id) {

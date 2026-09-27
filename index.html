@@ -123,9 +123,14 @@
         <!-- Campus Activity Feed -->
         <div class="feed-section">
           <div class="section-header">
-            <h3>Campus Live Feed</h3>
-            <button class="text-btn" onclick="openNewPostModal()">+ New Post</button>
+            <h3>School Feed</h3>
           </div>
+
+          <button class="feed-composer" onclick="openNewPostModal()">
+            <span class="post-avatar"><i class="fa-solid fa-pen"></i></span>
+            <span class="feed-composer-text">Share something with your school…</span>
+            <span class="feed-composer-btn">Post</span>
+          </button>
 
           <div class="filter-chips">
             <button class="chip active" onclick="setFeedSort('new', this)">Newest</button>
@@ -141,11 +146,13 @@
 
       <!-- Tab 2: Teacher Directory -->
       <section id="search-view" class="view">
-        <div class="chat-header-row">
-          <h1 class="page-title" style="margin:0;">Teachers</h1>
-          <button class="review-trigger-btn" onclick="openAddTeacherModal()">+ Add Teacher</button>
+        <div class="page-header">
+          <div class="page-header-text">
+            <h1 class="page-title">Teachers</h1>
+            <p class="description">Reviews, course requirements and notes from students who've had them.</p>
+          </div>
+          <button class="review-trigger-btn" onclick="openAddTeacherModal()"><i class="fa-solid fa-plus"></i> Add Teacher</button>
         </div>
-        <p class="description">Reviews, course requirements and notes from students who've had them.</p>
 
         <div class="search-input-wrapper">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
@@ -196,11 +203,13 @@
 
       <!-- Tab 3: Study Groups -->
       <section id="groups-view" class="view">
-        <div class="chat-header-row">
-          <h1 class="page-title" style="margin:0;">Study Groups</h1>
-          <button class="review-trigger-btn" onclick="openCreateGroupModal()">+ New Group</button>
+        <div class="page-header">
+          <div class="page-header-text">
+            <h1 class="page-title">Study Groups</h1>
+            <p class="description">Find people in your classes to study with, or start your own group.</p>
+          </div>
+          <button class="review-trigger-btn" onclick="openCreateGroupModal()"><i class="fa-solid fa-plus"></i> New Group</button>
         </div>
-        <p class="description">Groups scoped to your school. Anyone can create one — anyone in your school can join.</p>
 
         <div class="filter-chips">
           <button class="chip active" onclick="filterGroups('all', this)">All Groups</button>
@@ -215,38 +224,43 @@
 
       <!-- Tab 4: Direct Messages (friends-only) -->
       <section id="chat-view" class="view">
-        <div class="chat-header-row">
-          <h1 class="page-title" style="margin:0;">Messages</h1>
-          <button class="icon-header-btn" onclick="openFriendsModal()" aria-label="Manage friends">
-            <i class="fa-solid fa-user-group"></i>
+        <div class="page-header">
+          <div class="page-header-text">
+            <h1 class="page-title">Messages</h1>
+            <p class="description">Private messages with your friends.</p>
+          </div>
+          <button class="review-trigger-btn friends-open-btn" onclick="openFriendsModal()" aria-label="Friends">
+            <i class="fa-solid fa-user-plus"></i> Friends
             <span id="friends-badge" class="notif-badge" style="display:none;">0</span>
           </button>
         </div>
-        <p class="description">Private direct messages between friends.</p>
 
         <div id="friends-strip" class="friends-strip">
           <!-- friend chips render here -->
         </div>
 
         <div class="chat-container">
+          <div id="chat-thread-head" class="chat-thread-head" style="display:none;"></div>
           <div id="app-chat-messages" class="chat-messages-box">
             <!-- DM thread renders here -->
           </div>
-          <form id="app-chat-form" class="chat-form-row" onsubmit="sendDM(event)">
-            <input type="text" id="app-chat-input" class="auth-input" placeholder="Message..." required autocomplete="off" maxlength="280" oninput="updateChatCounter()" />
-            <button type="submit" class="primary-btn chat-send-btn">Send</button>
+          <form id="app-chat-form" class="chat-compose" onsubmit="sendDM(event)">
+            <input type="text" id="app-chat-input" class="chat-input" placeholder="Message..." required autocomplete="off" maxlength="280" oninput="updateChatCounter()" />
+            <span id="chat-char-counter" class="chat-char-counter">0/280</span>
+            <button type="submit" class="chat-send-btn" aria-label="Send"><i class="fa-solid fa-paper-plane"></i></button>
           </form>
-          <div id="chat-char-counter" class="chat-char-counter">0/280</div>
         </div>
       </section>
 
       <!-- Tab 5: Event Calendar -->
       <section id="events-view" class="view">
-        <div class="chat-header-row">
-          <h1 class="page-title" style="margin:0;">Calendar</h1>
-          <button class="review-trigger-btn" onclick="openEventModal()">+ Add Event</button>
+        <div class="page-header">
+          <div class="page-header-text">
+            <h1 class="page-title">Calendar</h1>
+            <p class="description">Events and deadlines at your school.</p>
+          </div>
+          <button class="review-trigger-btn" onclick="openEventModal()"><i class="fa-solid fa-plus"></i> Add Event</button>
         </div>
-        <p class="description">Events and deadlines at your school.</p>
 
         <div class="cal-card">
           <div class="cal-head">
@@ -267,7 +281,12 @@
 
       <!-- Tab 6: GPA Calculator -->
       <section id="gpa-view" class="view">
-        <h1 class="page-title">GPA Calculator</h1>
+        <div class="page-header">
+          <div class="page-header-text">
+            <h1 class="page-title">GPA Calculator</h1>
+            <p class="description">Estimate your GPA from your current grades. Saved on this device.</p>
+          </div>
+        </div>
         
         <div class="gpa-dashboard-card">
           <div class="gpa-score" id="calculated-gpa">0.00</div>
@@ -286,7 +305,12 @@
 
       <!-- Tab 8: Settings & Appearance -->
       <section id="settings-view" class="view">
-        <h1 class="page-title">Settings</h1>
+        <div class="page-header">
+          <div class="page-header-text">
+            <h1 class="page-title">Settings</h1>
+            <p class="description">Your school, appearance and privacy.</p>
+          </div>
+        </div>
 
         <!-- School -->
         <div class="pref-card">
