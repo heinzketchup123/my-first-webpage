@@ -16,19 +16,110 @@ if (SUPABASE_URL !== "YOUR_SUPABASE_URL" && typeof supabase !== 'undefined') {
   }
 }
 
-// Storage Keys
-const THEME_PRESETS = {
-  cyber: { main: '#00f3ff', light: '#0088cc', card: 'rgba(0, 243, 255, 0.06)', nav: 'rgba(10, 20, 30, 0.95)', bg: '#080d14', textOnAccent: '#000000' },
-  synthwave: { main: '#ff007f', light: '#cc0066', card: 'rgba(255, 0, 127, 0.08)', nav: 'rgba(25, 10, 30, 0.95)', bg: '#120518', textOnAccent: '#ffffff' },
-  matrix: { main: '#00ff66', light: '#00993d', card: 'rgba(0, 255, 102, 0.06)', nav: 'rgba(5, 20, 10, 0.95)', bg: '#040d06', textOnAccent: '#000000' },
-  dracula: { main: '#bd93f9', light: '#7243c2', card: 'rgba(189, 147, 249, 0.08)', nav: 'rgba(24, 20, 37, 0.95)', bg: '#181425', textOnAccent: '#ffffff' },
-  nordic: { main: '#0088cc', light: '#5e81ac', card: 'rgba(136, 192, 208, 0.08)', nav: 'rgba(20, 28, 38, 0.95)', bg: '#0f141c', textOnAccent: '#ffffff' },
-  orange: { main: '#ff7b00', light: '#d95300', card: 'rgba(255, 123, 0, 0.08)', nav: 'rgba(26, 20, 15, 0.95)', bg: '#140e0a', textOnAccent: '#ffffff' },
-  crimson: { main: '#ff4757', light: '#d63031', card: 'rgba(255, 71, 87, 0.08)', nav: 'rgba(30, 12, 15, 0.95)', bg: '#14080a', textOnAccent: '#ffffff' },
-  gold: { main: '#d9822b', light: '#b36200', card: 'rgba(255, 177, 66, 0.08)', nav: 'rgba(30, 24, 12, 0.95)', bg: '#141008', textOnAccent: '#ffffff' },
-  emerald: { main: '#10ac84', light: '#0f9b74', card: 'rgba(46, 213, 115, 0.08)', nav: 'rgba(12, 30, 20, 0.95)', bg: '#08140c', textOnAccent: '#ffffff' },
-  monochrome: { main: '#222222', light: '#444444', card: 'rgba(255, 255, 255, 0.08)', nav: 'rgba(20, 20, 20, 0.95)', bg: '#0a0a0a', textOnAccent: '#ffffff' }
+// Each theme has a separate palette per mode. Accents were picked so text in
+// the accent color stays readable (at least 4.5:1 contrast) on that mode's
+// background: bright accents on dark, deeper versions of the same hue on light.
+// `on` is the text color used on solid accent buttons.
+const THEMES = {
+  cyber:      { dark: { accent: '#22d3ee', bg: '#070b11', on: '#041318' }, light: { accent: '#0e7490', bg: '#f2f7fa', on: '#ffffff' } },
+  synthwave:  { dark: { accent: '#ff5fae', bg: '#0f0714', on: '#1e0612' }, light: { accent: '#be185d', bg: '#fbf3f7', on: '#ffffff' } },
+  matrix:     { dark: { accent: '#4ade80', bg: '#050c08', on: '#03140a' }, light: { accent: '#15803d', bg: '#f2f8f4', on: '#ffffff' } },
+  dracula:    { dark: { accent: '#c4a1ff', bg: '#120f1c', on: '#1a1033' }, light: { accent: '#6d28d9', bg: '#f6f3fc', on: '#ffffff' } },
+  nordic:     { dark: { accent: '#88c0d0', bg: '#0d131b', on: '#0c1a22' }, light: { accent: '#2f6690', bg: '#f2f5f8', on: '#ffffff' } },
+  orange:     { dark: { accent: '#fb923c', bg: '#110c08', on: '#1f0f03' }, light: { accent: '#c2410c', bg: '#fbf5f1', on: '#ffffff' } },
+  crimson:    { dark: { accent: '#fb7185', bg: '#120709', on: '#22060c' }, light: { accent: '#be123c', bg: '#fbf3f4', on: '#ffffff' } },
+  gold:       { dark: { accent: '#fbbf24', bg: '#100d06', on: '#1d1502' }, light: { accent: '#a16207', bg: '#faf7ef', on: '#ffffff' } },
+  emerald:    { dark: { accent: '#34d399', bg: '#06100c', on: '#03170f' }, light: { accent: '#047857', bg: '#f1f8f5', on: '#ffffff' } },
+  monochrome: { dark: { accent: '#e5e7eb', bg: '#0a0a0b', on: '#111113' }, light: { accent: '#18181b', bg: '#f4f4f5', on: '#ffffff' } }
 };
+
+// ---- small color helpers (hex in, hex/rgba out) ----
+function hexToRgb(h) { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function rgbToHex(rgb) { return '#' + rgb.map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join(''); }
+function mixHex(a, b, t) { const A = hexToRgb(a), B = hexToRgb(b); return rgbToHex(A.map((v, i) => v + (B[i] - v) * t)); }
+function rgbaOf(hex, alpha) { const [r, g, b] = hexToRgb(hex); return `rgba(${r}, ${g}, ${b}, ${alpha})`; }
+function relLum(hex) {
+  const w = [0.2126, 0.7152, 0.0722];
+  return hexToRgb(hex).map(v => v / 255).map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+    .reduce((sum, c, i) => sum + c * w[i], 0);
+}
+function contrastRatio(a, b) { const [x, y] = [relLum(a), relLum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); }
+// Nudge a color toward `target` until it has at least `min` contrast against `bg`.
+function ensureContrast(hex, bg, min, target) {
+  let c = hex;
+  for (let i = 0; i < 20 && contrastRatio(c, bg) < min; i++) c = mixHex(c, target, 0.1);
+  return c;
+}
+function bestTextOn(hex) { return contrastRatio('#ffffff', hex) >= contrastRatio('#0b0f14', hex) ? '#ffffff' : '#0b0f14'; }
+
+// Every color token the stylesheet uses, for one theme in one mode. A custom
+// accent is adjusted per mode so it stays readable in both.
+function buildPalette(themeName, customAccent, light) {
+  const t = THEMES[themeName] || THEMES.cyber;
+  const base = light ? t.light : t.dark;
+  const bg = base.bg;
+  let accent = base.accent;
+  let on = base.on;
+  if (customAccent && /^#[0-9a-f]{6}$/i.test(customAccent)) {
+    accent = light
+      ? ensureContrast(customAccent, '#ffffff', 4.8, '#000000')
+      : ensureContrast(customAccent, mixHex(bg, '#ffffff', 0.08), 4.8, '#ffffff');
+    on = bestTextOn(accent);
+  }
+
+  const shared = {
+    '--bg-color': bg,
+    '--accent-color': accent,
+    '--text-on-accent': on
+  };
+  if (light) {
+    return {
+      ...shared,
+      '--card-bg': '#ffffff',
+      '--card-bg-solid': '#ffffff',
+      '--input-bg': mixHex(bg, '#0f172a', 0.035),
+      '--card-border': 'rgba(15, 23, 42, 0.09)',
+      '--nav-bg': 'rgba(255, 255, 255, 0.86)',
+      '--main-text-color': '#0f172a',
+      '--sub-text-color': '#5a6477',
+      '--accent-light': mixHex(accent, '#ffffff', 0.18),
+      '--accent-muted': rgbaOf(accent, 0.1),
+      '--accent-soft-border': rgbaOf(accent, 0.35),
+      '--glow-shadow': `0 6px 18px -8px ${rgbaOf(accent, 0.5)}`,
+      '--shadow-card': '0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -14px rgba(15, 23, 42, 0.16)',
+      '--shadow-pop': '0 24px 60px -20px rgba(15, 23, 42, 0.35)',
+      '--bg-glow': rgbaOf(accent, 0.08),
+      '--overlay-bg': 'rgba(15, 23, 42, 0.35)',
+      '--danger': '#dc2626', '--success': '#15803d', '--warning': '#b45309', '--star': '#d97706'
+    };
+  }
+  return {
+    ...shared,
+    '--card-bg': 'rgba(255, 255, 255, 0.045)',
+    '--card-bg-solid': mixHex(bg, '#ffffff', 0.055),
+    '--input-bg': 'rgba(255, 255, 255, 0.07)',
+    '--card-border': 'rgba(255, 255, 255, 0.085)',
+    '--nav-bg': rgbaOf(mixHex(bg, '#ffffff', 0.07), 0.88),
+    '--main-text-color': '#edf1f7',
+    '--sub-text-color': '#9ba5b7',
+    '--accent-light': mixHex(accent, '#ffffff', 0.25),
+    '--accent-muted': rgbaOf(accent, 0.14),
+    '--accent-soft-border': rgbaOf(accent, 0.4),
+    '--glow-shadow': `0 8px 22px -10px ${rgbaOf(accent, 0.6)}`,
+    '--shadow-card': '0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 28px -18px rgba(0, 0, 0, 0.7)',
+    '--shadow-pop': '0 30px 70px -20px rgba(0, 0, 0, 0.75)',
+    '--bg-glow': rgbaOf(accent, 0.12),
+    '--overlay-bg': 'rgba(2, 4, 8, 0.6)',
+    '--danger': '#ff6b6b', '--success': '#34d399', '--warning': '#fbbf24', '--star': '#fbbf24'
+  };
+}
+
+function applyPalette(palette) {
+  const root = document.documentElement;
+  Object.entries(palette).forEach(([k, v]) => root.style.setProperty(k, v));
+  // Phone status bar / browser chrome color follows the theme.
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', palette['--bg-color']);
+}
 
 const defaultSettings = { lightMode: false, anonymous: true, autoSystemTheme: false };
 const defaultAppearance = { themeName: 'cyber', mode: 'dark', fontSize: 1, density: 'normal', customColors: null };
@@ -66,7 +157,6 @@ let pendingIncoming = [];      // [{id, requester_id, handle, display_name}]
 let pendingOutgoing = [];      // [{id, addressee_id, handle, display_name}]
 let profileMap = {};           // user_id -> {handle, display_name}
 let appSettings = { ...defaultSettings };
-let appTheme = { ...THEME_PRESETS.cyber };
 
 let currentPostCommentId = null;
 let realtimeChannel = null;
@@ -360,10 +450,8 @@ function applyAppearance() {
   appSettings.lightMode = wantsLight;
   document.body.classList.toggle('light-mode', wantsLight);
 
-  // 2) Theme palette (custom colors override the preset if present)
-  const preset = THEME_PRESETS[appAppearance.themeName] || THEME_PRESETS.cyber;
-  const config = appAppearance.customColors ? { ...preset, ...appAppearance.customColors } : preset;
-  applyPresetConfig(config);
+  // 2) Theme palette for the current mode (a custom accent overrides the theme's)
+  applyPalette(buildPalette(appAppearance.themeName, customAccent(), wantsLight));
 
   // 3) Font size scale (0/1/2 → small/medium/large). Applied to <html>
   // because the stylesheet sizes text in rem, which is relative to the root.
@@ -392,37 +480,27 @@ function applyAppearance() {
   syncCustomColorPickers();
 }
 
-function applyPresetConfig(config) {
-  const root = document.documentElement;
-  root.style.setProperty('--accent-color', config.main);
-  root.style.setProperty('--accent-light', config.light);
-  root.style.setProperty('--text-on-accent', config.textOnAccent || '#ffffff');
-
-  if (!appSettings.lightMode) {
-    root.style.setProperty('--card-bg', config.card);
-    root.style.setProperty('--nav-bg', config.nav);
-    root.style.setProperty('--bg-color', config.bg);
-  } else {
-    // In light mode, only the accent should follow the theme — clear
-    // any prior dark-mode overrides so the light palette shows through.
-    root.style.removeProperty('--card-bg');
-    root.style.removeProperty('--nav-bg');
-    root.style.removeProperty('--bg-color');
-  }
-  appTheme = { ...config };
+// Saved custom accent, if any (older saves stored it as `main`).
+function customAccent() {
+  const c = appAppearance.customColors;
+  return c ? (c.accent || c.main || null) : null;
 }
 
 function renderThemeSwatchGrid() {
   const grid = document.getElementById('theme-swatch-grid');
   if (!grid) return;
+  const light = !!appSettings.lightMode;
   grid.innerHTML = THEME_META.map(t => {
-    const p = THEME_PRESETS[t.key];
-    const active = t.key === appAppearance.themeName && !appAppearance.customColors;
+    // Preview each theme as it will actually look in the current mode.
+    const p = buildPalette(t.key, null, light);
+    const bg = p['--bg-color'], accent = p['--accent-color'];
+    const surface = light ? '#ffffff' : mixHex(bg, '#ffffff', 0.09);
+    const active = t.key === appAppearance.themeName && !customAccent();
     return `
       <button class="theme-swatch ${active ? 'active' : ''}" onclick="applyTheme('${t.key}')" aria-label="${t.label} theme">
-        <span class="swatch-preview" style="background:${p.bg};">
-          <span class="swatch-dot" style="background:${p.main}; box-shadow:0 0 8px ${p.main};"></span>
-          <span class="swatch-dot" style="background:${p.light};"></span>
+        <span class="swatch-preview" style="background:${bg};">
+          <span class="swatch-bar" style="background:${surface};"><span style="background:${accent};"></span></span>
+          <span class="swatch-dot" style="background:${accent};"></span>
         </span>
         <span class="swatch-label">${t.label}</span>
         ${active ? '<i class="fa-solid fa-check swatch-check"></i>' : ''}
@@ -432,18 +510,11 @@ function renderThemeSwatchGrid() {
 }
 
 function syncCustomColorPickers() {
-  const preset = THEME_PRESETS[appAppearance.themeName] || THEME_PRESETS.cyber;
-  const src = appAppearance.customColors || preset;
-  const set = (id, val) => { const el = document.getElementById(id); if (el && /^#[0-9a-fA-F]{6}$/.test(val)) el.value = val; };
-  set('picker-main', src.main);
-  set('picker-light', src.light);
-  // card/nav are rgba by default; show a reasonable hex fallback
-  set('picker-card', hexish(src.card, '#001a24'));
-  set('picker-nav',  hexish(src.nav,  '#081018'));
-}
-
-function hexish(val, fallback) {
-  return typeof val === 'string' && /^#[0-9a-fA-F]{6}$/.test(val) ? val : fallback;
+  const picker = document.getElementById('picker-main');
+  const theme = THEMES[appAppearance.themeName] || THEMES.cyber;
+  if (picker) picker.value = customAccent() || theme[appSettings.lightMode ? 'light' : 'dark'].accent;
+  const reset = document.getElementById('custom-accent-reset');
+  if (reset) reset.style.display = customAccent() ? 'inline-flex' : 'none';
 }
 
 function applyTheme(name) {
@@ -454,11 +525,14 @@ function applyTheme(name) {
 }
 
 function updateTheme() {
-  const main = document.getElementById('picker-main').value;
-  const light = document.getElementById('picker-light').value;
-  const card = document.getElementById('picker-card').value;
-  const nav = document.getElementById('picker-nav').value;
-  appAppearance.customColors = { main, light, card, nav, bg: appTheme.bg, textOnAccent: '#ffffff' };
+  const accent = document.getElementById('picker-main').value;
+  appAppearance.customColors = { accent };
+  saveAppearance();
+  applyAppearance();
+}
+
+function resetCustomAccent() {
+  appAppearance.customColors = null;
   saveAppearance();
   applyAppearance();
 }

@@ -1,32 +1,38 @@
+/* Defaults = Cyber / dark. At runtime script.js (buildPalette) overwrites
+   these on <html> for the chosen theme and light/dark mode. */
 :root {
-  --bg-color: #080d14;
-  --card-bg: rgba(0, 243, 255, 0.06);
-  --card-border: rgba(255, 255, 255, 0.12);
-  --accent-color: #00f3ff;
-  --accent-light: #80f9ff;
-  --accent-muted: rgba(0, 243, 255, 0.15);
-  --text-on-accent: #000000;
-  --nav-bg: rgba(10, 20, 30, 0.95);
-  --main-text-color: #f0f6fc;
-  --sub-text-color: #919bb0;
-  --input-bg: rgba(255, 255, 255, 0.06);
-  --glow-shadow: 0 0 15px rgba(0, 243, 255, 0.35);
+  --bg-color: #070b11;
+  --card-bg: rgba(255, 255, 255, 0.045);
+  --card-bg-solid: #10151a;
+  --card-border: rgba(255, 255, 255, 0.085);
+  --accent-color: #22d3ee;
+  --accent-light: #59def2;
+  --accent-muted: rgba(34, 211, 238, 0.14);
+  --accent-soft-border: rgba(34, 211, 238, 0.4);
+  --text-on-accent: #041318;
+  --nav-bg: rgba(24, 29, 34, 0.88);
+  --main-text-color: #edf1f7;
+  --sub-text-color: #9ba5b7;
+  --input-bg: rgba(255, 255, 255, 0.07);
+  --glow-shadow: 0 8px 22px -10px rgba(34, 211, 238, 0.6);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 28px -18px rgba(0, 0, 0, 0.7);
+  --shadow-pop: 0 30px 70px -20px rgba(0, 0, 0, 0.75);
+  --bg-glow: rgba(34, 211, 238, 0.12);
+  --overlay-bg: rgba(2, 4, 8, 0.6);
+  --danger: #ff6b6b;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --star: #fbbf24;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --glass-blur: blur(12px);
   /* Tells the browser to draw its own controls (dropdown lists, date/time
      pickers, autocomplete, scrollbars) dark to match. */
   color-scheme: dark;
 }
 
+/* Light-mode colors are set by script.js per theme; only the native-control
+   scheme lives here. */
 body.light-mode {
-  --bg-color: #f2f4f7;
-  --card-bg: #ffffff;
-  --card-border: #d0d7de;
-  --nav-bg: #ffffff;
-  --main-text-color: #000000;
-  --sub-text-color: #333333;
-  --input-bg: #ffffff;
-  --text-on-accent: #ffffff;
-  --glow-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   color-scheme: light;
 }
 
@@ -800,7 +806,6 @@ body.density-spacious .stack-list { gap: 18px; }
   border-radius: 14px;
 }
 
-body.light-mode .nav-btn { color: #555555; }
 
 .nav-btn:hover {
   color: var(--accent-color);
@@ -1786,3 +1791,314 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.4; }
 }
+
+/* =====================================================================
+   DESIGN REFRESH
+   Calm layered surfaces, readable accents, softer depth. All colors come
+   from the tokens script.js sets for the current theme + light/dark mode.
+   This layer is last on purpose so it overrides the older neon styles.
+   ===================================================================== */
+
+* { font-family: var(--font); }
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv11', 'ss01';
+  color: var(--main-text-color);
+}
+::selection { background: var(--accent-muted); color: var(--main-text-color); }
+::-webkit-scrollbar-thumb { background: var(--card-border); }
+
+/* Soft accent light in the background instead of glowing every element */
+.mobile-frame {
+  background:
+    radial-gradient(120% 55% at 0% 0%, var(--bg-glow), transparent 55%),
+    radial-gradient(90% 45% at 100% 100%, var(--bg-glow), transparent 60%),
+    var(--bg-color);
+}
+@media (min-width: 500px) and (min-height: 600px) {
+  .mobile-frame {
+    border: 1px solid var(--card-border);
+    border-radius: 38px;
+    box-shadow: 0 0 0 8px var(--input-bg), var(--shadow-pop);
+  }
+}
+
+/* ---- Type: neutral headings, accent reserved for emphasis ---- */
+.page-title, .hero-title, .modal-title, .auth-form h2, .notif-header,
+.section-header h3, .custom-title, .teacher-hero-text h1 {
+  color: var(--main-text-color);
+  letter-spacing: -0.02em;
+}
+.page-title { font-size: 1.55rem; font-weight: 800; }
+.hero-title { font-size: 1.35rem; font-weight: 800; line-height: 1.2; }
+.section-header h3 { font-size: 1rem; font-weight: 800; }
+.auth-form h2 { font-size: 1.8rem; font-weight: 900; }
+.modal-title { font-weight: 800; }
+.sub-heading {
+  color: var(--accent-color);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+.description, .auth-sub { color: var(--sub-text-color); line-height: 1.45; }
+
+/* ---- Header ---- */
+.brand-badge { letter-spacing: 0.08em; padding: 3px 7px; border-radius: 7px; }
+.brand-title { letter-spacing: -0.01em; }
+.icon-header-btn {
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  color: var(--main-text-color);
+}
+.icon-header-btn:hover, .icon-header-btn:active {
+  background: var(--accent-muted);
+  border-color: var(--accent-soft-border);
+  color: var(--accent-color);
+  transform: none;
+  box-shadow: none;
+}
+.review-trigger-btn { border-radius: 999px; padding: 8px 14px; box-shadow: var(--glow-shadow); }
+.review-trigger-btn:hover, .review-trigger-btn:active { transform: translateY(-1px); filter: brightness(1.06); }
+
+/* ---- Surfaces ---- */
+.info-card, .hero-card, .pref-card, .cal-card, .teacher-hero, .chat-container,
+.gpa-dashboard-card, .teacher-card, .school-row, .friend-chip, .tool-btn {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-card);
+}
+.info-card { border-radius: 18px; }
+.info-card:hover, .teacher-card:hover, .school-row:hover { border-color: var(--accent-soft-border); }
+.hero-card {
+  border-radius: 22px;
+  padding: 18px 18px 16px;
+  background: linear-gradient(140deg, var(--accent-muted) 0%, transparent 58%), var(--card-bg);
+}
+.stat-box, .tstat {
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: none;
+}
+.stat-number { letter-spacing: -0.02em; }
+.empty-state {
+  background: transparent;
+  border: 1.5px dashed var(--card-border);
+  box-shadow: none;
+}
+.empty-state i { color: var(--accent-color); opacity: 0.85; }
+.empty-state p { color: var(--sub-text-color); }
+
+/* ---- Buttons ---- */
+.primary-btn {
+  background: var(--accent-color);
+  color: var(--text-on-accent);
+  border-radius: 12px;
+  font-weight: 700;
+  box-shadow: var(--glow-shadow);
+}
+.primary-btn:hover, .primary-btn:focus { filter: brightness(1.06); box-shadow: var(--glow-shadow); }
+.primary-btn:disabled { opacity: 0.5; box-shadow: none; filter: none; cursor: not-allowed; }
+.secondary-btn {
+  background: var(--input-bg);
+  color: var(--main-text-color);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+}
+.secondary-btn:hover {
+  border-color: var(--accent-soft-border);
+  color: var(--accent-color);
+  background: var(--accent-muted);
+}
+/* A clicked button shouldn't stay highlighted; keyboard focus still shows. */
+.secondary-btn:focus:not(:focus-visible):not(.active-state):not(:hover) {
+  border-color: var(--card-border);
+  color: var(--main-text-color);
+  background: var(--input-bg);
+}
+/* "Selected" state (Leave / Going / Pause): tinted, not a loud solid block */
+.secondary-btn.active-state {
+  background: var(--accent-muted);
+  color: var(--accent-color);
+  border-color: var(--accent-soft-border);
+}
+.text-btn { color: var(--accent-color); }
+.danger-text { color: var(--danger) !important; }
+
+/* ---- Inputs ---- */
+.auth-input, .search-bar, .mini-select {
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  color: var(--main-text-color);
+}
+.auth-input::placeholder, .search-bar::placeholder { color: var(--sub-text-color); opacity: 0.8; }
+.auth-input:focus, .search-bar:focus, .mini-select:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+  outline: none;
+}
+.mini-select { padding: 8px 10px; border-radius: 10px; }
+
+/* ---- Chips, segmented controls, tabs ---- */
+.chip {
+  background: var(--input-bg);
+  color: var(--sub-text-color);
+  border: 1px solid var(--card-border);
+}
+.chip:hover { color: var(--main-text-color); border-color: var(--accent-soft-border); }
+.chip.active {
+  background: var(--accent-color);
+  color: var(--text-on-accent);
+  border-color: transparent;
+  box-shadow: none;
+}
+.segmented, .teacher-tabs, .friends-tabs { background: var(--input-bg); border-color: var(--card-border); }
+.seg-btn.active, .teacher-tab.active, .friends-tab.active {
+  box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.35);
+}
+.tt-count { background: rgba(0, 0, 0, 0.14); }
+.teacher-tab:not(.active) .tt-count { background: var(--card-border); }
+
+/* ---- Toggle ---- */
+.toggle-btn { background: var(--input-bg); border: 1px solid var(--card-border); }
+.toggle-btn::after { top: 2px; left: 2px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+.toggle-btn.active { background: var(--accent-color); border-color: transparent; box-shadow: none; }
+
+/* ---- Quick tools ---- */
+.tool-btn { border-radius: 16px; padding: 12px 4px 10px; gap: 6px; }
+.tool-btn i {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: var(--accent-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+.tool-btn:hover, .tool-btn:active {
+  transform: translateY(-2px);
+  background: var(--card-bg);
+  border-color: var(--accent-soft-border);
+  box-shadow: var(--shadow-card);
+}
+.tool-btn.pomo-live { border-color: var(--accent-soft-border); box-shadow: var(--glow-shadow); }
+
+/* ---- Bottom nav ---- */
+.bottom-nav {
+  background: var(--nav-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+}
+.nav-btn { color: var(--sub-text-color); }
+.nav-btn:hover { background: transparent; color: var(--main-text-color); }
+.nav-btn i {
+  width: 46px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.nav-btn.active i {
+  background: var(--accent-muted);
+  color: var(--accent-color);
+  filter: none;
+  transform: none;
+}
+.nav-label { text-transform: none; letter-spacing: 0; font-size: 0.64rem; font-weight: 600; }
+.nav-btn.active .nav-label { color: var(--accent-color); font-weight: 700; }
+
+/* ---- Overlays: modals, drawer, toasts ---- */
+.modal-overlay {
+  background: var(--overlay-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.modal-content {
+  background: var(--card-bg-solid);
+  border: 1px solid var(--card-border);
+  border-radius: 22px;
+  box-shadow: var(--shadow-pop);
+}
+.notif-drawer { background: var(--card-bg-solid); box-shadow: var(--shadow-pop); }
+.notif-item { background: var(--input-bg); }
+.toast { background: var(--card-bg-solid); box-shadow: var(--shadow-pop); }
+.auth-overlay {
+  background:
+    radial-gradient(90% 50% at 50% 0%, var(--bg-glow), transparent 60%),
+    var(--bg-color);
+}
+
+/* ---- Chat ---- */
+.chat-bubble-other { background: var(--input-bg); border: 1px solid var(--card-border); }
+.chat-bubble-mine { box-shadow: var(--glow-shadow); }
+
+/* ---- Feed reactions ---- */
+.reaction-chip { background: var(--input-bg); }
+.reaction-chip.has-count { background: var(--accent-muted); border-color: var(--accent-soft-border); }
+
+/* ---- Theme swatches: previews show the current mode ---- */
+.theme-swatch { background: var(--input-bg); box-shadow: none; }
+.theme-swatch.active { border-color: var(--accent-color); box-shadow: 0 0 0 3px var(--accent-muted); }
+.swatch-preview {
+  position: relative;
+  border: 1px solid var(--card-border);
+  justify-content: flex-start;
+  padding: 0 8px;
+  gap: 6px;
+}
+.swatch-bar {
+  flex: 1;
+  height: 12px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 3px;
+}
+.swatch-bar span { width: 40%; height: 4px; border-radius: 2px; }
+.swatch-dot { width: 12px; height: 12px; flex-shrink: 0; box-shadow: none; }
+
+/* ---- Custom accent ---- */
+.custom-accent-row { display: flex; gap: 12px; align-items: center; }
+.custom-accent-row input[type="color"] {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 3px;
+  background: var(--input-bg);
+  cursor: pointer;
+}
+.custom-accent-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.custom-accent-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 10px; }
+.custom-accent-hint { margin: 0; }
+.custom-accent-reset { width: 100%; margin-top: 10px; display: inline-flex; justify-content: center; gap: 6px; align-items: center; }
+
+/* ---- Status colors from tokens (readable in light mode too) ---- */
+.friends-status.ok { color: var(--success); }
+.friends-status.err, .chat-char-counter.over-limit { color: var(--danger); }
+.post-action-btn.liked { color: var(--danger); }
+.stars { color: var(--star); }
+.tstat-num.r-good { color: var(--success); }
+.tstat-num.r-ok   { color: var(--warning); }
+.tstat-num.r-bad  { color: var(--danger); }
+.toast-success i { color: var(--success); }
+.toast-warn i    { color: var(--warning); }
+.toast-error i   { color: var(--danger); }
+.admin-card { border-color: var(--warning); }
+.admin-card .pref-header i:first-child { color: var(--warning); }
+.admin-inline-btn { color: var(--warning); border-color: var(--warning); }
+.admin-del-btn, .post-delete-btn:hover { color: var(--danger); }
+
+/* ---- Light mode refinements ---- */
+body.light-mode .rating-badge.r-none { background: var(--input-bg); }
+body.light-mode .chat-bubble-mine,
+body.light-mode .primary-btn,
+body.light-mode .review-trigger-btn { box-shadow: var(--glow-shadow); }
+body.light-mode .tt-count { background: rgba(255, 255, 255, 0.22); }
+body.light-mode .teacher-tab:not(.active) .tt-count { background: var(--card-border); }

@@ -11,6 +11,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" />
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   
@@ -345,28 +348,17 @@
         <div class="pref-card">
           <div class="pref-header collapsible" onclick="togglePrefSection(this)">
             <i class="fa-solid fa-eye-dropper"></i>
-            <h3>Custom Colors</h3>
+            <h3>Custom Accent</h3>
             <i class="fa-solid fa-chevron-down pref-chevron"></i>
           </div>
           <div class="pref-body">
-            <div class="color-picker-grid">
-              <div class="picker-item">
-                <label for="picker-main">Accent</label>
-                <input type="color" id="picker-main" value="#00f3ff" onchange="updateTheme()" />
-              </div>
-              <div class="picker-item">
-                <label for="picker-light">Highlight</label>
-                <input type="color" id="picker-light" value="#80f9ff" onchange="updateTheme()" />
-              </div>
-              <div class="picker-item">
-                <label for="picker-card">Card Tint</label>
-                <input type="color" id="picker-card" value="#001a24" onchange="updateTheme()" />
-              </div>
-              <div class="picker-item">
-                <label for="picker-nav">Nav Tint</label>
-                <input type="color" id="picker-nav" value="#081018" onchange="updateTheme()" />
-              </div>
+            <div class="custom-accent-row">
+              <input type="color" id="picker-main" value="#22d3ee" oninput="updateTheme()" aria-label="Accent color" />
+              <p class="admin-hint custom-accent-hint">Pick any color. It's adjusted automatically so text stays readable in both light and dark mode.</p>
             </div>
+            <button id="custom-accent-reset" class="secondary-btn custom-accent-reset" onclick="resetCustomAccent()" style="display:none;">
+              <i class="fa-solid fa-rotate-left"></i> Use theme color
+            </button>
           </div>
         </div>
 
