@@ -3016,14 +3016,19 @@ html.ios-short-viewport.layout-phone .mobile-frame {
     var(--bg-color);
 }
 
-/* "Fill the whole screen (test)" in Settings: size the app with 100lvh,
-   the one height iOS 26 reports in full. Untested on real phones, so
-   script.js asks for confirmation and undoes it automatically. */
-html.ios-fill-lvh,
-html.ios-fill-lvh body { height: 100lvh; }
-html.ios-fill-lvh.layout-phone .mobile-frame { height: 100lvh; }
-.settings-list li.ios-only { display: none; }
-html.ios-standalone .settings-list li.ios-only { display: flex; }
+/* ---------- Installed iPhone app with the solid status bar ----------
+   Measured on an iPhone: iOS paints the solid status bar in exactly the
+   page background colour. The only thing that made it look like a separate
+   band was the soft glow in the app's top corner starting right at its top
+   edge. So the top edge stays flat background colour and the glow fades in
+   a little lower: the status bar and the app read as one surface. */
+html.ios-solid-bar.layout-phone .mobile-frame {
+  background:
+    linear-gradient(to bottom, var(--bg-color) 0, var(--bg-color) 6px, rgba(0, 0, 0, 0) 120px),
+    radial-gradient(120% 55% at 0% 0%, var(--bg-glow), transparent 55%),
+    radial-gradient(90% 45% at 100% 100%, var(--bg-glow), transparent 60%),
+    var(--bg-color);
+}
 
 /* Light theme under the see-through status bar (the app was added to the
    Home Screen in dark mode): the clock and battery are always white, so a

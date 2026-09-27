@@ -175,7 +175,7 @@ document.addEventListener("DOMContentLoaded", () => {
   syncDeviceAlertsToggle();
   document.addEventListener('visibilitychange', markOpenThreadRead);
   let layoutTimer = null;
-  applyIosFill();
+  try { localStorage.removeItem('iosFillScreen'); } catch (_) {}   // retired "fill the whole screen" test
   detectShortViewport();
   window.addEventListener('resize', () => {
     clearTimeout(layoutTimer);
@@ -602,15 +602,19 @@ function applyLayout() {
   });
 }
 
-// iOS 26 bug (WebKit 301108): an installed iPhone app with the see-through
-// status bar is drawn from the top of the screen but sized one status bar
-// short, leaving an undrawable strip at the bottom. Detect it by comparing
-// the window height with the screen height; if Apple fixes the bug (or the
-// app uses a solid status bar) the numbers match and nothing changes.
+// Installed iPhone app: work out which kind of status bar iOS gave us.
+// - Solid bar (safe-area top inset is 0): iOS paints the bar in the page's
+//   background colour and sizes the app to the rest of the screen, so the
+//   CSS just keeps the app's top edge that same flat colour (.ios-solid-bar).
+// - See-through bar (an icon added while black-translucent was used): iOS 26
+//   draws from the top of the screen but sizes the app one status bar short,
+//   leaving an undrawable strip at the bottom (WebKit bug 301108). Detected
+//   by comparing window and screen heights (.ios-short-viewport); if Apple
+//   fixes the bug the numbers match and nothing changes.
 function detectShortViewport() {
   const root = document.documentElement;
-  if (!root.classList.contains('ios-standalone') || !document.body || root.classList.contains('ios-fill-lvh')) {
-    root.classList.remove('ios-short-viewport');
+  if (!root.classList.contains('ios-standalone') || !document.body) {
+    root.classList.remove('ios-short-viewport', 'ios-solid-bar');
     return;
   }
   const probe = document.createElement('div');
@@ -621,98 +625,8 @@ function detectShortViewport() {
   const portrait = window.innerHeight >= window.innerWidth;
   const screenH = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
   const missing = screenH - window.innerHeight;
+  root.classList.toggle('ios-solid-bar', safeTop === 0);
   root.classList.toggle('ios-short-viewport', safeTop > 0 && missing > 0 && Math.abs(missing - safeTop) <= 4);
-}
-
-// "Fill the whole screen (test)" — iPhone Home Screen app only. Some
-// developers report 100lvh (the one height iOS 26 reports in full) covers
-// the strip; others found the strip can't be drawn on at all, and nobody
-// has confirmed either on a real phone. So it's an opt-in test that asks
-// "can you see the tab bar?" and undoes itself unless you say keep it.
-const IOS_FILL_KEY = 'iosFillScreen';
-let iosFillTimer = null;
-
-function iosFillOn() {
-  try { return localStorage.getItem(IOS_FILL_KEY) === 'on'; } catch (_) { return false; }
-}
-
-function applyIosFill() {
-  const root = document.documentElement;
-  const on = root.classList.contains('ios-standalone') && iosFillOn();
-  root.classList.toggle('ios-fill-lvh', on);
-  if (on) {
-    // One report says iOS only corrects the height after the page scrolls once.
-    window.scrollTo(0, 1);
-    requestAnimationFrame(() => window.scrollTo(0, 0));
-  }
-  document.getElementById('ios-fill-toggle')?.classList.toggle('active', on);
-}
-
-function setIosFill(on) {
-  try { localStorage.setItem(IOS_FILL_KEY, on ? 'on' : 'off'); } catch (_) {}
-  applyIosFill();
-  detectShortViewport();
-}
-
-// Measurements shown in the test dialog so a screenshot tells us exactly
-// where iOS put the app (all in CSS pixels, page coordinates).
-function screenReport() {
-  const probe = (css) => {
-    const d = document.createElement('div');
-    d.style.cssText = 'position:fixed;top:0;left:0;width:0;visibility:hidden;pointer-events:none;' + css;
-    document.body.appendChild(d);
-    const h = d.offsetHeight;
-    d.remove();
-    return h;
-  };
-  const r = (sel) => document.querySelector(sel)?.getBoundingClientRect();
-  const frame = r('.mobile-frame'), header = r('.app-header'), nav = r('.bottom-nav');
-  const vv = window.visualViewport;
-  const n = (v) => Math.round(v);
-  return [
-    `screen ${screen.width}×${screen.height} · window ${innerWidth}×${innerHeight}`,
-    `lvh ${probe('height:100lvh')} · dvh ${probe('height:100dvh')} · svh ${probe('height:100svh')}`,
-    `inset top ${probe('padding-top:env(safe-area-inset-top)')} · bottom ${probe('padding-top:env(safe-area-inset-bottom)')}`,
-    `visual ${vv ? n(vv.height) + ' @' + n(vv.offsetTop) : '–'} · scrollY ${n(window.scrollY)}`,
-    `app ${frame ? n(frame.top) + '–' + n(frame.bottom) : '–'} · header ${header ? n(header.top) : '–'} · tabbar ${nav ? n(nav.top) + '–' + n(nav.bottom) : '–'}`,
-  ].join('<br>');
-}
-
-function toggleIosFill() {
-  if (iosFillOn()) {
-    setIosFill(false);
-    return showToast('Back to the normal layout.', 'info');
-  }
-  setIosFill(true);
-  let left = 30;
-  openModal('Can you see the tab bar?', `
-    <div style="text-align:left;">
-      <p style="font-size:0.85rem; margin-bottom:10px;">Look at the very bottom of the screen. Is the Home · Teachers · Groups · Chat · Me bar fully visible, sitting on the bottom edge?</p>
-      <p id="ios-fill-report" style="font-size:0.72rem; line-height:1.5; font-family:ui-monospace,Menlo,monospace; color:var(--sub-text-color); background:var(--input-bg); border:1px solid var(--card-border); border-radius:10px; padding:8px 10px; margin-bottom:10px;">${screenReport()}</p>
-      <p id="ios-fill-count" style="font-size:0.78rem; color:var(--sub-text-color); margin-bottom:12px;">Undoing in ${left} s unless you keep it…</p>
-      <div class="modal-actions" style="margin-top:0;">
-        <button class="secondary-btn" onclick="finishIosFill(false)">No, undo</button>
-        <button class="primary-btn" onclick="finishIosFill(true)">Yes, keep it</button>
-      </div>
-    </div>`);
-  clearInterval(iosFillTimer);
-  iosFillTimer = setInterval(() => {
-    left -= 1;
-    const el = document.getElementById('ios-fill-count');
-    if (el) el.textContent = `Undoing in ${left} s unless you keep it…`;
-    const rep = document.getElementById('ios-fill-report');
-    if (rep) rep.innerHTML = screenReport();
-    if (left <= 0) finishIosFill(false);
-  }, 1000);
-}
-
-function finishIosFill(keep) {
-  clearInterval(iosFillTimer);
-  iosFillTimer = null;
-  closeModalForce();
-  if (keep) return showToast('Full screen kept.', 'success');
-  setIosFill(false);
-  showToast('Undone: back to the normal layout.', 'info');
 }
 
 function setLayout(layout) {

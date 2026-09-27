@@ -11,13 +11,14 @@
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#080d14" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <!-- See-through status bar: the installed iPhone app draws right up behind
-       the clock (a solid bar left a dark strip at the top). iOS 26 then sizes
-       the app one status bar short (WebKit bug 301108); script.js detects that
-       and the CSS makes the undrawable strip at the bottom blend in. iOS reads
-       this when the app is added to the Home Screen; the inline script below
-       switches it to "default" (light bar, dark text) if added in light mode. -->
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" id="status-bar-style" />
+  <!-- Solid status bar for the installed iPhone app. Measured on an iPhone
+       (iOS 26): iOS paints it in the page's background colour and sizes the
+       app exactly to the rest of the screen. (black-translucent instead left
+       an undrawable strip at the bottom — WebKit bug 301108.) The CSS keeps
+       the top edge of the app that same flat colour so there's no visible
+       line. iOS reads this when the app is added to the Home Screen; the
+       inline script below switches it to "default" if added in light mode. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" id="status-bar-style" />
   
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -513,14 +514,6 @@
               <small>Pop-ups for messages and activity while the app is in the background</small>
             </div>
             <div id="alerts-toggle" class="toggle-btn"></div>
-          </li>
-          <!-- Only shown in the installed iPhone app (see toggleIosFill in script.js) -->
-          <li class="ios-only" onclick="toggleIosFill()">
-            <div class="setting-text">
-              <span>Fill the whole screen (test)</span>
-              <small>Tries to stretch the app over the strip at the bottom. If the tab bar disappears, it undoes itself.</small>
-            </div>
-            <div id="ios-fill-toggle" class="toggle-btn"></div>
           </li>
         </ul>
 
