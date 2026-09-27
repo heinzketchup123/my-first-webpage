@@ -1,7 +1,7 @@
 // Network-first: when online, always load the latest app files so updates
 // show up on the next reload. The cache is only a fallback for offline use.
 // (The old cache-first version kept serving outdated CSS/JS indefinitely.)
-const CACHE_NAME = 'campus-pulse-v16';
+const CACHE_NAME = 'campus-pulse-v17';
 const ASSETS = [
   './',
   './index.html',
@@ -25,6 +25,22 @@ self.addEventListener('activate', (e) => {
       Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))),
     self.clients.claim()
   ]));
+});
+
+// Tapping a device alert brings the app forward and opens that notification.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const nid = e.notification.data && e.notification.data.nid;
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const client = list[0];
+      if (client) {
+        client.postMessage({ type: 'open-notification', id: nid });
+        return client.focus();
+      }
+      return self.clients.openWindow('./index.html');
+    })
+  );
 });
 
 self.addEventListener('fetch', (e) => {

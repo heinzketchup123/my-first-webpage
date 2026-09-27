@@ -170,6 +170,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initSystemThemeListener();
   renderEmptyStates();
   loadPomo();
+  syncDeviceAlertsToggle();
+  document.addEventListener('visibilitychange', markOpenThreadRead);
 
   if (!isSupabaseConnected) {
     // Supabase misconfigured — surface it instead of silently degrading.
@@ -203,6 +205,7 @@ document.addEventListener("DOMContentLoaded", () => {
       teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
       calEvents = []; calRsvps = {}; isAdmin = false;
       adminJoinRequests = []; adminJoinCodes = {}; myJoinRequests = {};
+      resetFeedAndNotifState();
       document.getElementById('auth-screen').style.display = 'flex';
       renderEmptyStates();
     }
@@ -227,8 +230,18 @@ function renderEmptyStates() {
   updateNotifBadge();
 }
 
+function resetFeedAndNotifState() {
+  feedReactions = {}; myFeedReactions = new Set(); feedComments = {};
+  notifications = []; notifFresh = new Set(); unreadNotifs = 0;
+  document.getElementById('notif-drawer')?.classList.remove('open');
+}
+
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
+  // Tapping a device alert focuses the app and opens that notification.
+  navigator.serviceWorker.addEventListener('message', (ev) => {
+    if (ev.data?.type === 'open-notification' && ev.data.id) openNotification(ev.data.id);
+  });
   // When a new version takes over, reload once so the page isn't left
   // running the previous version's CSS/JS. Skipped on the very first install.
   const hadController = !!navigator.serviceWorker.controller;
@@ -258,6 +271,9 @@ function initSupabaseRealtime() {
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => fetchFriendships())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_feed' }, () => fetchFeed())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'feed_reactions' }, () => onFeedExtrasChanged())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'feed_comments' }, () => onFeedExtrasChanged())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, p => onNotificationChanged(p))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'study_groups' }, () => fetchGroups())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'study_group_members' }, () => fetchGroups())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, () => onTeacherDataChanged())
@@ -272,7 +288,7 @@ function initSupabaseRealtime() {
 
 async function loadAllSupabaseData() {
   await Promise.all([fetchFeed(), fetchGroups(), fetchFriendships(), fetchTeacherDirectory(),
-                     fetchMyReviewCount(), fetchEvents()]);
+                     fetchMyReviewCount(), fetchEvents(), fetchNotifications()]);
   const savedGpa = localStorage.getItem(`gpa_${currentUserId}`);
   gpaCourses = savedGpa ? JSON.parse(savedGpa) : [];
   renderGpaRows();
@@ -287,6 +303,7 @@ async function fetchFeed() {
     .limit(50);
   if (error) { showToast('Feed load failed: ' + error.message, 'error'); return; }
   campusFeed = data || [];
+  await fetchFeedExtras();
   renderFeed();
   updateAnalytics();
 }
@@ -416,6 +433,7 @@ async function logout() {
   teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
   calEvents = []; calRsvps = {}; isAdmin = false;
   adminJoinRequests = []; adminJoinCodes = {}; myJoinRequests = {};
+  resetFeedAndNotifState();
   switchTab('home-view');
   renderEmptyStates();
 
@@ -595,22 +613,255 @@ function switchTab(viewId, element) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === navView));
   document.querySelector('.content-container')?.scrollTo(0, 0);
 
-  if (viewId === 'chat-view')   { renderFriendsStrip(); renderDMThread(); }
+  if (viewId === 'chat-view')   { renderFriendsStrip(); renderDMThread(); markOpenThreadRead(); }
   if (viewId === 'search-view') { fetchTeacherDirectory(); }
   if (viewId === 'events-view') { fetchEvents(); }
   if (viewId === 'settings-view') { renderAdminPanel(); }
 }
 
-function toggleNotifications() {
-  document.getElementById('notif-drawer').classList.toggle('open');
+// -------------------- Notifications --------------------
+// Rows in `notifications` are written by database triggers when someone
+// messages you, likes / reacts to / comments on your post, sends or accepts
+// a friend request, joins your group, RSVPs to your event, finds your
+// teacher post helpful, or (admins) asks to join a school.
+// The bell counts everything except messages; unread messages show on the
+// Chat tab and on each friend instead, and clear when you open the chat.
+let notifications = [];
+let notifsReady = null;          // false until SCHEMA.sql section 6h has been run
+let notifFresh = new Set();      // highlighted as "new" while the drawer is open
+let notifRefreshTimer = null;
+
+function notifDrawerOpen() { return document.getElementById('notif-drawer')?.classList.contains('open'); }
+
+async function fetchNotifications() {
+  if (!currentUserId || !isSupabaseConnected) { notifications = []; return; }
+  const { data, error } = await supabaseClient.from('notifications')
+    .select('*').order('created_at', { ascending: false }).limit(60);
+  if (error) { notifsReady = false; notifications = []; }
+  else { notifsReady = true; notifications = data || []; }
+  markOpenThreadRead();
+  updateNotifBadgeFromState();
+  renderFriendsStrip();
+  if (notifDrawerOpen()) renderNotifications();
+}
+
+function onNotificationChanged(payload) {
+  const row = payload?.new;
+  if (row && row.id && row.user_id === currentUserId && !row.read_at) {
+    const known = notifications.find(n => n.id === row.id);
+    const isNew = !known || known.times !== row.times || known.created_at !== row.created_at;
+    if (isNew) {
+      const viewingThread = row.kind === 'dm' && !document.hidden
+        && isViewActive('chat-view') && selectedFriendId === row.ref_id;
+      if (!viewingThread) {
+        const text = notifPlainText(row);
+        if (row.kind !== 'dm' || !isViewActive('chat-view')) showToast(text, 'info', 4000);
+        showDeviceAlert(row, text);
+      }
+    }
+  }
+  clearTimeout(notifRefreshTimer);
+  notifRefreshTimer = setTimeout(fetchNotifications, 200);
+}
+
+function toggleNotifications(force) {
+  const drawer = document.getElementById('notif-drawer');
+  const open = typeof force === 'boolean' ? force : !drawer.classList.contains('open');
+  drawer.classList.toggle('open', open);
+  if (!open) { notifFresh.clear(); return; }
+  if (notifsReady) {
+    notifFresh = new Set(notifications.filter(n => !n.read_at).map(n => n.id));
+    renderNotifications();
+    markNotificationsRead(n => n.kind !== 'dm');   // messages clear when you open the chat
+  } else {
+    renderNotifications();
+    unreadNotifs = 0;
+    updateNotifBadge();
+  }
+}
+
+async function markNotificationsRead(pred) {
+  if (!notifsReady) return;
+  const ids = notifications.filter(n => !n.read_at && (!pred || pred(n))).map(n => n.id);
+  if (!ids.length) return;
+  const now = new Date().toISOString();
+  notifications.forEach(n => { if (ids.includes(n.id)) n.read_at = now; });
+  updateNotifBadgeFromState();
+  renderFriendsStrip();
+  const { error } = await supabaseClient.from('notifications').update({ read_at: now }).in('id', ids);
+  if (error) console.warn('mark read failed:', error.message);
+}
+
+// Opening a chat marks that friend's message notifications as read.
+function markOpenThreadRead() {
+  if (!selectedFriendId || document.hidden || !isViewActive('chat-view')) return;
+  if (notifications.some(n => n.kind === 'dm' && n.ref_id === selectedFriendId && !n.read_at)) {
+    markNotificationsRead(n => n.kind === 'dm' && n.ref_id === selectedFriendId);
+  }
+}
+
+async function clearNotifications() {
+  if (!notifsReady || !notifications.length) return;
+  const ids = notifications.map(n => n.id);
+  notifications = [];
+  notifFresh.clear();
   renderNotifications();
-  unreadNotifs = 0;
-  updateNotifBadge();
+  updateNotifBadgeFromState();
+  renderFriendsStrip();
+  const { error } = await supabaseClient.from('notifications').delete().in('id', ids);
+  if (error) { showToast('Could not clear: ' + error.message, 'error'); fetchNotifications(); }
+}
+
+function unreadDmCount(friendId) {
+  return notifications.filter(n => n.kind === 'dm' && !n.read_at && (!friendId || n.ref_id === friendId))
+    .reduce((sum, n) => sum + (n.times || 1), 0);
+}
+
+function describeNotif(n) {
+  const times = n.times || 1;
+  const who = (!n.actor_id && times > 1)
+    ? `<strong>${times} people</strong>`
+    : `<strong>${escapeHtml(n.actor_name || 'Someone')}</strong>`;
+  const post = (t) => t ? `your post “${escapeHtml(t)}”` : 'your post';
+  const em = REACTIONS.find(r => r.key === n.meta)?.em || '';
+  switch (n.kind) {
+    case 'dm':             return { icon: 'fa-comment',        html: `${who} sent you ${times > 1 ? times + ' messages' : 'a message'}`, sub: n.body };
+    case 'like':           return { icon: 'fa-heart',          html: `${who} liked ${post(n.body)}` };
+    case 'reaction':       return { icon: 'fa-face-smile',     html: `${who} reacted ${em} to ${post(n.body)}` };
+    case 'comment':        return { icon: 'fa-comment-dots',   html: `${who} ${times > 1 ? `left ${times} comments on` : 'commented on'} ${post(n.meta)}`, sub: n.body };
+    case 'friend_request': return { icon: 'fa-user-plus',      html: `${who} sent you a friend request`, sub: 'Tap to respond' };
+    case 'friend_accept':  return { icon: 'fa-user-check',     html: `${who} accepted your friend request`, sub: 'Tap to say hi' };
+    case 'join_request':   return { icon: 'fa-school',         html: `${who} asked to join <strong>${escapeHtml(n.body || 'a school')}</strong>`, sub: 'Tap to review' };
+    case 'join_decision':  return n.meta === 'approved'
+      ? { icon: 'fa-circle-check', html: `You were approved to join <strong>${escapeHtml(n.body || 'your school')}</strong>` }
+      : { icon: 'fa-circle-xmark', html: `Your request to join <strong>${escapeHtml(n.body || 'the school')}</strong> was declined` };
+    case 'group_join':     return { icon: 'fa-user-group',     html: `${who} joined your study group <strong>${escapeHtml(n.body || '')}</strong>` };
+    case 'helpful':        return { icon: 'fa-thumbs-up',      html: `${times > 1 ? `<strong>${times} people</strong>` : 'Someone'} found your teacher post helpful`, sub: n.body };
+    case 'event_rsvp':     return { icon: 'fa-calendar-check', html: `<strong>${times} ${times === 1 ? 'person is' : 'people are'}</strong> going to <strong>${escapeHtml(n.body || 'your event')}</strong>` };
+    default:               return { icon: 'fa-bell',           html: escapeHtml(n.body || 'New activity') };
+  }
+}
+
+function notifPlainText(n) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = describeNotif(n).html;
+  return tmp.textContent;
+}
+
+async function openNotification(id) {
+  const n = notifications.find(x => x.id === id);
+  if (!n) return;
+  toggleNotifications(false);
+  markNotificationsRead(x => x.id === id);
+  switch (n.kind) {
+    case 'dm':
+    case 'friend_accept':
+      switchTab('chat-view');
+      if (friends.some(f => f.friend_id === n.ref_id)) selectFriend(n.ref_id);
+      break;
+    case 'like': case 'reaction': case 'comment':
+      openFeedPost(n.ref_id, n.kind === 'comment');
+      break;
+    case 'friend_request':
+      openFriendsModal();
+      setFriendsTab('requests');
+      break;
+    case 'join_request':
+      switchTab('settings-view');
+      document.getElementById('admin-card')?.scrollIntoView({ block: 'start' });
+      break;
+    case 'join_decision':
+      switchTab('settings-view');
+      break;
+    case 'group_join':  switchTab('groups-view'); break;
+    case 'event_rsvp':  switchTab('events-view'); break;
+    case 'helpful':     if (n.meta) openTeacherPage(n.meta); break;
+  }
+}
+
+function openFeedPost(postId, showComments) {
+  switchTab('home-view');
+  const post = findPost(postId);
+  if (!post) return showToast('That post is no longer in your feed.', 'info');
+  if (showComments) return openCommentsModal(post.id);
+  const el = [...document.querySelectorAll('#feed-container .feed-post')]
+    .find(a => a.dataset.postId === String(post.id));
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 1600);
+}
+
+// ---- Device alerts: a system pop-up while the app is open in the background ----
+function deviceAlertsOn() {
+  try {
+    return localStorage.getItem('deviceAlerts') === 'on'
+      && 'Notification' in window && Notification.permission === 'granted';
+  } catch (_) { return false; }
+}
+
+function syncDeviceAlertsToggle() {
+  document.getElementById('alerts-toggle')?.classList.toggle('active', deviceAlertsOn());
+}
+
+async function toggleDeviceAlerts() {
+  if (!('Notification' in window)) {
+    return showToast("This browser can't show alerts. On iPhone, add the app to your Home Screen first.", 'warn', 6000);
+  }
+  if (deviceAlertsOn()) {
+    try { localStorage.setItem('deviceAlerts', 'off'); } catch (_) {}
+    syncDeviceAlertsToggle();
+    return showToast('Device alerts off.', 'info');
+  }
+  const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+  if (perm !== 'granted') {
+    syncDeviceAlertsToggle();
+    return showToast('Alerts are blocked — allow notifications for this site in your browser settings.', 'warn', 6000);
+  }
+  try { localStorage.setItem('deviceAlerts', 'on'); } catch (_) {}
+  syncDeviceAlertsToggle();
+  showToast("Device alerts on — you'll get a pop-up while the app is open in the background.", 'success', 5000);
+}
+
+function showDeviceAlert(n, text) {
+  if (!deviceAlertsOn() || !document.hidden) return;
+  const opts = { body: text, tag: n.id, data: { nid: n.id } };
+  const fallback = () => { try { new Notification('Campus Pulse', opts); } catch (_) {} };
+  if (!navigator.serviceWorker) return fallback();
+  navigator.serviceWorker.getRegistration()
+    .then(reg => reg ? reg.showNotification('Campus Pulse', opts) : fallback())
+    .catch(fallback);
 }
 
 function renderNotifications() {
   const body = document.getElementById('notif-body');
   if (!body) return;
+  const clearBtn = document.getElementById('notif-clear-btn');
+  if (clearBtn) clearBtn.style.display = notifsReady && notifications.length ? 'inline-flex' : 'none';
+
+  if (notifsReady) {
+    body.innerHTML = notifications.length ? notifications.map(n => {
+      const d = describeNotif(n);
+      const unread = !n.read_at || notifFresh.has(n.id);
+      return `
+        <button class="notif-item ${unread ? 'unread' : ''}" onclick="openNotification('${escapeAttr(n.id)}')">
+          <span class="notif-icon-wrap"><i class="fa-solid ${d.icon}"></i></span>
+          <span class="notif-text">
+            <span class="notif-line">${d.html}</span>
+            ${d.sub ? `<span class="notif-sub">${escapeHtml(d.sub)}</span>` : ''}
+            <small>${escapeHtml(timeAgo(n.created_at))}</small>
+          </span>
+          ${unread ? '<span class="notif-dot" aria-label="New"></span>' : ''}
+        </button>`;
+    }).join('') : `
+      <div class="notif-empty">
+        <i class="fa-solid fa-bell-slash"></i>
+        <p>${currentUserId ? "You're all caught up." : 'Sign in to see notifications.'}</p>
+      </div>`;
+    return;
+  }
+
+  // Older database without the notifications table: show what we can work out.
   const items = [];
   pendingIncoming.forEach(r => {
     items.push(`
@@ -640,8 +891,16 @@ function renderNotifications() {
     </div>`;
 }
 function updateNotifBadgeFromState() {
-  unreadNotifs = pendingIncoming.length + (isAdmin ? adminJoinRequests.length : 0);
+  unreadNotifs = notifsReady
+    ? notifications.filter(n => !n.read_at && n.kind !== 'dm').length
+    : pendingIncoming.length + (isAdmin ? adminJoinRequests.length : 0);
   updateNotifBadge();
+  const chatBadge = document.getElementById('chat-nav-badge');
+  if (chatBadge) {
+    const dms = notifsReady ? unreadDmCount() : 0;
+    chatBadge.textContent = dms > 9 ? '9+' : String(dms);
+    chatBadge.style.display = dms > 0 ? 'inline-flex' : 'none';
+  }
 }
 
 // Chat Engine — security-hardened
@@ -1071,12 +1330,15 @@ function renderFriendsStrip() {
       </div>`;
     return;
   }
-  strip.innerHTML = list.map(f => `
+  strip.innerHTML = list.map(f => {
+    const unread = unreadDmCount(f.friend_id);
+    return `
     <button class="friend-chip ${f.friend_id === selectedFriendId ? 'active' : ''}" onclick="selectFriend('${escapeAttr(f.friend_id)}')">
-      <span class="friend-avatar">${escapeHtml((f.display_name || f.handle || '?')[0].toUpperCase())}</span>
+      <span class="friend-avatar">${escapeHtml((f.display_name || f.handle || '?')[0].toUpperCase())}${unread
+        ? `<span class="chip-unread" aria-label="${unread} unread">${unread > 9 ? '9+' : unread}</span>` : ''}</span>
       <span class="friend-name">${escapeHtml(f.display_name || f.handle)}</span>
-    </button>
-  `).join('');
+    </button>`;
+  }).join('');
 }
 
 function escapeAttr(v) { return String(v).replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
@@ -1164,6 +1426,7 @@ function renderFriendsModalIfOpen() {
 async function selectFriend(friendId) {
   selectedFriendId = friendId;
   renderFriendsStrip();
+  markOpenThreadRead();
   await fetchDMs(friendId);
 }
 
@@ -1311,14 +1574,80 @@ async function sendAppChatMessage(event) { return sendDM(event); }
 function renderChat() { renderDMThread(); }
 
 // Feed Engine
-const REACTION_EMOJIS = ['👍','❤️','😂','🎉','🔥'];
+// Each like / reaction / comment is its own row per user (feed_reactions,
+// feed_comments), so tapping a reaction again removes yours.
+const REACTIONS = [
+  { key: 'thumbs', em: '👍' }, { key: 'heart', em: '❤️' }, { key: 'laugh', em: '😂' },
+  { key: 'party',  em: '🎉' }, { key: 'fire',  em: '🔥' }
+];
+let feedReactions   = {};          // postId -> { key: count }
+let myFeedReactions = new Set();   // "postId|key" for my own reactions
+let feedComments    = {};          // postId -> [comment rows]
+let feedExtrasReady = null;        // false until SCHEMA.sql section 6h has been run
+const reactInFlight = new Set();
+let feedExtrasTimer = null;
+
+const samePostId = (a, b) => String(a) === String(b);
+const findPost = (id) => campusFeed.find(p => samePostId(p.id, id));
+
+function postReactionCount(post, key) {
+  if (feedExtrasReady === false) {   // old database: show the counters stored on the post
+    if (key === 'like') return post.likes || 0;
+    const em = REACTIONS.find(r => r.key === key)?.em;
+    return (post.reactions || {})[em] || 0;
+  }
+  return feedReactions[String(post.id)]?.[key] || 0;
+}
+function iReacted(post, key) { return myFeedReactions.has(`${post.id}|${key}`); }
+function postComments(post) {
+  if (feedExtrasReady === false) return Array.isArray(post.comments) ? post.comments : [];
+  return feedComments[String(post.id)] || [];
+}
+
+async function fetchFeedExtras() {
+  const ids = campusFeed.map(p => p.id);
+  if (!ids.length || !currentUserId) {
+    feedReactions = {}; myFeedReactions = new Set(); feedComments = {};
+    return;
+  }
+  const [rx, cm] = await Promise.all([
+    supabaseClient.from('feed_reactions').select('post_id, user_id, emoji').in('post_id', ids),
+    supabaseClient.from('feed_comments').select('id, post_id, author_id, author, body, created_at')
+      .in('post_id', ids).order('created_at', { ascending: true })
+  ]);
+  if (rx.error || cm.error) { feedExtrasReady = false; return; }
+  feedExtrasReady = true;
+  const counts = {}, mine = new Set(), comments = {};
+  (rx.data || []).forEach(r => {
+    const pid = String(r.post_id);
+    (counts[pid] ||= {})[r.emoji] = (counts[pid][r.emoji] || 0) + 1;
+    if (r.user_id === currentUserId) mine.add(`${pid}|${r.emoji}`);
+  });
+  // Keep taps that are still being saved, so a refresh can't flicker them.
+  reactInFlight.forEach(tag => { if (myFeedReactions.has(tag) && !mine.has(tag)) {
+    const [pid, key] = tag.split('|'); mine.add(tag); (counts[pid] ||= {})[key] = (counts[pid][key] || 0) + 1; } });
+  (cm.data || []).forEach(c => (comments[String(c.post_id)] ||= []).push(c));
+  feedReactions = counts; myFeedReactions = mine; feedComments = comments;
+}
+
+// Realtime: someone reacted or commented — refresh counts (debounced).
+function onFeedExtrasChanged() {
+  clearTimeout(feedExtrasTimer);
+  feedExtrasTimer = setTimeout(async () => {
+    await fetchFeedExtras();
+    renderFeed();
+    if (currentPostCommentId && document.getElementById('detailModal')?.style.display === 'flex') {
+      renderCommentsList();
+    }
+  }, 250);
+}
 
 function sortedFeed() {
   const list = [...campusFeed];
   if (feedSort === 'top') {
-    list.sort((a,b) => (b.likes||0) - (a.likes||0));
+    list.sort((a,b) => postReactionCount(b, 'like') - postReactionCount(a, 'like'));
   } else if (feedSort === 'comments') {
-    list.sort((a,b) => ((b.comments||[]).length) - ((a.comments||[]).length));
+    list.sort((a,b) => postComments(b).length - postComments(a).length);
   } else {
     // 'new': DB rows come pre-sorted by created_at desc; keep as-is.
   }
@@ -1371,20 +1700,25 @@ function renderFeed() {
   }
 
   list.forEach(post => {
-    const commentCount = post.comments ? post.comments.length : 0;
-    const reactions = post.reactions || {};
-    const reactionRow = REACTION_EMOJIS.map(em => `
-      <button class="reaction-chip ${reactions[em] ? 'has-count' : ''}" onclick="reactToPost('${escapeAttr(post.id)}','${em}')">
-        ${em} <span>${reactions[em] || ''}</span>
-      </button>
-    `).join('');
+    const pid = escapeAttr(post.id);
+    const commentCount = postComments(post).length;
+    const likeCount = postReactionCount(post, 'like');
+    const liked = iReacted(post, 'like');
+    const reactionRow = REACTIONS.map(r => {
+      const n = postReactionCount(post, r.key);
+      const on = iReacted(post, r.key);
+      return `<button class="reaction-chip ${n ? 'has-count' : ''} ${on ? 'mine' : ''}" aria-pressed="${on}"
+                onclick="reactToPost('${pid}','${r.key}')" aria-label="${on ? 'Remove' : 'Add'} ${r.em} reaction">
+                ${r.em} <span>${n || ''}</span>
+              </button>`;
+    }).join('');
 
     const author = String(post.author || 'Student');
     const anon = /^anonymous/i.test(author);
     const mine = post.author_id && post.author_id === currentUserId;
-    const pid = escapeAttr(post.id);
     const el = document.createElement('article');
     el.className = 'info-card feed-post';
+    el.dataset.postId = String(post.id);
     el.innerHTML = `
       <header class="post-head">
         <span class="post-avatar">${anon ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(author[0].toUpperCase())}</span>
@@ -1400,8 +1734,8 @@ function renderFeed() {
       <p class="post-body">${renderSafeMessage(post.text || '')}</p>
       <div class="reaction-row">${reactionRow}</div>
       <footer class="post-actions">
-        <button class="post-action-btn ${post.liked ? 'liked' : ''}" onclick="toggleLikePost('${pid}')" aria-label="Like">
-          <i class="fa-${post.liked ? 'solid' : 'regular'} fa-heart"></i> ${post.likes || 0}
+        <button class="post-action-btn ${liked ? 'liked' : ''}" onclick="toggleLikePost('${pid}')" aria-pressed="${liked}" aria-label="${liked ? 'Unlike' : 'Like'}">
+          <i class="fa-${liked ? 'solid' : 'regular'} fa-heart"></i> ${likeCount}
         </button>
         <button class="post-action-btn" onclick="openCommentsModal('${pid}')">
           <i class="fa-regular fa-comment"></i> ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}
@@ -1423,83 +1757,122 @@ function updateNotifBadge() {
   }
 }
 
-async function toggleLikePost(id) {
-  const post = campusFeed.find(p => p.id === id);
-  if (!post) return;
-
-  post.liked = !post.liked;
-  const newLikes = Math.max(0, (post.likes || 0) + (post.liked ? 1 : -1));
-  post.likes = newLikes;
-
-  if (isSupabaseConnected && currentUserId) {
-    await supabaseClient.from('campus_feed').update({ likes: newLikes }).eq('id', id);
-  }
-  renderFeed();
+function needsFeedUpdate() {
+  if (feedExtrasReady !== false) return false;
+  showToast('Reactions and comments need the latest database update — run SCHEMA.sql in Supabase.', 'warn', 6000);
+  return true;
 }
 
-async function reactToPost(id, emoji) {
-  const post = campusFeed.find(p => p.id === id);
-  if (!post) return;
-  post.reactions = post.reactions || {};
-  post.reactions[emoji] = (post.reactions[emoji] || 0) + 1;
-
-  if (isSupabaseConnected && currentUserId) {
-    await supabaseClient.from('campus_feed').update({ reactions: post.reactions }).eq('id', id);
+function setLocalReaction(id, key, on) {
+  const tag = `${id}|${key}`;
+  const counts = (feedReactions[String(id)] ||= {});
+  if (on && !myFeedReactions.has(tag)) {
+    myFeedReactions.add(tag); counts[key] = (counts[key] || 0) + 1;
+  } else if (!on && myFeedReactions.has(tag)) {
+    myFeedReactions.delete(tag); counts[key] = Math.max(0, (counts[key] || 0) - 1);
   }
-  renderFeed();
 }
+
+// Tap once to add your like/reaction, tap again to take it back.
+async function toggleFeedReaction(id, key) {
+  if (!currentUserId) return showToast('Sign in to react.', 'warn');
+  if (needsFeedUpdate()) return;
+  const post = findPost(id);
+  if (!post) return;
+  const tag = `${post.id}|${key}`;
+  if (reactInFlight.has(tag)) return;          // ignore double-taps while saving
+  const had = myFeedReactions.has(tag);
+
+  reactInFlight.add(tag);
+  setLocalReaction(post.id, key, !had);        // show it instantly
+  renderFeed();
+
+  const { error } = had
+    ? await supabaseClient.from('feed_reactions').delete()
+        .match({ post_id: post.id, user_id: currentUserId, emoji: key })
+    : await supabaseClient.from('feed_reactions')
+        .insert([{ post_id: post.id, user_id: currentUserId, emoji: key, anonymous: !!appSettings.anonymous }]);
+  reactInFlight.delete(tag);
+
+  if (error && error.code !== '23505') {       // 23505 = it was already saved
+    setLocalReaction(post.id, key, had);
+    renderFeed();
+    showToast('Could not save that: ' + error.message, 'error');
+  }
+}
+
+function toggleLikePost(id) { return toggleFeedReaction(id, 'like'); }
+function reactToPost(id, key) { return toggleFeedReaction(id, key); }
 
 function openCommentsModal(postId) {
-  currentPostCommentId = postId;
-  const post = campusFeed.find(p => p.id === postId);
+  const post = findPost(postId);
   if (!post) return;
+  currentPostCommentId = post.id;
 
-  const modal = document.getElementById('detailModal');
-  const title = document.getElementById('modalTitle');
-  const body = document.getElementById('modalBody');
+  document.getElementById('modalTitle').textContent = post.title || 'Discussion';
+  document.getElementById('modalBody').innerHTML = `
+    <div id="comments-list" class="comments-list"></div>
+    <form class="comment-compose" onsubmit="event.preventDefault(); addCommentToPost();">
+      <input type="text" id="new-comment-input" class="chat-input" maxlength="500"
+             placeholder="${currentUserId ? 'Write a comment…' : 'Sign in to comment'}" ${currentUserId ? '' : 'disabled'} />
+      <button type="submit" class="chat-send-btn" aria-label="Send comment"><i class="fa-solid fa-paper-plane"></i></button>
+    </form>`;
+  renderCommentsList();
+  document.getElementById('detailModal').style.display = 'flex';
+}
 
-  title.textContent = `Discussion: ${post.title}`;
-  
-  const commentsList = (post.comments || []).map(c => `
-    <div style="background:var(--input-bg); padding:10px; border-radius:10px; margin-bottom:8px; border:1px solid var(--card-border);">
-      <div style="font-weight:700; color:var(--accent-color); font-size:0.75rem;">${escapeHtml(c.author || 'Anonymous')}</div>
-      <div style="font-size:0.82rem; color:var(--main-text-color); margin-top:2px;">${renderSafeMessage(String(c.text || '').slice(0, 500))}</div>
-    </div>
-  `).join('') || '<p style="color:var(--sub-text-color); font-size:0.8rem;">No comments yet. Start the conversation!</p>';
-
-  body.innerHTML = `
-    <div style="max-height:180px; overflow-y:auto; text-align:left; margin-bottom:12px;">
-      ${commentsList}
-    </div>
-    <div style="display:flex; gap:6px;">
-      <input type="text" id="new-comment-input" class="auth-input" placeholder="Write a comment..." style="padding:8px 10px; font-size:0.8rem;" />
-      <button class="primary-btn" style="padding:8px 14px; font-size:0.8rem;" onclick="addCommentToPost()">Send</button>
-    </div>
-  `;
-
-  modal.style.display = 'flex';
+function renderCommentsList() {
+  const box = document.getElementById('comments-list');
+  const post = findPost(currentPostCommentId);
+  if (!box || !post) return;
+  const list = postComments(post);
+  const ownsPost = post.author_id && post.author_id === currentUserId;
+  box.innerHTML = list.length ? list.map(c => {
+    const name = String(c.author || 'Anonymous Student');
+    const canDelete = feedExtrasReady && c.id && (c.author_id === currentUserId || ownsPost || isAdmin);
+    return `
+      <div class="comment-row">
+        <span class="post-avatar sm">${/^anonymous/i.test(name) ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(name[0].toUpperCase())}</span>
+        <div class="comment-main">
+          <div class="comment-meta">
+            <strong>${escapeHtml(name)}${c.author_id && c.author_id === currentUserId ? ' <em>(you)</em>' : ''}</strong>
+            ${c.created_at ? `<small>${escapeHtml(timeAgo(c.created_at))}</small>` : ''}
+            ${canDelete ? `<button class="comment-delete" onclick="deleteComment('${escapeAttr(c.id)}')" aria-label="Delete comment"><i class="fa-solid fa-xmark"></i></button>` : ''}
+          </div>
+          <div class="comment-body">${renderSafeMessage(String(c.body ?? c.text ?? '').slice(0, 500))}</div>
+        </div>
+      </div>`;
+  }).join('') : '<p class="comments-empty">No comments yet. Start the conversation!</p>';
+  box.scrollTop = box.scrollHeight;
 }
 
 async function addCommentToPost() {
   const input = document.getElementById('new-comment-input');
-  if (!input || !input.value.trim() || !currentPostCommentId) return;
+  const text = (input?.value || '').trim();
+  if (!text || !currentPostCommentId) return;
+  if (!currentUserId) return showToast('Sign in to comment.', 'warn');
+  if (needsFeedUpdate()) return;
 
-  const post = campusFeed.find(p => p.id === currentPostCommentId);
-  if (post) {
-    const updatedComments = post.comments || [];
-    updatedComments.push({
-      author: appSettings.anonymous ? "Anonymous Student" : (currentUser ? currentUser.split('@')[0] : "Student"),
-      text: input.value.trim()
-    });
-    post.comments = updatedComments;
+  input.value = '';
+  const { data, error } = await supabaseClient.from('feed_comments')
+    .insert([{ post_id: currentPostCommentId, author_id: currentUserId, body: text.slice(0, 500), anonymous: !!appSettings.anonymous }])
+    .select('id, post_id, author_id, author, body, created_at').single();
+  if (error) { input.value = text; return showToast('Comment failed: ' + error.message, 'error'); }
 
-    if (isSupabaseConnected && currentUserId) {
-      const { error } = await supabaseClient.from('campus_feed').update({ comments: updatedComments }).eq('id', currentPostCommentId);
-      if (error) showToast('Comment failed: ' + error.message, 'error');
-    }
-    renderFeed();
-    openCommentsModal(currentPostCommentId);
-  }
+  const pid = String(data.post_id);
+  const list = (feedComments[pid] ||= []);
+  if (!list.some(c => c.id === data.id)) list.push(data);
+  renderFeed();
+  renderCommentsList();
+}
+
+async function deleteComment(id) {
+  if (!confirm('Delete this comment?')) return;
+  const { data, error } = await supabaseClient.from('feed_comments').delete().eq('id', id).select('id');
+  if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
+  Object.keys(feedComments).forEach(k => { feedComments[k] = feedComments[k].filter(c => c.id !== id); });
+  renderFeed();
+  renderCommentsList();
 }
 
 function openNewPostModal() { document.getElementById('postModal').style.display = 'flex'; }
@@ -2045,7 +2418,7 @@ async function deleteFeedPost(id) {
   if (!confirm('Delete this post?')) return;
   const { data, error } = await supabaseClient.from('campus_feed').delete().eq('id', id).select('id');
   if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
-  campusFeed = campusFeed.filter(p => p.id !== id);
+  campusFeed = campusFeed.filter(p => !samePostId(p.id, id));
   renderFeed();
   showToast('Post deleted.', 'success');
 }

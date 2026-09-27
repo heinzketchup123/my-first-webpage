@@ -959,6 +959,397 @@ revoke all on function public.admin_review_join_request(uuid, boolean) from publ
 grant execute on function public.admin_review_join_request(uuid, boolean) to authenticated;
 
 -- ============================================================
+-- 6h. FEED REACTIONS, COMMENTS + NOTIFICATIONS
+-- ============================================================
+-- Likes, emoji reactions and comments used to be counters stored on the
+-- post itself. Only a post's author may edit a post, so everyone else's
+-- taps were silently dropped, and nothing recorded WHO reacted, so a
+-- second tap added another instead of removing yours. Each one is now its
+-- own row per user (tap again = delete your row).
+--
+-- Notifications are written by triggers, never by the app, so nobody can
+-- fake one. Each user can only read, mark read and clear their own.
+
+-- campus_feed.id may be uuid or bigint depending on how the project was
+-- first created, so the post_id columns copy whatever type it really is.
+do $$
+declare idtype text;
+begin
+  select format_type(a.atttypid, a.atttypmod) into idtype
+  from pg_attribute a
+  where a.attrelid = 'public.campus_feed'::regclass and a.attname = 'id';
+
+  execute format($f$
+    create table if not exists public.feed_reactions (
+      post_id    %s not null references public.campus_feed(id) on delete cascade,
+      user_id    uuid not null default auth.uid() references auth.users(id) on delete cascade,
+      emoji      text not null check (emoji in ('like','thumbs','heart','laugh','party','fire')),
+      anonymous  boolean not null default false,
+      created_at timestamptz not null default now(),
+      primary key (post_id, user_id, emoji)
+    )$f$, idtype);
+
+  execute format($f$
+    create table if not exists public.feed_comments (
+      id         uuid primary key default gen_random_uuid(),
+      post_id    %s not null references public.campus_feed(id) on delete cascade,
+      author_id  uuid default auth.uid() references auth.users(id) on delete set null,
+      author     text,
+      anonymous  boolean not null default false,
+      legacy     boolean not null default false,
+      body       text not null check (char_length(body) between 1 and 500),
+      created_at timestamptz not null default now()
+    )$f$, idtype);
+end $$;
+create index if not exists feed_comments_post_idx on public.feed_comments (post_id, created_at);
+
+alter table public.feed_reactions enable row level security;
+alter table public.feed_comments  enable row level security;
+do $$ declare p record; begin
+  for p in select policyname, tablename from pg_policies
+           where schemaname='public' and tablename in ('feed_reactions','feed_comments') loop
+    execute format('drop policy if exists %I on public.%I', p.policyname, p.tablename);
+  end loop;
+end $$;
+
+-- You can see reactions/comments on any post you can see (same school).
+create policy "reactions: visible with post"
+  on public.feed_reactions for select
+  using (exists (select 1 from public.campus_feed f where f.id = post_id));
+create policy "reactions: add own"
+  on public.feed_reactions for insert
+  with check (user_id = auth.uid()
+              and exists (select 1 from public.campus_feed f where f.id = post_id));
+create policy "reactions: remove own"
+  on public.feed_reactions for delete using (user_id = auth.uid());
+
+create policy "comments: visible with post"
+  on public.feed_comments for select
+  using (exists (select 1 from public.campus_feed f where f.id = post_id));
+create policy "comments: add own"
+  on public.feed_comments for insert
+  with check (author_id = auth.uid()
+              and exists (select 1 from public.campus_feed f where f.id = post_id));
+create policy "comments: author, post owner or admin deletes"
+  on public.feed_comments for delete
+  using (author_id = auth.uid() or public.is_admin()
+         or exists (select 1 from public.campus_feed f where f.id = post_id and f.author_id = auth.uid()));
+
+-- The shown name on a comment comes from the profile (or "Anonymous
+-- Student"), not from whatever the app sends, so nobody can pose as someone else.
+create or replace function public.feed_comment_defaults()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is not null then
+    new.author_id  := auth.uid();
+    new.legacy     := false;
+    new.created_at := now();
+    new.author     := case when new.anonymous then 'Anonymous Student'
+                           else coalesce((select handle from public.profiles where user_id = auth.uid()), 'Student') end;
+  end if;
+  return new;
+end $$;
+drop trigger if exists feed_comment_defaults on public.feed_comments;
+create trigger feed_comment_defaults before insert on public.feed_comments
+  for each row execute function public.feed_comment_defaults();
+
+-- Copy comments stored the old way (inside the post) into the new table, once.
+do $$
+begin
+  insert into public.feed_comments (post_id, author, body, legacy, created_at)
+  select f.id,
+         left(coalesce(nullif(trim(c->>'author'), ''), 'Student'), 40),
+         left(trim(c->>'text'), 500),
+         true,
+         f.created_at
+  from public.campus_feed f
+  cross join lateral jsonb_array_elements(
+    case when jsonb_typeof(to_jsonb(f.comments)) = 'array' then to_jsonb(f.comments) else '[]'::jsonb end) c
+  where jsonb_typeof(c) = 'object'
+    and char_length(trim(coalesce(c->>'text', ''))) > 0
+    and not exists (select 1 from public.feed_comments fc where fc.post_id = f.id and fc.legacy);
+exception when others then
+  raise notice 'Skipped copying old comments: %', sqlerrm;
+end $$;
+
+-- ---- Notifications ----
+create table if not exists public.notifications (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade,  -- who receives it
+  actor_id   uuid references auth.users(id) on delete set null,          -- null when anonymous
+  actor_name text,
+  kind       text not null,     -- dm, like, reaction, comment, friend_request, friend_accept,
+                                -- join_request, join_decision, group_join, helpful, event_rsvp
+  ref_id     text,              -- post / friend / request / group / event id
+  body       text,
+  meta       text,
+  times      int not null default 1,   -- repeats are folded into one (e.g. "3 messages")
+  created_at timestamptz not null default now(),
+  read_at    timestamptz
+);
+create index if not exists notifications_user_idx on public.notifications (user_id, created_at desc);
+
+alter table public.notifications enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='notifications' loop
+    execute format('drop policy if exists %I on public.notifications', p.policyname);
+  end loop;
+end $$;
+create policy "notifications: read own"   on public.notifications for select using (user_id = auth.uid());
+create policy "notifications: update own" on public.notifications for update
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "notifications: clear own"  on public.notifications for delete using (user_id = auth.uid());
+-- The app may only flip read_at; it can never create or rewrite one.
+revoke insert, update on public.notifications from anon, authenticated;
+grant select, delete on public.notifications to authenticated;
+grant update (read_at) on public.notifications to authenticated;
+
+create or replace function public.notif_name(uid uuid)
+returns text language sql stable security definer set search_path = public as $$
+  select coalesce(nullif(trim(display_name), ''), handle) from public.profiles where user_id = uid;
+$$;
+
+-- Add a notification, or fold it into an unread one for the same thing.
+create or replace function public.push_notification(
+  recipient uuid, actor uuid, actor_label text, nkind text, ref text, nbody text, nmeta text default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare existing uuid;
+begin
+  if recipient is null or recipient = actor then return; end if;
+  select id into existing from public.notifications
+   where user_id = recipient and kind = nkind and ref_id is not distinct from ref
+     and actor_id is not distinct from actor and read_at is null
+   order by created_at desc limit 1;
+  if existing is not null then
+    update public.notifications
+       set times = times + 1, body = nbody, meta = coalesce(nmeta, meta),
+           actor_name = actor_label, created_at = now()
+     where id = existing;
+  else
+    insert into public.notifications (user_id, actor_id, actor_name, kind, ref_id, body, meta)
+    values (recipient, actor, actor_label, nkind, ref, nbody, nmeta);
+  end if;
+  delete from public.notifications where user_id = recipient and created_at < now() - interval '60 days';
+end $$;
+
+-- Undo one unread notification (e.g. someone took their reaction back).
+create or replace function public.retract_notification(recipient uuid, actor uuid, nkind text, ref text)
+returns void language plpgsql security definer set search_path = public as $$
+declare nid uuid; n int;
+begin
+  select id, times into nid, n from public.notifications
+   where user_id = recipient and kind = nkind and ref_id is not distinct from ref
+     and actor_id is not distinct from actor and read_at is null
+   order by created_at desc limit 1;
+  if nid is null then return; end if;
+  if n > 1 then update public.notifications set times = times - 1 where id = nid;
+  else delete from public.notifications where id = nid; end if;
+end $$;
+
+revoke all on function public.push_notification(uuid, uuid, text, text, text, text, text) from public, anon, authenticated;
+revoke all on function public.retract_notification(uuid, uuid, text, text) from public, anon, authenticated;
+revoke all on function public.notif_name(uuid) from public, anon, authenticated;
+
+-- Direct messages
+create or replace function public.notify_chat()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  perform public.push_notification(new.recipient_id, new.sender_id,
+    coalesce(public.notif_name(new.sender_id), 'A friend'), 'dm', new.sender_id::text, left(coalesce(new.text, ''), 90));
+  return null;
+end $$;
+drop trigger if exists notify_chat on public.campus_chat;
+create trigger notify_chat after insert on public.campus_chat
+  for each row execute function public.notify_chat();
+
+-- Likes + emoji reactions
+create or replace function public.notify_reaction()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare r record; owner uuid; ptitle text; actor uuid; nkind text;
+begin
+  if tg_op = 'INSERT' then r := new; else r := old; end if;
+  select author_id, title into owner, ptitle from public.campus_feed where id = r.post_id;
+  if owner is null or owner = r.user_id then return null; end if;
+  actor := case when r.anonymous then null else r.user_id end;
+  nkind := case when r.emoji = 'like' then 'like' else 'reaction' end;
+  if tg_op = 'INSERT' then
+    perform public.push_notification(owner, actor,
+      case when r.anonymous then 'Someone' else coalesce(public.notif_name(r.user_id), 'Someone') end,
+      nkind, r.post_id::text, left(coalesce(ptitle, ''), 90), r.emoji);
+  else
+    perform public.retract_notification(owner, actor, nkind, r.post_id::text);
+  end if;
+  return null;
+end $$;
+drop trigger if exists notify_reaction on public.feed_reactions;
+create trigger notify_reaction after insert or delete on public.feed_reactions
+  for each row execute function public.notify_reaction();
+
+-- Comments
+create or replace function public.notify_comment()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare owner uuid; ptitle text;
+begin
+  if new.legacy then return null; end if;
+  select author_id, title into owner, ptitle from public.campus_feed where id = new.post_id;
+  if owner is null or owner = new.author_id then return null; end if;
+  perform public.push_notification(owner,
+    case when new.anonymous then null else new.author_id end,
+    case when new.anonymous then 'Someone' else coalesce(public.notif_name(new.author_id), new.author, 'Someone') end,
+    'comment', new.post_id::text, left(new.body, 90), left(coalesce(ptitle, ''), 90));
+  return null;
+end $$;
+drop trigger if exists notify_comment on public.feed_comments;
+create trigger notify_comment after insert on public.feed_comments
+  for each row execute function public.notify_comment();
+
+-- A deleted post takes its notifications with it.
+create or replace function public.cleanup_post_notifications()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.notifications where kind in ('like','reaction','comment') and ref_id = old.id::text;
+  return null;
+end $$;
+drop trigger if exists cleanup_post_notifications on public.campus_feed;
+create trigger cleanup_post_notifications after delete on public.campus_feed
+  for each row execute function public.cleanup_post_notifications();
+
+-- Friend requests
+create or replace function public.notify_friendship()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' and new.status = 'pending' then
+    perform public.push_notification(new.addressee_id, new.requester_id,
+      coalesce(public.notif_name(new.requester_id), 'Someone'), 'friend_request', new.requester_id::text, null);
+  elsif tg_op = 'UPDATE' and new.status = 'accepted' and old.status is distinct from 'accepted' then
+    perform public.push_notification(new.requester_id, new.addressee_id,
+      coalesce(public.notif_name(new.addressee_id), 'Someone'), 'friend_accept', new.addressee_id::text, null);
+    update public.notifications set read_at = now()
+     where user_id = new.addressee_id and kind = 'friend_request'
+       and ref_id = new.requester_id::text and read_at is null;
+  elsif tg_op = 'UPDATE' and new.status <> 'pending' then
+    update public.notifications set read_at = now()
+     where user_id = new.addressee_id and kind = 'friend_request'
+       and ref_id = new.requester_id::text and read_at is null;
+  elsif tg_op = 'DELETE' and old.status = 'pending' then
+    delete from public.notifications
+     where user_id = old.addressee_id and kind = 'friend_request'
+       and ref_id = old.requester_id::text and read_at is null;
+  end if;
+  return null;
+end $$;
+drop trigger if exists notify_friendship on public.friendships;
+create trigger notify_friendship after insert or update or delete on public.friendships
+  for each row execute function public.notify_friendship();
+
+-- School join requests (admins get the request, the student gets the answer)
+create or replace function public.notify_join_request()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare a record; sname text;
+begin
+  if tg_op = 'DELETE' then
+    delete from public.notifications where kind = 'join_request' and ref_id = old.id::text and read_at is null;
+    return null;
+  end if;
+  select name into sname from public.schools where id = new.school_id;
+  if new.status = 'pending' and (tg_op = 'INSERT' or old.status is distinct from 'pending') then
+    for a in select user_id from public.admins loop
+      perform public.push_notification(a.user_id, new.user_id,
+        coalesce(public.notif_name(new.user_id), 'A student'), 'join_request', new.id::text, sname);
+    end loop;
+  elsif tg_op = 'UPDATE' and new.status in ('approved','denied') and old.status = 'pending' then
+    perform public.push_notification(new.user_id, null, 'School admin', 'join_decision',
+      new.id::text, sname, new.status);
+    update public.notifications set read_at = now()
+     where kind = 'join_request' and ref_id = new.id::text and read_at is null;
+  end if;
+  return null;
+end $$;
+drop trigger if exists notify_join_request on public.school_join_requests;
+create trigger notify_join_request after insert or update or delete on public.school_join_requests
+  for each row execute function public.notify_join_request();
+
+-- Someone joined (or left) your study group
+create or replace function public.notify_group_join()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare r record; owner uuid; gname text;
+begin
+  if tg_op = 'INSERT' then r := new; else r := old; end if;
+  select creator_id, name into owner, gname from public.study_groups where id = r.group_id;
+  if owner is null or owner = r.user_id then return null; end if;
+  if tg_op = 'INSERT' then
+    perform public.push_notification(owner, r.user_id,
+      coalesce(public.notif_name(r.user_id), 'Someone'), 'group_join', r.group_id::text, gname);
+  else
+    perform public.retract_notification(owner, r.user_id, 'group_join', r.group_id::text);
+  end if;
+  return null;
+end $$;
+drop trigger if exists notify_group_join on public.study_group_members;
+create trigger notify_group_join after insert or delete on public.study_group_members
+  for each row execute function public.notify_group_join();
+
+-- Your teacher review / note was marked helpful (voters stay unnamed)
+create or replace function public.notify_helpful()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare r record; owner uuid; teacher uuid; pbody text;
+begin
+  if tg_op = 'INSERT' then r := new; else r := old; end if;
+  select author_id, teacher_id, body into owner, teacher, pbody from public.teacher_posts where id = r.post_id;
+  if owner is null or owner = r.user_id then return null; end if;
+  if tg_op = 'INSERT' then
+    perform public.push_notification(owner, null, 'Someone', 'helpful', r.post_id::text,
+      left(coalesce(pbody, ''), 90), teacher::text);
+  else
+    perform public.retract_notification(owner, null, 'helpful', r.post_id::text);
+  end if;
+  return null;
+end $$;
+drop trigger if exists notify_helpful on public.teacher_post_votes;
+create trigger notify_helpful after insert or delete on public.teacher_post_votes
+  for each row execute function public.notify_helpful();
+
+-- People RSVP'd to an event you created
+create or replace function public.notify_rsvp()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare r record; owner uuid; etitle text;
+begin
+  if tg_op = 'INSERT' then r := new; else r := old; end if;
+  select created_by, title into owner, etitle from public.campus_events where id = r.event_id;
+  if owner is null or owner = r.user_id then return null; end if;
+  if tg_op = 'INSERT' then
+    perform public.push_notification(owner, null, 'Someone', 'event_rsvp', r.event_id::text, etitle);
+  else
+    perform public.retract_notification(owner, null, 'event_rsvp', r.event_id::text);
+  end if;
+  return null;
+end $$;
+drop trigger if exists notify_rsvp on public.event_rsvps;
+create trigger notify_rsvp after insert or delete on public.event_rsvps
+  for each row execute function public.notify_rsvp();
+
+-- Friend requests and join requests that were already waiting get a
+-- notification now, so nothing pending is missed.
+insert into public.notifications (user_id, actor_id, actor_name, kind, ref_id, created_at)
+select f.addressee_id, f.requester_id, coalesce(public.notif_name(f.requester_id), 'Someone'),
+       'friend_request', f.requester_id::text, f.created_at
+from public.friendships f
+where f.status = 'pending'
+  and not exists (select 1 from public.notifications n
+                  where n.user_id = f.addressee_id and n.kind = 'friend_request'
+                    and n.ref_id = f.requester_id::text);
+
+insert into public.notifications (user_id, actor_id, actor_name, kind, ref_id, body, created_at)
+select a.user_id, r.user_id, coalesce(public.notif_name(r.user_id), 'A student'),
+       'join_request', r.id::text, s.name, r.created_at
+from public.school_join_requests r
+join public.schools s on s.id = r.school_id
+cross join public.admins a
+where r.status = 'pending'
+  and not exists (select 1 from public.notifications n
+                  where n.user_id = a.user_id and n.kind = 'join_request' and n.ref_id = r.id::text);
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -971,7 +1362,8 @@ declare
 begin
   foreach t in array array['campus_chat','campus_feed','friendships','study_groups','study_group_members',
                            'teachers','teacher_posts','teacher_post_votes',
-                           'campus_events','event_rsvps','school_join_requests','schools'] loop
+                           'campus_events','event_rsvps','school_join_requests','schools',
+                           'feed_reactions','feed_comments','notifications'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'
