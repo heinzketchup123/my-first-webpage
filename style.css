@@ -3016,6 +3016,15 @@ html.ios-short-viewport.layout-phone .mobile-frame {
     var(--bg-color);
 }
 
+/* "Fill the whole screen (test)" in Settings: size the app with 100lvh,
+   the one height iOS 26 reports in full. Untested on real phones, so
+   script.js asks for confirmation and undoes it automatically. */
+html.ios-fill-lvh,
+html.ios-fill-lvh body { height: 100lvh; }
+html.ios-fill-lvh.layout-phone .mobile-frame { height: 100lvh; }
+.settings-list li.ios-only { display: none; }
+html.ios-standalone .settings-list li.ios-only { display: flex; }
+
 /* Light theme under the see-through status bar (the app was added to the
    Home Screen in dark mode): the clock and battery are always white, so a
    soft shade behind them keeps them readable. It sits above every overlay

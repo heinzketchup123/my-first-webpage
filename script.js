@@ -175,6 +175,7 @@ document.addEventListener("DOMContentLoaded", () => {
   syncDeviceAlertsToggle();
   document.addEventListener('visibilitychange', markOpenThreadRead);
   let layoutTimer = null;
+  applyIosFill();
   detectShortViewport();
   window.addEventListener('resize', () => {
     clearTimeout(layoutTimer);
@@ -608,7 +609,7 @@ function applyLayout() {
 // app uses a solid status bar) the numbers match and nothing changes.
 function detectShortViewport() {
   const root = document.documentElement;
-  if (!root.classList.contains('ios-standalone') || !document.body) {
+  if (!root.classList.contains('ios-standalone') || !document.body || root.classList.contains('ios-fill-lvh')) {
     root.classList.remove('ios-short-viewport');
     return;
   }
@@ -621,6 +622,70 @@ function detectShortViewport() {
   const screenH = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
   const missing = screenH - window.innerHeight;
   root.classList.toggle('ios-short-viewport', safeTop > 0 && missing > 0 && Math.abs(missing - safeTop) <= 4);
+}
+
+// "Fill the whole screen (test)" — iPhone Home Screen app only. Some
+// developers report 100lvh (the one height iOS 26 reports in full) covers
+// the strip; others found the strip can't be drawn on at all, and nobody
+// has confirmed either on a real phone. So it's an opt-in test that asks
+// "can you see the tab bar?" and undoes itself unless you say keep it.
+const IOS_FILL_KEY = 'iosFillScreen';
+let iosFillTimer = null;
+
+function iosFillOn() {
+  try { return localStorage.getItem(IOS_FILL_KEY) === 'on'; } catch (_) { return false; }
+}
+
+function applyIosFill() {
+  const root = document.documentElement;
+  const on = root.classList.contains('ios-standalone') && iosFillOn();
+  root.classList.toggle('ios-fill-lvh', on);
+  if (on) {
+    // One report says iOS only corrects the height after the page scrolls once.
+    window.scrollTo(0, 1);
+    requestAnimationFrame(() => window.scrollTo(0, 0));
+  }
+  document.getElementById('ios-fill-toggle')?.classList.toggle('active', on);
+}
+
+function setIosFill(on) {
+  try { localStorage.setItem(IOS_FILL_KEY, on ? 'on' : 'off'); } catch (_) {}
+  applyIosFill();
+  detectShortViewport();
+}
+
+function toggleIosFill() {
+  if (iosFillOn()) {
+    setIosFill(false);
+    return showToast('Back to the normal layout.', 'info');
+  }
+  setIosFill(true);
+  let left = 12;
+  openModal('Can you see the tab bar?', `
+    <div style="text-align:left;">
+      <p style="font-size:0.85rem; margin-bottom:10px;">Look at the very bottom of the screen. Is the Home · Teachers · Groups · Chat · Me bar fully visible, sitting on the bottom edge?</p>
+      <p id="ios-fill-count" style="font-size:0.78rem; color:var(--sub-text-color); margin-bottom:12px;">Undoing in ${left} s unless you keep it…</p>
+      <div class="modal-actions" style="margin-top:0;">
+        <button class="secondary-btn" onclick="finishIosFill(false)">No, undo</button>
+        <button class="primary-btn" onclick="finishIosFill(true)">Yes, keep it</button>
+      </div>
+    </div>`);
+  clearInterval(iosFillTimer);
+  iosFillTimer = setInterval(() => {
+    left -= 1;
+    const el = document.getElementById('ios-fill-count');
+    if (el) el.textContent = `Undoing in ${left} s unless you keep it…`;
+    if (left <= 0) finishIosFill(false);
+  }, 1000);
+}
+
+function finishIosFill(keep) {
+  clearInterval(iosFillTimer);
+  iosFillTimer = null;
+  closeModalForce();
+  if (keep) return showToast('Full screen kept.', 'success');
+  setIosFill(false);
+  showToast('Undone: back to the normal layout.', 'info');
 }
 
 function setLayout(layout) {
