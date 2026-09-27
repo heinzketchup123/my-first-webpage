@@ -857,6 +857,20 @@ create trigger guard_profile_school
   before insert or update of school_id on public.profiles
   for each row execute function public.guard_profile_school();
 
+-- Students an admin removed from a school can't rejoin it until an admin
+-- lets them back in (see section 6i). Written only by admin functions.
+create table if not exists public.school_bans (
+  school_id  uuid not null references public.schools(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  banned_by  uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  primary key (school_id, user_id)
+);
+alter table public.school_bans enable row level security;
+drop policy if exists "bans: admins and the student read" on public.school_bans;
+create policy "bans: admins and the student read" on public.school_bans
+  for select using (public.is_admin() or user_id = auth.uid());
+
 create or replace function public.join_school(target uuid, code text default null)
 returns text   -- 'joined' or 'pending'
 language plpgsql
@@ -875,6 +889,9 @@ begin
   if not found then raise exception 'That school no longer exists'; end if;
 
   if not public.is_admin() then
+    if exists (select 1 from public.school_bans b where b.school_id = target and b.user_id = auth.uid()) then
+      raise exception 'An admin removed you from this school. Ask an admin to let you back in.';
+    end if;
     if s.join_mode = 'code' then
       select join_code into secret from public.school_join_codes where school_id = target;
       if secret is null or code is null or lower(trim(code)) <> lower(trim(secret)) then
@@ -1350,6 +1367,82 @@ where r.status = 'pending'
                   where n.user_id = a.user_id and n.kind = 'join_request' and n.ref_id = r.id::text);
 
 -- ============================================================
+-- 6i. ADMIN: SCHOOL MEMBERS (see everyone, remove, promote)
+-- ============================================================
+-- Admins can see who's in each school (profiles are already public), who
+-- the other admins are, remove a student from a school (they can't rejoin
+-- until an admin lets them back in) and make or unmake admins. Every
+-- change goes through these functions, which check is_admin() first.
+
+-- Admins can see the full admin list (everyone else only sees their own row).
+drop policy if exists "admins: admins see all" on public.admins;
+create policy "admins: admins see all" on public.admins for select using (public.is_admin());
+
+create or replace function public.admin_remove_member(target_user uuid, target_school uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare sname text;
+begin
+  if not public.is_admin() then raise exception 'Only admins can remove students'; end if;
+  if target_user = auth.uid() then raise exception 'You can''t remove yourself'; end if;
+  if exists (select 1 from public.admins where user_id = target_user) then
+    raise exception 'That person is an admin. Remove their admin role first.';
+  end if;
+  select name into sname from public.schools where id = target_school;
+  if sname is null then raise exception 'That school no longer exists'; end if;
+
+  -- Leave the school (the profile guard allows setting it to null).
+  update public.profiles set school_id = null
+   where user_id = target_user and school_id = target_school;
+  -- Can't rejoin until an admin allows it.
+  insert into public.school_bans (school_id, user_id, banned_by)
+  values (target_school, target_user, auth.uid())
+  on conflict (school_id, user_id) do nothing;
+  -- Close any pending request and drop their study group memberships there.
+  update public.school_join_requests
+     set status = 'denied', reviewed_at = now(), reviewed_by = auth.uid()
+   where school_id = target_school and user_id = target_user and status = 'pending';
+  delete from public.study_group_members m
+   using public.study_groups g
+   where m.group_id = g.id and g.school_id = target_school and m.user_id = target_user;
+
+  perform public.push_notification(target_user, null, 'School admin', 'removed_from_school',
+                                   target_school::text, sname);
+end $$;
+
+create or replace function public.admin_allow_back(target_user uuid, target_school uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Only admins can do that'; end if;
+  delete from public.school_bans where school_id = target_school and user_id = target_user;
+end $$;
+
+create or replace function public.admin_set_admin(target_user uuid, make boolean)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Only admins can change admins'; end if;
+  if not exists (select 1 from public.profiles where user_id = target_user) then
+    raise exception 'That account no longer exists';
+  end if;
+  if make then
+    insert into public.admins (user_id) values (target_user) on conflict do nothing;
+    perform public.push_notification(target_user, auth.uid(),
+      coalesce(public.notif_name(auth.uid()), 'An admin'), 'promoted', null, null);
+  else
+    if (select count(*) from public.admins) <= 1 then
+      raise exception 'There has to be at least one admin';
+    end if;
+    delete from public.admins where user_id = target_user;
+  end if;
+end $$;
+
+revoke all on function public.admin_remove_member(uuid, uuid) from public, anon;
+revoke all on function public.admin_allow_back(uuid, uuid) from public, anon;
+revoke all on function public.admin_set_admin(uuid, boolean) from public, anon;
+grant execute on function public.admin_remove_member(uuid, uuid) to authenticated;
+grant execute on function public.admin_allow_back(uuid, uuid) to authenticated;
+grant execute on function public.admin_set_admin(uuid, boolean) to authenticated;
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -1363,7 +1456,7 @@ begin
   foreach t in array array['campus_chat','campus_feed','friendships','study_groups','study_group_members',
                            'teachers','teacher_posts','teacher_post_votes',
                            'campus_events','event_rsvps','school_join_requests','schools',
-                           'feed_reactions','feed_comments','notifications'] loop
+                           'feed_reactions','feed_comments','notifications','admins','school_bans'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'

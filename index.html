@@ -400,6 +400,16 @@
           <p class="admin-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Manage who can join each school below.</p>
           <div class="friends-subheading">Join requests</div>
           <div id="admin-request-list"></div>
+          <div class="friends-subheading admin-members-head" style="margin-top:12px;">
+            <span>Students</span>
+            <button class="text-btn" onclick="fetchAdminMembers()" aria-label="Refresh student list"><i class="fa-solid fa-rotate"></i></button>
+          </div>
+          <div class="admin-members-controls">
+            <select id="admin-members-school" class="mini-select" onchange="setAdminMembersSchool(this.value)" aria-label="School"></select>
+            <input id="admin-members-search" class="auth-input" type="search" autocomplete="off"
+                   placeholder="Search name or @handle" oninput="renderAdminMembers()" />
+          </div>
+          <div id="admin-member-list"></div>
           <div class="friends-subheading" style="margin-top:12px;">Schools</div>
           <div id="admin-school-list"></div>
         </div>

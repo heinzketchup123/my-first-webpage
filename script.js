@@ -293,6 +293,8 @@ function initSupabaseRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'event_rsvps' }, () => onEventsChanged())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'school_join_requests' }, p => onJoinRequestChanged(p))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'schools' }, () => onSchoolsChanged())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'admins' }, () => onAdminsChanged())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'school_bans' }, () => { if (isAdmin) fetchAdminMembers(); })
     .subscribe();
 }
 
@@ -443,6 +445,7 @@ async function logout() {
   teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
   calEvents = []; calRsvps = {}; isAdmin = false;
   adminJoinRequests = []; adminJoinCodes = {}; myJoinRequests = {};
+  adminMembers = []; adminBans = []; adminIds = new Set(); adminMembersSchoolId = null;
   resetFeedAndNotifState();
   updateSchoolChrome();
   switchTab('home-view');
@@ -693,7 +696,7 @@ function switchTab(viewId, element) {
     fetchTeacherDirectory();
   }
   if (viewId === 'events-view') { fetchEvents(); }
-  if (viewId === 'settings-view') { renderAdminPanel(); }
+  if (viewId === 'settings-view') { renderAdminPanel(); if (isAdmin) fetchAdminMembers(); }
 }
 
 // -------------------- Notifications --------------------
@@ -734,6 +737,11 @@ function onNotificationChanged(payload) {
         const text = notifPlainText(row);
         if (row.kind !== 'dm' || !isViewActive('chat-view')) showToast(text, 'info', 4000);
         showDeviceAlert(row, text);
+      }
+      // An admin removed me from my school: the database already cut access,
+      // so reload my profile (opens the school picker) and clear the old data.
+      if (row.kind === 'removed_from_school' && row.ref_id === currentSchoolId) {
+        ensureProfile().then(() => loadAllSupabaseData());
       }
     }
   }
@@ -815,7 +823,9 @@ function describeNotif(n) {
     case 'group_join':     return { icon: 'fa-user-group',     html: `${who} joined your study group <strong>${escapeHtml(n.body || '')}</strong>` };
     case 'helpful':        return { icon: 'fa-thumbs-up',      html: `${times > 1 ? `<strong>${times} people</strong>` : 'Someone'} found your teacher post helpful`, sub: n.body };
     case 'event_rsvp':     return { icon: 'fa-calendar-check', html: `<strong>${times} ${times === 1 ? 'person is' : 'people are'}</strong> going to <strong>${escapeHtml(n.body || 'your event')}</strong>` };
-    default:               return { icon: 'fa-bell',           html: escapeHtml(n.body || 'New activity') };
+    case 'promoted':       return { icon: 'fa-shield-halved',  html: `${who} made you an admin`, sub: 'Admin tools are in Me → Admin' };
+    case 'removed_from_school': return { icon: 'fa-user-slash', html: `An admin removed you from <strong>${escapeHtml(n.body || 'your school')}</strong>`, sub: 'Tap to pick a school' };
+    default:              return { icon: 'fa-bell',           html: escapeHtml(n.body || 'New activity') };
   }
 }
 
@@ -853,6 +863,8 @@ async function openNotification(id) {
     case 'group_join':  switchTab('groups-view'); break;
     case 'event_rsvp':  switchTab('events-view'); break;
     case 'helpful':     if (n.meta) openTeacherPage(n.meta); break;
+    case 'promoted':    switchTab('settings-view'); document.getElementById('admin-card')?.scrollIntoView({ block: 'start' }); break;
+    case 'removed_from_school': openSchoolPicker(!currentSchoolId); break;
   }
 }
 
@@ -1047,9 +1059,8 @@ async function ensureProfile() {
     profileMap[currentUserId] = { handle: data.handle, display_name: data.display_name };
   }
   await refreshSchoolsCache();
-  if (currentSchoolId) {
-    currentSchool = schoolsCache.find(s => s.id === currentSchoolId) || null;
-  }
+  // (Reset when there's no school, e.g. after an admin removed me from it.)
+  currentSchool = currentSchoolId ? (schoolsCache.find(s => s.id === currentSchoolId) || null) : null;
   updateSchoolChrome();
   await Promise.all([fetchAdminStatus(), fetchMyJoinRequests()]);
   // If signed in without a school, open the picker before doing anything else.
@@ -2353,8 +2364,8 @@ async function fetchAdminStatus() {
     const { data } = await supabaseClient.from('admins').select('user_id').eq('user_id', currentUserId).maybeSingle();
     isAdmin = !!data;
   }
-  if (isAdmin) await fetchAdminJoinData();
-  else { adminJoinCodes = {}; adminJoinRequests = []; renderAdminPanel(); }
+  if (isAdmin) { await fetchAdminJoinData(); fetchAdminMembers(); }
+  else { adminJoinCodes = {}; adminJoinRequests = []; adminMembers = []; adminBans = []; renderAdminPanel(); }
 }
 
 async function fetchAdminJoinData() {
@@ -2422,6 +2433,7 @@ function renderAdminPanel() {
       }).join('')
     : '<p class="friends-empty-inner">No schools.</p>';
   if (adminEditingSchoolId) renderJoinRuleFields();
+  renderAdminMembers();
 }
 
 function joinRuleEditorHtml(s) {
@@ -2485,6 +2497,169 @@ async function reviewJoinRequest(requestId, approve) {
   if (error) return showToast('Could not update request: ' + error.message, 'error');
   showToast(approve ? 'Approved — they\'re in.' : 'Request denied.', approve ? 'success' : 'info');
   fetchAdminJoinData();
+  fetchAdminMembers();
+}
+
+// -------------------- Admin: school members --------------------
+// Everyone in a school, plus remove (they can't rejoin until let back in)
+// and make / unmake admin. The database functions check is_admin().
+let adminMembersSchoolId = null;
+let adminMembers = [];          // profiles in the selected school
+let adminIds = new Set();       // every admin's user_id
+let adminBans = [];             // students removed from the selected school
+let adminMembersState = 'idle'; // 'idle' | 'loading' | 'ok' | 'error:<msg>'
+
+function setAdminMembersSchool(id) {
+  adminMembersSchoolId = id || null;
+  fetchAdminMembers();
+}
+
+async function fetchAdminMembers() {
+  if (!isAdmin || !isSupabaseConnected) return;
+  if (!adminMembersSchoolId || !schoolsCache.some(s => s.id === adminMembersSchoolId)) {
+    adminMembersSchoolId = currentSchoolId || schoolsCache[0]?.id || null;
+  }
+  const sid = adminMembersSchoolId;
+  if (!sid) { adminMembers = []; adminBans = []; adminMembersState = 'ok'; return renderAdminMembers(); }
+  adminMembersState = 'loading';
+  renderAdminMembers();
+  const [mem, adm, bans] = await Promise.all([
+    supabaseClient.from('profiles').select('user_id, handle, display_name, created_at')
+      .eq('school_id', sid).order('handle').limit(1000),
+    supabaseClient.from('admins').select('user_id'),
+    supabaseClient.from('school_bans').select('user_id, created_at').eq('school_id', sid)
+  ]);
+  if (sid !== adminMembersSchoolId) return;           // picked another school meanwhile
+  if (mem.error) { adminMembersState = 'error:' + mem.error.message; return renderAdminMembers(); }
+  adminMembers = mem.data || [];
+  adminIds = new Set((adm.data || []).map(a => a.user_id));
+  adminBans = bans.error ? [] : (bans.data || []);    // table missing until SCHEMA.sql 6g is re-run
+  await fetchProfilesByIds(adminBans.map(b => b.user_id));
+  adminMembersState = 'ok';
+  renderAdminMembers();
+}
+
+function renderAdminMembers() {
+  const sel = document.getElementById('admin-members-school');
+  const list = document.getElementById('admin-member-list');
+  if (!sel || !list || !isAdmin) return;
+
+  sel.innerHTML = schoolsCache.map(s =>
+    `<option value="${escapeAttr(s.id)}" ${s.id === adminMembersSchoolId ? 'selected' : ''}>${escapeHtml(s.name)}${s.id === currentSchoolId ? ' (your school)' : ''}</option>`
+  ).join('') || '<option value="">No schools</option>';
+
+  if (adminMembersState === 'loading' && !adminMembers.length) {
+    list.innerHTML = '<p class="friends-empty-inner"><i class="fa-solid fa-spinner fa-spin"></i> Loading students…</p>';
+    return;
+  }
+  if (adminMembersState.startsWith('error:')) {
+    list.innerHTML = `<p class="friends-empty-inner">Couldn't load students: ${escapeHtml(adminMembersState.slice(6))}</p>`;
+    return;
+  }
+
+  const q = (document.getElementById('admin-members-search')?.value || '').trim().toLowerCase().replace(/^@/, '');
+  const shown = adminMembers.filter(m => !q
+    || (m.handle || '').toLowerCase().includes(q) || (m.display_name || '').toLowerCase().includes(q));
+  const nAdmins = adminMembers.filter(m => adminIds.has(m.user_id)).length;
+
+  const rows = shown.map(m => {
+    const name = m.display_name || m.handle || 'Student';
+    const me = m.user_id === currentUserId;
+    const admin = adminIds.has(m.user_id);
+    const uid = escapeAttr(m.user_id);
+    const actions = me ? '' : `
+      <button class="secondary-btn friend-btn-sm" onclick="adminToggleAdmin('${uid}', ${!admin})">${admin ? 'Remove admin' : 'Make admin'}</button>
+      ${admin ? '' : `<button class="secondary-btn friend-btn-sm danger-text" onclick="adminRemoveMember('${uid}')">Remove</button>`}`;
+    return `
+      <div class="admin-row admin-member-row">
+        <span class="friend-avatar sm">${escapeHtml(name[0].toUpperCase())}</span>
+        <div class="school-row-text">
+          <strong>${escapeHtml(name)}${admin ? ' <span class="admin-badge">ADMIN</span>' : ''}${me ? ' <small>(you)</small>' : ''}</strong>
+          <small>@${escapeHtml(m.handle || '')}${m.created_at ? ' · joined the app ' + escapeHtml(timeAgo(m.created_at)) : ''}</small>
+        </div>
+        <div class="admin-member-actions">${actions}</div>
+      </div>`;
+  }).join('');
+
+  const removed = adminBans.filter(b => {
+    const p = profileMap[b.user_id] || {};
+    return !q || (p.handle || '').toLowerCase().includes(q) || (p.display_name || '').toLowerCase().includes(q);
+  }).map(b => {
+    const p = profileMap[b.user_id] || {};
+    const name = p.display_name || p.handle || 'A student';
+    return `
+      <div class="admin-row admin-member-row">
+        <span class="friend-avatar sm">${escapeHtml(name[0].toUpperCase())}</span>
+        <div class="school-row-text">
+          <strong>${escapeHtml(name)}</strong>
+          <small>${p.handle ? '@' + escapeHtml(p.handle) + ' · ' : ''}removed ${escapeHtml(timeAgo(b.created_at))}</small>
+        </div>
+        <div class="admin-member-actions">
+          <button class="secondary-btn friend-btn-sm" onclick="adminAllowBack('${escapeAttr(b.user_id)}')">Let back in</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  const count = `${adminMembers.length} ${adminMembers.length === 1 ? 'person' : 'people'}${nAdmins ? ` · ${nAdmins} admin${nAdmins === 1 ? '' : 's'}` : ''}`;
+  list.innerHTML = `
+    <p class="admin-hint admin-members-count">${count}</p>
+    ${rows || `<p class="friends-empty-inner">${q ? 'No one matches that search.' : 'No one has joined this school yet.'}</p>`}
+    ${removed ? `<div class="friends-subheading" style="margin-top:10px;">Removed from this school</div>${removed}` : ''}`;
+}
+
+function adminRpcError(error) {
+  const msg = error?.message || 'Something went wrong';
+  if (/admin_(remove_member|allow_back|set_admin)/.test(msg) && /(function|schema cache)/i.test(msg)) {
+    return 'Run the updated SCHEMA.sql in Supabase first (section 6i adds this).';
+  }
+  return msg;
+}
+
+function memberName(userId) {
+  const p = adminMembers.find(m => m.user_id === userId) || profileMap[userId] || {};
+  return p.display_name || p.handle || 'this student';
+}
+
+async function adminToggleAdmin(userId, make) {
+  const name = memberName(userId);
+  const ok = confirm(make
+    ? `Make ${name} an admin?\n\nAdmins can delete posts, reviews, teachers, groups, events and schools, change join rules, and remove or promote students — at every school.`
+    : `Remove ${name}'s admin role?`);
+  if (!ok) return;
+  const { error } = await supabaseClient.rpc('admin_set_admin', { target_user: userId, make });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast(make ? `${name} is now an admin.` : `${name} is no longer an admin.`, 'success');
+  fetchAdminMembers();
+}
+
+async function adminRemoveMember(userId) {
+  const name = memberName(userId);
+  const school = schoolsCache.find(s => s.id === adminMembersSchoolId)?.name || 'this school';
+  const ok = confirm(`Remove ${name} from ${school}?\n\nThey lose access to its feed, study groups, teacher pages and calendar right away, and can't rejoin until an admin lets them back in. Their posts and reviews stay.`);
+  if (!ok) return;
+  const { error } = await supabaseClient.rpc('admin_remove_member', { target_user: userId, target_school: adminMembersSchoolId });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast(`${name} was removed from ${school}.`, 'success');
+  fetchAdminMembers();
+}
+
+async function adminAllowBack(userId) {
+  const name = memberName(userId);
+  const { error } = await supabaseClient.rpc('admin_allow_back', { target_user: userId, target_school: adminMembersSchoolId });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast(`${name} can join again.`, 'success');
+  fetchAdminMembers();
+}
+
+// Realtime: someone was promoted/demoted (maybe me), or a removal changed.
+function onAdminsChanged() {
+  clearTimeout(onAdminsChanged.t);
+  onAdminsChanged.t = setTimeout(async () => {
+    const was = isAdmin;
+    await fetchAdminStatus();
+    // (Being made an admin also arrives as a notification, which shows its own toast.)
+    if (!isAdmin && was) showToast('Your admin role was removed.', 'info', 6000);
+  }, 300);
 }
 
 // Realtime: an admin sees new requests; a student gets let in when approved.
