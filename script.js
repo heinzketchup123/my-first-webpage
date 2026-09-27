@@ -210,6 +210,7 @@ document.addEventListener("DOMContentLoaded", () => {
       calEvents = []; calRsvps = {}; isAdmin = false;
       adminJoinRequests = []; adminJoinCodes = {}; myJoinRequests = {};
       resetFeedAndNotifState();
+      updateSchoolChrome();
       document.getElementById('auth-screen').style.display = 'flex';
       renderEmptyStates();
     }
@@ -438,6 +439,7 @@ async function logout() {
   calEvents = []; calRsvps = {}; isAdmin = false;
   adminJoinRequests = []; adminJoinCodes = {}; myJoinRequests = {};
   resetFeedAndNotifState();
+  updateSchoolChrome();
   switchTab('home-view');
   renderEmptyStates();
 
@@ -651,7 +653,13 @@ function switchTab(viewId, element) {
   document.querySelector('.content-container')?.scrollTo(0, 0);
 
   if (viewId === 'chat-view')   { renderFriendsStrip(); renderDMThread(); markOpenThreadRead(); }
-  if (viewId === 'search-view') { fetchTeacherDirectory(); }
+  if (viewId === 'search-view') {
+    // Keep the top-bar search (computer layout) showing the same text.
+    const g = document.getElementById('global-search');
+    const p = document.getElementById('teacher-search-input');
+    if (g && p && g.value !== p.value) g.value = p.value;
+    fetchTeacherDirectory();
+  }
   if (viewId === 'events-view') { fetchEvents(); }
   if (viewId === 'settings-view') { renderAdminPanel(); }
 }
@@ -1071,6 +1079,59 @@ function updateSchoolChrome() {
   }
   const label = document.getElementById('current-school-label');
   if (label) label.textContent = currentSchool ? currentSchool.name : 'No school set';
+
+  // Computer layout: school chip in the top bar + profile card in the sidebar
+  const schoolName = currentSchool ? currentSchool.name : (currentUserId ? 'Pick a school' : 'No school');
+  const chip = document.getElementById('topbar-school');
+  if (chip) chip.textContent = schoolName;
+  const who = currentUserId ? (currentHandle || (currentUser || '').split('@')[0] || 'Student') : 'Not signed in';
+  const nameEl = document.getElementById('sidebar-user-name');
+  if (nameEl) nameEl.textContent = who;
+  const schoolEl = document.getElementById('sidebar-user-school');
+  if (schoolEl) schoolEl.textContent = schoolName;
+  const av = document.getElementById('sidebar-avatar');
+  if (av) av.textContent = currentUserId ? who[0].toUpperCase() : '?';
+}
+
+// Top-bar search (computer layout): searches teachers from any page.
+function globalTeacherSearch(value) {
+  const input = document.getElementById('teacher-search-input');
+  if (input) input.value = value;
+  if (value.trim() && !isViewActive('search-view')) {
+    switchTab('search-view');
+    document.getElementById('global-search')?.focus();
+  }
+  renderTeacherDirectory();
+}
+
+// Home side panels (computer layout): next few events + my study groups.
+function renderHomeSide() {
+  const up = document.getElementById('home-upcoming');
+  if (up) {
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    const next = calEvents.filter(e => new Date(e.starts_at) >= startOfToday).slice(0, 3);
+    up.innerHTML = next.length ? next.map(e => {
+      const d = new Date(e.starts_at);
+      const when = e.all_day ? 'All day' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      return `
+        <button class="side-item" onclick="switchTab('events-view'); selectCalDay('${dayKey(d)}')">
+          <span class="side-date"><small>${d.toLocaleDateString([], { month: 'short' })}</small><b>${d.getDate()}</b></span>
+          <span class="side-text"><strong>${escapeHtml(e.title)}</strong>
+            <small>${dayKey(d) === dayKey(new Date()) ? 'Today' : d.toLocaleDateString([], { weekday: 'short' })} · ${when}</small></span>
+        </button>`;
+    }).join('') : `<p class="side-empty">No upcoming events. <button class="text-btn" onclick="openEventModal()">Add one</button></p>`;
+  }
+  const gr = document.getElementById('home-groups');
+  if (gr) {
+    const mine = studyGroups.filter(g => g.joined).slice(0, 3);
+    gr.innerHTML = mine.length ? mine.map(g => `
+      <button class="side-item" onclick="openGroupDetailModal('${escapeAttr(g.id)}')">
+        <span class="side-icon"><i class="fa-solid fa-book-open"></i></span>
+        <span class="side-text"><strong>${escapeHtml(g.name || '')}</strong>
+          <small>${escapeHtml(g.course || '')}${g.schedule ? ' · ' + escapeHtml(g.schedule) : ''}</small></span>
+      </button>`).join('')
+      : `<p class="side-empty">You're not in any groups yet. <button class="text-btn" onclick="switchTab('groups-view')">Find one</button></p>`;
+  }
 }
 
 // -------------------- School picker --------------------
@@ -1942,6 +2003,7 @@ async function submitPost(event) {
 
 // Study Groups Engine
 function renderGroups(filter = 'all') {
+  renderHomeSide();
   const container = document.getElementById('groups-list');
   if (!container) return;
   container.innerHTML = '';
@@ -2123,6 +2185,7 @@ function renderCalendar() {
     grid.innerHTML = cells.join('');
   }
   renderEventList();
+  renderHomeSide();
 }
 
 function renderEventList() {

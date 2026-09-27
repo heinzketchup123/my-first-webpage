@@ -64,7 +64,17 @@
         <span class="brand-badge">PULSE</span>
         <span class="brand-title">Campus Hub</span>
       </div>
+      <!-- Computer layout: search teachers from any page -->
+      <label class="topbar-search desktop-only">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="search" id="global-search" placeholder="Search teachers or subjects…" autocomplete="off"
+               oninput="globalTeacherSearch(this.value)" onkeydown="if (event.key === 'Escape') { this.value = ''; globalTeacherSearch(''); this.blur(); }" />
+      </label>
       <div class="header-actions">
+        <button class="school-chip desktop-only" onclick="openSchoolPicker(false)" title="Change school">
+          <i class="fa-solid fa-graduation-cap"></i>
+          <span id="topbar-school">No school</span>
+        </button>
         <!-- Shown in the phone layout on a wide screen: jump back to the computer layout -->
         <button class="icon-header-btn layout-quick-btn wide-only phone-only" onclick="toggleLayoutQuick()" aria-label="Switch to computer layout" title="Switch to computer layout">
           <i class="fa-solid fa-desktop"></i>
@@ -135,6 +145,22 @@
             <i class="fa-solid fa-calendar-check"></i>
             <span>Events</span>
           </button>
+        </div>
+
+        <!-- Computer layout: side panels next to the feed -->
+        <div class="side-panel desktop-only" id="home-upcoming-panel">
+          <div class="side-panel-head">
+            <h3><i class="fa-solid fa-calendar-days"></i> Coming up</h3>
+            <button class="text-btn" onclick="switchTab('events-view')">Calendar</button>
+          </div>
+          <div id="home-upcoming" class="side-list"></div>
+        </div>
+        <div class="side-panel desktop-only" id="home-groups-panel">
+          <div class="side-panel-head">
+            <h3><i class="fa-solid fa-user-group"></i> My study groups</h3>
+            <button class="text-btn" onclick="switchTab('groups-view')">All groups</button>
+          </div>
+          <div id="home-groups" class="side-list"></div>
         </div>
 
         <!-- Campus Activity Feed -->
@@ -490,6 +516,7 @@
       <button class="primary-btn sidebar-post-btn desktop-only" onclick="openNewPostModal()">
         <i class="fa-solid fa-pen"></i> New Post
       </button>
+      <div class="nav-section-label desktop-only">Campus</div>
       <button class="nav-btn active" data-view="home-view" onclick="switchTab('home-view', this)" aria-label="Home">
         <i class="fa-solid fa-house"></i>
         <span class="nav-label">Home</span>
@@ -511,6 +538,7 @@
         <i class="fa-solid fa-calendar-days"></i>
         <span class="nav-label">Calendar</span>
       </button>
+      <div class="nav-section-label desktop-only">Tools</div>
       <button class="nav-btn desktop-only" data-view="gpa-view" onclick="switchTab('gpa-view', this)" aria-label="GPA Calculator">
         <i class="fa-solid fa-calculator"></i>
         <span class="nav-label">GPA Calculator</span>
@@ -526,6 +554,13 @@
       <button class="nav-btn nav-settings" data-view="settings-view" onclick="switchTab('settings-view', this)" aria-label="Settings">
         <i class="fa-solid fa-gear"></i>
         <span class="nav-label"><span class="phone-only">Me</span><span class="desktop-only">Settings</span></span>
+      </button>
+      <button class="sidebar-user desktop-only" onclick="switchTab('settings-view')" title="Your account">
+        <span class="friend-avatar" id="sidebar-avatar">?</span>
+        <span class="sidebar-user-text">
+          <strong id="sidebar-user-name">Not signed in</strong>
+          <small id="sidebar-user-school">No school</small>
+        </span>
       </button>
     </nav>
 
