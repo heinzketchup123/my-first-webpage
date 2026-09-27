@@ -2734,40 +2734,11 @@ html.layout-phone.wide-screen .layout-quick-btn { display: inline-flex !importan
 html.layout-desktop .nav-layout-switch { margin-top: auto; }
 html.layout-desktop .nav-layout-switch + .nav-settings { margin-top: 0; }
 
-.layout-float-btn {
-  display: none;
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 50;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border-radius: 999px;
-  border: 1px solid var(--card-border);
-  background: var(--card-bg-solid);
-  color: var(--main-text-color);
-  font-size: 0.85rem;
-  font-weight: 700;
-  box-shadow: var(--shadow-pop);
-  cursor: pointer;
-}
-.layout-float-btn:hover { border-color: var(--accent-soft-border); color: var(--accent-color); }
-.layout-float-btn i { color: var(--accent-color); }
-/* When there's room, park it right next to the phone */
-@media (min-width: 920px) {
-  .layout-float-btn { right: auto; left: calc(50% + 240px); bottom: 50px; }
-}
-
 /* ---------- Phone layout on a computer: shown inside a phone ----------
    Only with a mouse/trackpad (pointer: fine), so real phones and tablets
-   still use the whole screen. */
+   still use the whole screen. Nothing is drawn outside the phone; switch
+   back from Settings > Layout inside it. */
 @media (pointer: fine) and (min-height: 640px) {
-  html.layout-phone.wide-screen body {
-    background:
-      radial-gradient(60% 50% at 50% 40%, var(--bg-glow), transparent 70%),
-      var(--bg-color);
-  }
   html.layout-phone.wide-screen .mobile-frame {
     width: 400px;
     height: min(860px, calc(100vh - 48px));
@@ -2810,35 +2781,12 @@ html.layout-desktop .nav-layout-switch + .nav-settings { margin-top: 0; }
     z-index: 1000;
     pointer-events: none;
   }
-  /* The switch-back button sits beside the phone instead of in its top bar */
+  /* No extra switch button squeezing the phone's top bar */
   html.layout-phone.wide-screen .layout-quick-btn { display: none !important; }
-  html.layout-phone.wide-screen .layout-float-btn { display: inline-flex; }
   html.layout-phone.wide-screen .brand-title { white-space: nowrap; }
   /* Make room for the island and the home bar */
   html.layout-phone.wide-screen .app-header { padding-top: 54px; max-width: none; }
   html.layout-phone.wide-screen .notif-drawer { padding-top: 54px; }
   html.layout-phone.wide-screen .auth-overlay { padding-top: 54px; }
   html.layout-phone.wide-screen .bottom-nav { margin-bottom: 22px; width: calc(100% - 28px); }
-  /* Side buttons (volume + power), drawn outside the screen */
-  html.layout-phone.wide-screen body::before,
-  html.layout-phone.wide-screen body::after {
-    content: '';
-    position: fixed;
-    top: 50%;
-    width: 4px;
-    border-radius: 2px;
-    background: #2c2f38;
-    pointer-events: none;
-  }
-  html.layout-phone.wide-screen body::before {   /* volume, left side */
-    left: calc(50% - 214px);
-    height: 64px;
-    transform: translateY(-150px);
-    box-shadow: 0 78px 0 #2c2f38;
-  }
-  html.layout-phone.wide-screen body::after {    /* power, right side */
-    left: calc(50% + 210px);
-    height: 96px;
-    transform: translateY(-110px);
-  }
 }

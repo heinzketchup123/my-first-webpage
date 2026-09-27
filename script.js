@@ -606,7 +606,7 @@ function toggleLayoutQuick() {
   const toDesktop = !document.documentElement.classList.contains('layout-desktop');
   setLayout(toDesktop ? 'desktop' : 'phone');
   showToast(toDesktop ? 'Computer layout on. Switch back from the sidebar or Settings.'
-                      : 'Phone layout on. Switch back from the top bar or Settings.', 'info', 3500);
+                      : 'Phone layout on. Switch back in Settings → Layout.', 'info', 3500);
 }
 
 function resetAppearance() {
