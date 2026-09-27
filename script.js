@@ -654,16 +654,41 @@ function setIosFill(on) {
   detectShortViewport();
 }
 
+// Measurements shown in the test dialog so a screenshot tells us exactly
+// where iOS put the app (all in CSS pixels, page coordinates).
+function screenReport() {
+  const probe = (css) => {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;top:0;left:0;width:0;visibility:hidden;pointer-events:none;' + css;
+    document.body.appendChild(d);
+    const h = d.offsetHeight;
+    d.remove();
+    return h;
+  };
+  const r = (sel) => document.querySelector(sel)?.getBoundingClientRect();
+  const frame = r('.mobile-frame'), header = r('.app-header'), nav = r('.bottom-nav');
+  const vv = window.visualViewport;
+  const n = (v) => Math.round(v);
+  return [
+    `screen ${screen.width}×${screen.height} · window ${innerWidth}×${innerHeight}`,
+    `lvh ${probe('height:100lvh')} · dvh ${probe('height:100dvh')} · svh ${probe('height:100svh')}`,
+    `inset top ${probe('padding-top:env(safe-area-inset-top)')} · bottom ${probe('padding-top:env(safe-area-inset-bottom)')}`,
+    `visual ${vv ? n(vv.height) + ' @' + n(vv.offsetTop) : '–'} · scrollY ${n(window.scrollY)}`,
+    `app ${frame ? n(frame.top) + '–' + n(frame.bottom) : '–'} · header ${header ? n(header.top) : '–'} · tabbar ${nav ? n(nav.top) + '–' + n(nav.bottom) : '–'}`,
+  ].join('<br>');
+}
+
 function toggleIosFill() {
   if (iosFillOn()) {
     setIosFill(false);
     return showToast('Back to the normal layout.', 'info');
   }
   setIosFill(true);
-  let left = 12;
+  let left = 30;
   openModal('Can you see the tab bar?', `
     <div style="text-align:left;">
       <p style="font-size:0.85rem; margin-bottom:10px;">Look at the very bottom of the screen. Is the Home · Teachers · Groups · Chat · Me bar fully visible, sitting on the bottom edge?</p>
+      <p id="ios-fill-report" style="font-size:0.72rem; line-height:1.5; font-family:ui-monospace,Menlo,monospace; color:var(--sub-text-color); background:var(--input-bg); border:1px solid var(--card-border); border-radius:10px; padding:8px 10px; margin-bottom:10px;">${screenReport()}</p>
       <p id="ios-fill-count" style="font-size:0.78rem; color:var(--sub-text-color); margin-bottom:12px;">Undoing in ${left} s unless you keep it…</p>
       <div class="modal-actions" style="margin-top:0;">
         <button class="secondary-btn" onclick="finishIosFill(false)">No, undo</button>
@@ -675,6 +700,8 @@ function toggleIosFill() {
     left -= 1;
     const el = document.getElementById('ios-fill-count');
     if (el) el.textContent = `Undoing in ${left} s unless you keep it…`;
+    const rep = document.getElementById('ios-fill-report');
+    if (rep) rep.innerHTML = screenReport();
     if (left <= 0) finishIosFill(false);
   }, 1000);
 }
