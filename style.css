@@ -12,6 +12,9 @@
   --input-bg: rgba(255, 255, 255, 0.06);
   --glow-shadow: 0 0 15px rgba(0, 243, 255, 0.35);
   --glass-blur: blur(12px);
+  /* Tells the browser to draw its own controls (dropdown lists, date/time
+     pickers, autocomplete, scrollbars) dark to match. */
+  color-scheme: dark;
 }
 
 body.light-mode {
@@ -24,6 +27,15 @@ body.light-mode {
   --input-bg: #ffffff;
   --text-on-accent: #ffffff;
   --glow-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  color-scheme: light;
+}
+
+/* Dropdown list items can't be see-through, so give them a solid theme
+   color instead of inheriting the select's translucent background. */
+select option,
+select optgroup {
+  background-color: var(--bg-color);
+  color: var(--main-text-color);
 }
 
 * {

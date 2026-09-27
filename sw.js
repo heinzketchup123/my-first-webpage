@@ -1,6 +1,6 @@
 // Bump this version whenever the app files change so browsers pick up the
 // new version instead of serving stale cached HTML/CSS/JS forever.
-const CACHE_NAME = 'campus-pulse-v12';
+const CACHE_NAME = 'campus-pulse-v13';
 const ASSETS = [
   './',
   './index.html',
