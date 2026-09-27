@@ -391,7 +391,7 @@
               <i class="fa-solid fa-desktop"></i><span>Computer</span>
             </button>
           </div>
-          <p class="admin-hint layout-hint">Auto uses the computer layout on wide screens and the phone layout on narrow ones. You can also switch any time with the button in the sidebar or top bar.</p>
+          <p class="admin-hint layout-hint">Auto uses the computer layout on wide screens and the phone layout on narrow ones. You can also switch any time with the button in the sidebar, or the one beside the phone.</p>
         </div>
 
         <!-- Color Theme Presets -->
@@ -530,6 +530,11 @@
     </nav>
 
   </div>
+
+  <!-- Phone layout on a computer: switch back, shown beside the phone -->
+  <button class="layout-float-btn" onclick="toggleLayoutQuick()" aria-label="Switch to computer layout">
+    <i class="fa-solid fa-desktop"></i> Computer layout
+  </button>
 
   <!-- Detail Information Modal -->
   <div id="detailModal" class="modal-overlay" onclick="closeModal(event)">
