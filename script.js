@@ -175,7 +175,11 @@ document.addEventListener("DOMContentLoaded", () => {
   syncDeviceAlertsToggle();
   document.addEventListener('visibilitychange', markOpenThreadRead);
   let layoutTimer = null;
-  window.addEventListener('resize', () => { clearTimeout(layoutTimer); layoutTimer = setTimeout(applyLayout, 120); });
+  detectShortViewport();
+  window.addEventListener('resize', () => {
+    clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(() => { applyLayout(); detectShortViewport(); }, 120);
+  });
 
   if (!isSupabaseConnected) {
     // Supabase misconfigured — surface it instead of silently degrading.
@@ -595,6 +599,28 @@ function applyLayout() {
   document.querySelectorAll('#layout-segmented .seg-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.layout === pref);
   });
+}
+
+// iOS 26 bug (WebKit 301108): an installed iPhone app with the see-through
+// status bar is drawn from the top of the screen but sized one status bar
+// short, leaving an undrawable strip at the bottom. Detect it by comparing
+// the window height with the screen height; if Apple fixes the bug (or the
+// app uses a solid status bar) the numbers match and nothing changes.
+function detectShortViewport() {
+  const root = document.documentElement;
+  if (!root.classList.contains('ios-standalone') || !document.body) {
+    root.classList.remove('ios-short-viewport');
+    return;
+  }
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;padding-top:var(--safe-top);visibility:hidden;pointer-events:none;';
+  document.body.appendChild(probe);
+  const safeTop = probe.offsetHeight;
+  probe.remove();
+  const portrait = window.innerHeight >= window.innerWidth;
+  const screenH = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+  const missing = screenH - window.innerHeight;
+  root.classList.toggle('ios-short-viewport', safeTop > 0 && missing > 0 && Math.abs(missing - safeTop) <= 4);
 }
 
 function setLayout(layout) {

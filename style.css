@@ -2999,24 +2999,38 @@ html.layout-desktop .notif-drawer {   /* stays under the (taller) top bar */
 }
 .rotate-overlay { padding: calc(24px + var(--safe-top)) calc(24px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(24px + var(--safe-left)); }
 
-/* Installed on an iPhone the status bar is solid black (see the status-bar
-   meta in index.html), so in dark themes the top of the app fades up into
-   black: no visible line where the status bar ends. */
-html.ios-standalone.layout-phone body:not(.light-mode) .app-header {
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;   /* nothing scrolls under the header; the blur drew a hairline at its edge */
+/* ---------- iOS 26 short-viewport bug (WebKit 301108) ----------
+   An installed iPhone app with the see-through status bar is drawn from the
+   very top of the screen but sized one status bar short, leaving a strip at
+   the bottom that nothing can be drawn on; iOS fills it with the page's
+   background colour. script.js adds .ios-short-viewport when it detects this.
+   Then: (1) the bottom of the app is that same plain colour (no glow), so the
+   strip blends in; (2) no extra home-bar spacing under the tab bar, because
+   the strip already sits over the home bar. */
+html.ios-short-viewport { --safe-bottom: 0px; }
+html.ios-short-viewport body,
+html.ios-short-viewport { background-color: var(--bg-color); }
+html.ios-short-viewport.layout-phone .mobile-frame {
+  background:
+    radial-gradient(120% 55% at 0% 0%, var(--bg-glow), transparent 55%),
+    var(--bg-color);
 }
-html.ios-standalone.layout-phone body:not(.light-mode) .app-header::before {
+
+/* Light theme under the see-through status bar (the app was added to the
+   Home Screen in dark mode): the clock and battery are always white, so a
+   soft shade behind them keeps them readable. It sits above every overlay
+   (sign-in screen, drawer, dialogs) and is 0 tall wherever there's no
+   status-bar inset (Android, computers, solid status bars). */
+html.ios-standalone body.light-mode::before {
   content: '';
-  position: absolute;
+  position: fixed;
   top: 0;
-  /* Full screen width even when the header is capped and centered (iPad) */
-  left: calc(50% - 50vw);
-  right: calc(50% - 50vw);
-  height: 56px;
-  background: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 35%, rgba(0, 0, 0, 0) 100%);
+  left: 0;
+  right: 0;
+  height: calc(var(--safe-top) + min(8px, var(--safe-top)));
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0));
   pointer-events: none;
-  z-index: -1;            /* behind the header's buttons */
+  z-index: 3000;
 }
 
 /* ---------- Phone layout on a computer: shown inside a phone ----------

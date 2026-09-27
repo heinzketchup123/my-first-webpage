@@ -11,11 +11,13 @@
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#080d14" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <!-- Solid (not translucent) status bar for the installed iPhone app. With
-       black-translucent, iOS 26 sizes the app one status-bar short and leaves
-       an undrawable strip at the bottom (WebKit bug 301108). The inline script
-       below switches this to "default" (light bar, dark text) for light mode. -->
-  <meta name="apple-mobile-web-app-status-bar-style" content="black" id="status-bar-style" />
+  <!-- See-through status bar: the installed iPhone app draws right up behind
+       the clock (a solid bar left a dark strip at the top). iOS 26 then sizes
+       the app one status bar short (WebKit bug 301108); script.js detects that
+       and the CSS makes the undrawable strip at the bottom blend in. iOS reads
+       this when the app is added to the Home Screen; the inline script below
+       switches it to "default" (light bar, dark text) if added in light mode. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" id="status-bar-style" />
   
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
