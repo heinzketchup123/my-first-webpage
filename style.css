@@ -2952,9 +2952,9 @@ html.layout-desktop #settings-view > .page-header { margin-bottom: 6px; }
 }
 
 /* ---------- Edge to edge on real phones ----------
-   With viewport-fit=cover the app draws behind the status bar (clock,
-   battery, camera) and the home bar, instead of leaving a flat dark strip.
-   These insets keep content clear of them; they're 0 on computers. */
+   With viewport-fit=cover the app can use the whole screen; these insets
+   keep content clear of the status bar / camera and the home bar wherever
+   the phone reports them (0 on computers). */
 :root {
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -2987,17 +2987,23 @@ html.layout-desktop .app-header { padding-top: calc(14px + var(--safe-top)); }
 html.layout-desktop .bottom-nav { padding-top: calc(20px + var(--safe-top)); }
 .rotate-overlay { padding: calc(24px + var(--safe-top)) calc(24px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(24px + var(--safe-left)); }
 
-/* Installed on an iPhone the status bar text is always white, so in light
-   mode a soft shade behind it keeps the clock and battery readable. */
-html.standalone.layout-phone body.light-mode .app-header::before {
+/* Installed on an iPhone the status bar is solid black (see the status-bar
+   meta in index.html), so in dark themes the top of the app fades up into
+   black: no visible line where the status bar ends. */
+html.ios-standalone.layout-phone body:not(.light-mode) .app-header {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;   /* nothing scrolls under the header; the blur drew a hairline at its edge */
+}
+html.ios-standalone.layout-phone body:not(.light-mode) .app-header::before {
   content: '';
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: calc(var(--safe-top) + 8px);
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0));
+  height: 56px;
+  background: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 35%, rgba(0, 0, 0, 0) 100%);
   pointer-events: none;
+  z-index: -1;            /* behind the header's buttons */
 }
 
 /* ---------- Phone layout on a computer: shown inside a phone ----------

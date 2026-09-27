@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <!-- viewport-fit=cover lets the app draw behind the phone's status bar (no dark band at the top);
-       the CSS keeps content clear of it with env(safe-area-inset-*). -->
+  <!-- viewport-fit=cover lets the app use the whole screen (down behind the home bar);
+       the CSS keeps content clear of the edges with env(safe-area-inset-*). -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Campus Pulse & Knowledge Hub</title>
   
@@ -11,7 +11,11 @@
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#080d14" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <!-- Solid (not translucent) status bar for the installed iPhone app. With
+       black-translucent, iOS 26 sizes the app one status-bar short and leaves
+       an undrawable strip at the bottom (WebKit bug 301108). The inline script
+       below switches this to "default" (light bar, dark text) for light mode. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" id="status-bar-style" />
   
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -20,8 +24,16 @@
   <!-- Pick phone vs computer layout before the first paint (no flash). -->
   <script>
     (function () {
-      var l = 'auto';
-      try { l = (JSON.parse(localStorage.getItem('appearance') || '{}').layout) || 'auto'; } catch (e) {}
+      var l = 'auto', mode = 'dark';
+      try {
+        var a = JSON.parse(localStorage.getItem('appearance') || '{}');
+        l = a.layout || 'auto';
+        mode = a.mode || 'dark';
+      } catch (e) {}
+      // Light theme: light status bar with dark text instead of a black bar
+      var light = mode === 'light' || (mode === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+      var sb = document.getElementById('status-bar-style');
+      if (light && sb) sb.setAttribute('content', 'default');
       var desktop = window.innerWidth >= 700 && (l === 'desktop' || (l === 'auto' && window.innerWidth >= 960));
       document.documentElement.classList.add(desktop ? 'layout-desktop' : 'layout-phone');
       if (window.innerWidth >= 700) document.documentElement.classList.add('wide-screen');
@@ -29,6 +41,8 @@
       if (window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) {
         document.documentElement.classList.add('standalone');
       }
+      // navigator.standalone only exists on iPhone/iPad Safari
+      if (window.navigator.standalone === true) document.documentElement.classList.add('ios-standalone');
     })();
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
