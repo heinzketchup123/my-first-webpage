@@ -198,7 +198,8 @@ async function fetchFeed() {
 
 async function fetchGroups() {
   const [{ data, error }, memRes] = await Promise.all([
-    supabaseClient.from('study_groups').select('*').order('created_at', { ascending: false }),
+    // Sorted client-side: older projects' study_groups table has no created_at.
+    supabaseClient.from('study_groups').select('*'),
     supabaseClient.from('study_group_members').select('group_id, user_id')
   ]);
   if (error) { showToast('Groups load failed: ' + error.message, 'error'); return; }
@@ -216,7 +217,7 @@ async function fetchGroups() {
     ...g,
     members: counts[g.id] || 0,
     joined:  mine.has(g.id)
-  }));
+  })).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   renderGroups();
 }
 

@@ -162,6 +162,7 @@ create table if not exists public.campus_chat (
 );
 
 alter table public.campus_chat
+  add column if not exists created_at   timestamptz not null default now(),
   add column if not exists sender_id    uuid references auth.users(id) on delete cascade,
   add column if not exists recipient_id uuid references auth.users(id) on delete cascade,
   add column if not exists text         text,
@@ -208,6 +209,7 @@ create table if not exists public.campus_feed (
 );
 
 alter table public.campus_feed
+  add column if not exists created_at timestamptz not null default now(),
   add column if not exists author_id uuid references auth.users(id) on delete set null,
   add column if not exists title     text,
   add column if not exists text      text,
@@ -257,6 +259,7 @@ create table if not exists public.instructor_reviews (
 );
 
 alter table public.instructor_reviews
+  add column if not exists created_at timestamptz not null default now(),
   add column if not exists author_id uuid references auth.users(id) on delete set null,
   add column if not exists teacher   text,
   add column if not exists rating    text,
@@ -295,6 +298,18 @@ create table if not exists public.study_groups (
   id         uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now()
 );
+
+-- The table may predate this script, so add every column the app uses.
+alter table public.study_groups
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists name       text,
+  add column if not exists course     text,
+  add column if not exists schedule   text,
+  add column if not exists location   text,
+  add column if not exists "max"      int not null default 6,
+  add column if not exists host       text,
+  add column if not exists topics     text[] not null default '{}',
+  add column if not exists roster     text[] not null default '{}';
 
 alter table public.study_groups enable row level security;
 
