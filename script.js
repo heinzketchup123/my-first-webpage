@@ -63,8 +63,6 @@ let currentHandle = null;     // profile.handle when signed in
 let currentSchoolId = null;   // profile.school_id when signed in
 let currentSchool = null;     // {id, name, slug}
 let schoolsCache = [];        // all schools known
-let reviewSchoolFilterId = 'mine'; // 'mine' | '<school_id>' — for reviews lookup
-let userReviews = [];
 let campusFeed = [];
 let studyGroups = [];
 let gpaCourses = [];
@@ -80,8 +78,6 @@ let appSettings = { ...defaultSettings };
 let appTheme = { ...THEME_PRESETS.cyber };
 
 let currentPostCommentId = null;
-let timerSeconds = 1500;
-let timerInterval = null;
 let realtimeChannel = null;
 let feedSort = 'new'; // 'new' | 'top' | 'comments'
 let unreadNotifs = 0;
@@ -96,6 +92,7 @@ document.addEventListener("DOMContentLoaded", () => {
   campusEvents = [...defaultEvents];
   renderEvents();
   renderEmptyStates();
+  loadPomo();
 
   if (!isSupabaseConnected) {
     // Supabase misconfigured — surface it instead of silently degrading.
@@ -122,7 +119,8 @@ document.addEventListener("DOMContentLoaded", () => {
       currentSchool = null;
       currentSchoolId = null;
       friends = []; pendingIncoming = []; pendingOutgoing = [];
-      campusFeed = []; studyGroups = []; userReviews = [];
+      campusFeed = []; studyGroups = [];
+      teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
       document.getElementById('auth-screen').style.display = 'flex';
       renderEmptyStates();
     }
@@ -136,7 +134,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function renderEmptyStates() {
   renderFeed();
   renderGroups();
-  renderReviews();
+  renderTeacherDirectory();
   renderGpaRows();
   renderFriendsStrip();
   renderDMThread();
@@ -172,12 +170,14 @@ function initSupabaseRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_feed' }, () => fetchFeed())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'study_groups' }, () => fetchGroups())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'study_group_members' }, () => fetchGroups())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_reviews' }, () => fetchReviews())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, () => onTeacherDataChanged())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'teacher_posts' }, () => onTeacherDataChanged())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'teacher_post_votes' }, () => onTeacherDataChanged())
     .subscribe();
 }
 
 async function loadAllSupabaseData() {
-  await Promise.all([fetchFeed(), fetchGroups(), fetchReviews(), fetchFriendships()]);
+  await Promise.all([fetchFeed(), fetchGroups(), fetchFriendships(), fetchTeacherDirectory(), fetchMyReviewCount()]);
   const savedGpa = localStorage.getItem(`gpa_${currentUserId}`);
   gpaCourses = savedGpa ? JSON.parse(savedGpa) : [];
   renderGpaRows();
@@ -265,17 +265,6 @@ async function createGroup(event) {
   fetchGroups();
 }
 
-async function fetchReviews() {
-  let q = supabaseClient.from('instructor_reviews').select('*').order('created_at', { ascending: false });
-  const wantSchool = reviewSchoolFilterId === 'mine' ? currentSchoolId : reviewSchoolFilterId;
-  if (wantSchool) q = q.eq('school_id', wantSchool);
-  const { data, error } = await q;
-  if (error) { showToast('Reviews load failed: ' + error.message, 'error'); return; }
-  userReviews = data || [];
-  renderReviews();
-  updateAnalytics();
-}
-
 // Authentication Handlers
 function toggleAuthMode() {
   document.getElementById('login-form').classList.toggle('hidden');
@@ -326,8 +315,10 @@ async function logout() {
   currentUser = null; currentUserId = null; currentHandle = null;
   currentSchool = null; currentSchoolId = null;
   friends = []; pendingIncoming = []; pendingOutgoing = [];
-  campusFeed = []; studyGroups = []; userReviews = []; gpaCourses = [];
+  campusFeed = []; studyGroups = []; gpaCourses = [];
   selectedFriendId = null; dmMessages = [];
+  teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
+  switchTab('home-view');
   renderEmptyStates();
 
   const authScreen = document.getElementById('auth-screen');
@@ -514,17 +505,13 @@ function switchTab(viewId, element) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
 
   document.getElementById(viewId).classList.add('active-view');
-  if (element) {
-    element.classList.add('active');
-  } else {
-    const viewOrder = ['home-view', 'search-view', 'groups-view', 'chat-view', 'profile-view', 'settings-view'];
-    const btns = document.querySelectorAll('.nav-btn');
-    const idx = viewOrder.indexOf(viewId);
-    if (idx !== -1 && btns[idx]) btns[idx].classList.add('active');
-  }
+  // A teacher page lives under the Teachers tab in the nav.
+  const navView = viewId === 'teacher-view' ? 'search-view' : viewId;
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === navView));
+  document.querySelector('.content-container')?.scrollTo(0, 0);
 
   if (viewId === 'chat-view')   { renderFriendsStrip(); renderDMThread(); }
-  if (viewId === 'search-view') { fetchTeachersForView(); }
+  if (viewId === 'search-view') { fetchTeacherDirectory(); }
 }
 
 function toggleNotifications() {
@@ -691,23 +678,6 @@ async function pickSchool(schoolId) {
   document.getElementById('schoolModal').style.display = 'none';
   // Reload everything now that the RLS view of the world changed.
   loadAllSupabaseData();
-}
-
-// Reviews view: pick which school's reviews to browse.
-function setReviewSchool(value) {
-  reviewSchoolFilterId = value || 'mine';
-  if (isSupabaseConnected) fetchReviews();
-}
-function renderReviewSchoolOptions() {
-  const sel = document.getElementById('review-school-filter');
-  if (!sel) return;
-  const cur = sel.value;
-  const opts = [
-    `<option value="mine">${currentSchool ? 'My school (' + escapeHtml(currentSchool.name) + ')' : 'My school'}</option>`,
-    ...schoolsCache.filter(s => s.id !== currentSchoolId).map(s => `<option value="${escapeAttr(s.id)}">${escapeHtml(s.name)}</option>`)
-  ];
-  sel.innerHTML = opts.join('');
-  sel.value = (cur && [...sel.options].some(o => o.value === cur)) ? cur : reviewSchoolFilterId;
 }
 
 async function createSchoolFromInput() {
@@ -1465,188 +1435,213 @@ function calculateGPA() {
   document.getElementById('total-credits-val').textContent = totalCredits;
 }
 
-// Timer Engine
-function openTimerModal() { document.getElementById('timerModal').style.display = 'flex'; }
-function closeTimerModal() { document.getElementById('timerModal').style.display = 'none'; clearInterval(timerInterval); timerInterval = null; }
+// ==================== Pomodoro timer ====================
+// Timestamp-based: stays accurate when a phone suspends the tab, keeps
+// running while the modal is closed, and survives a page reload.
+const POMO_DURATIONS = { focus: 25 * 60 * 1000, break: 5 * 60 * 1000 };
+let pomo = { mode: 'focus', running: false, endAt: 0, remaining: POMO_DURATIONS.focus };
+let pomoTick = null;
+
+function loadPomo() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('pomo') || 'null');
+    if (saved && POMO_DURATIONS[saved.mode]) pomo = { ...pomo, ...saved };
+  } catch (_) { /* corrupt state — keep defaults */ }
+  if (pomo.running) startPomoTick();
+  onPomoTick();
+}
+function savePomo() { try { localStorage.setItem('pomo', JSON.stringify(pomo)); } catch (_) {} }
+function pomoRemainingMs() { return pomo.running ? Math.max(0, pomo.endAt - Date.now()) : pomo.remaining; }
+function startPomoTick() { if (!pomoTick) pomoTick = setInterval(onPomoTick, 250); }
+function stopPomoTick() { clearInterval(pomoTick); pomoTick = null; }
+
+function onPomoTick() {
+  if (pomo.running && pomoRemainingMs() <= 0) return finishPomo();
+  renderTimer();
+}
+
+function finishPomo() {
+  const wasFocus = pomo.mode === 'focus';
+  stopPomoTick();
+  pomo.mode = wasFocus ? 'break' : 'focus';
+  pomo.running = false;
+  pomo.remaining = POMO_DURATIONS[pomo.mode];
+  savePomo();
+  renderTimer();
+  showToast(wasFocus ? '🍅 Focus done — take a 5-minute break.' : 'Break over — ready for another round?', 'success', 6000);
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+}
+
+function openTimerModal() { renderTimer(); document.getElementById('timerModal').style.display = 'flex'; }
+function closeTimerModal() { document.getElementById('timerModal').style.display = 'none'; }
 
 function toggleTimer() {
-  const btn = document.getElementById('timer-start-btn');
-  if (timerInterval) {
-    clearInterval(timerInterval);
-    timerInterval = null;
-    btn.textContent = "Resume Focus";
-    btn.classList.remove('active-state');
+  if (pomo.running) {
+    pomo.remaining = pomoRemainingMs();
+    pomo.running = false;
+    stopPomoTick();
   } else {
-    btn.textContent = "Pause Focus";
-    btn.classList.add('active-state');
-    timerInterval = setInterval(() => {
-      if (timerSeconds > 0) {
-        timerSeconds--;
-        updateTimerDisplay();
-      } else {
-        clearInterval(timerInterval);
-        showToast('🍅 Pomodoro complete — take a 5-minute break.', 'success', 6000);
-        resetTimer();
-      }
-    }, 1000);
+    if (pomo.remaining <= 0) pomo.remaining = POMO_DURATIONS[pomo.mode];
+    pomo.endAt = Date.now() + pomo.remaining;
+    pomo.running = true;
+    startPomoTick();
   }
+  savePomo();
+  renderTimer();
 }
 
 function resetTimer() {
-  clearInterval(timerInterval);
-  timerInterval = null;
-  timerSeconds = 1500;
-  updateTimerDisplay();
+  stopPomoTick();
+  pomo.running = false;
+  pomo.remaining = POMO_DURATIONS[pomo.mode];
+  savePomo();
+  renderTimer();
+}
+
+function setTimerMode(mode) {
+  if (!POMO_DURATIONS[mode] || mode === pomo.mode) return;
+  if (pomo.running && !confirm('Switch modes? The current countdown will reset.')) return;
+  pomo.mode = mode;
+  resetTimer();
+}
+
+function fmtClock(ms) {
+  const total = Math.ceil(ms / 1000);
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function renderTimer() {
+  const ms = pomoRemainingMs();
+  const full = POMO_DURATIONS[pomo.mode];
+  const inProgress = pomo.running || ms < full;
+
+  const display = document.getElementById('timer-display');
+  if (display) display.textContent = fmtClock(ms);
+  const fill = document.getElementById('timer-progress-fill');
+  if (fill) fill.style.width = `${Math.min(100, 100 * (1 - ms / full))}%`;
   const btn = document.getElementById('timer-start-btn');
-  btn.textContent = "Start Focus";
-  btn.classList.remove('active-state');
-}
-
-function updateTimerDisplay() {
-  const mins = Math.floor(timerSeconds / 60);
-  const secs = timerSeconds % 60;
-  document.getElementById('timer-display').textContent = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-}
-
-// Reviews Engine
-function openReviewModal() { document.getElementById('reviewModal').style.display = 'flex'; }
-function closeReviewModal() { document.getElementById('reviewModal').style.display = 'none'; }
-
-async function submitReview(event) {
-  event.preventDefault();
-  if (!currentUserId) { closeReviewModal(); return showToast('Sign in to leave a review.', 'warn'); }
-  if (!currentSchoolId) { closeReviewModal(); return openSchoolPicker(true); }
-
-  const teacher = document.getElementById('review-teacher').value.trim();
-  const rating  = document.getElementById('review-rating').value;
-  const text    = document.getElementById('review-text').value.trim();
-  if (!teacher || !text) return showToast('Fill in teacher and review text.', 'warn');
-  if (text.length > 2000) return showToast('Review is too long.', 'warn');
-
-  const { error } = await supabaseClient
-    .from('instructor_reviews')
-    .insert([{ teacher, rating, text, author_id: currentUserId, school_id: currentSchoolId }]);
-  if (error) return showToast('Review blocked: ' + error.message, 'error');
-  showToast('Review posted.', 'success');
-  event.target.reset();
-  closeReviewModal();
-  switchTab('profile-view');
-}
-
-function renderReviews() {
-  const container = document.getElementById('user-reviews-list');
-  const filterVal = document.getElementById('rating-filter') ? document.getElementById('rating-filter').value : 'all';
-  if (!container) return;
-  renderReviewSchoolOptions();
-
-  container.innerHTML = '';
-  const teacherChipHtml = selectedTeacherName ? `
-    <div class="active-teacher-chip">
-      Showing reviews for <strong>${escapeHtml(selectedTeacherName)}</strong>
-      <button class="teacher-clear-btn" onclick="clearTeacherFilter()"><i class="fa-solid fa-xmark"></i></button>
-    </div>` : '';
-
-  let filtered = userReviews.filter(rev => filterVal === 'all' || rev.rating === filterVal);
-  if (selectedTeacherName) {
-    filtered = filtered.filter(rev => (rev.teacher || '').trim().toLowerCase() === selectedTeacherName.toLowerCase());
+  if (btn) {
+    btn.textContent = pomo.running ? 'Pause' : (inProgress ? 'Resume' : 'Start');
+    btn.classList.toggle('active-state', pomo.running);
   }
+  document.querySelectorAll('#timer-mode-seg .seg-btn')
+    .forEach(b => b.classList.toggle('active', b.dataset.mode === pomo.mode));
+  const hint = document.getElementById('timer-hint');
+  if (hint) hint.textContent = pomo.mode === 'focus'
+    ? 'Focus session — keeps running if you close this.'
+    : 'Break — stretch, drink water, look away from the screen.';
 
-  if (!filtered.length) {
-    const isOwn = reviewSchoolFilterId === 'mine' && currentSchool;
-    container.innerHTML = teacherChipHtml + `<div class="empty-state">
-      <i class="fa-solid fa-star"></i>
-      <p>No reviews${selectedTeacherName ? ' for ' + escapeHtml(selectedTeacherName) : isOwn ? ' for ' + escapeHtml(currentSchool.name) : ''} yet.</p>
-      ${currentUserId ? '<button class="primary-btn" onclick="openReviewModal()">+ Add Review</button>' : ''}
-    </div>`;
-    return;
+  const label = document.getElementById('pomo-tool-label');
+  if (label) label.textContent = inProgress ? `${pomo.running ? '' : '⏸ '}${fmtClock(ms)}` : 'Pomodoro';
+  document.getElementById('pomo-tool-btn')?.classList.toggle('pomo-live', pomo.running);
+}
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden) onPomoTick(); });
+
+// ==================== Teachers ====================
+// Teachers belong to a school and each has a page of posts:
+//   review       — rating, difficulty, would-take-again, tags, text
+//   requirement  — course requirements (textbook, grading, workload...)
+//   note         — tips, heads-ups, resources
+// Anyone can browse any school; only that school's students can post.
+
+const ANON_AUTHOR = 'Anonymous student';
+const POST_KIND_META = {
+  review: {
+    title: 'Write a review', editTitle: 'Edit your review', bodyLabel: 'Your review',
+    placeholder: 'What was the class like? How do they teach, grade, and treat students?',
+    tags: ['Clear lectures', 'Tough grader', 'Lots of homework', 'Test heavy', 'Caring', 'Inspiring',
+           'Extra credit', 'Group projects', 'Strict deadlines', 'Easy A'],
+    tagLabel: 'Tags (up to 3)', maxTags: 3, empty: 'No reviews yet.', cta: '+ Write a review'
+  },
+  requirement: {
+    title: 'Add course info', editTitle: 'Edit course info', bodyLabel: 'Requirements',
+    placeholder: 'Textbook, grading breakdown, homework load, exams, projects, supplies...',
+    tags: ['Textbook', 'Grading', 'Homework', 'Exams', 'Projects', 'Attendance', 'Materials', 'Prerequisites'],
+    tagLabel: 'What does this cover?', maxTags: 4, empty: 'No course requirements posted yet.', cta: '+ Add course info'
+  },
+  note: {
+    title: 'Add a note', editTitle: 'Edit note', bodyLabel: 'Note',
+    placeholder: 'Tips, heads-ups, useful resources, how to do well...',
+    tags: ['Tip', 'Heads up', 'Resource', 'Office hours', 'Study guide'],
+    tagLabel: 'Type', maxTags: 2, empty: 'No notes yet.', cta: '+ Add a note'
   }
+};
+const RATING_WORDS = ['', 'Awful', 'Poor', 'OK', 'Good', 'Awesome'];
+const DIFFICULTY_WORDS = ['', 'Very easy', 'Easy', 'Medium', 'Hard', 'Very hard'];
 
-  container.innerHTML = teacherChipHtml;
+let teacherDir = [];              // teacher_stats rows for the selected school
+let teacherDirSchoolId = 'mine';  // 'mine' | <school_id>
+let teacherSort = 'top';
+let currentTeacher = null;        // teacher_stats row for the open page
+let teacherPosts = [];
+let teacherVotes = {};            // post_id -> { count, mine }
+let teacherTab = 'review';
+let composerKind = 'review';
+let editingPostId = null;
+let tpDraft = { rating: 0, difficulty: 0, again: null, tags: [] };
+let myReviewCount = 0;
+let teacherRefreshTimer = null;
 
-  filtered.forEach(rev => {
-    const isMine = rev.author_id && rev.author_id === currentUserId;
-    const card = document.createElement('div');
-    card.className = 'info-card';
-    card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; font-weight:700; margin-bottom:6px;">
-        <span style="color:var(--accent-color);">${escapeHtml(rev.teacher || '')}</span>
-        <span>${'⭐'.repeat(parseInt(rev.rating) || 0)}</span>
-      </div>
-      <p style="font-size:0.82rem; color:var(--sub-text-color);">${escapeHtml(rev.text || '')}</p>
-      <div style="text-align:right; margin-top:8px;">
-        ${isMine ? `<i class="fa-solid fa-trash" style="color:#ff3b30; cursor:pointer;" onclick="deleteReview('${escapeAttr(rev.id)}')"></i>` : ''}
-      </div>
-    `;
-    container.appendChild(card);
-  });
+function dirSchoolId() { return teacherDirSchoolId === 'mine' ? currentSchoolId : teacherDirSchoolId; }
+function schoolName(id) { return (schoolsCache.find(s => s.id === id) || {}).name || 'another school'; }
+function toNum(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : null; }
+function ratingClass(avg) { return avg == null ? 'r-none' : avg >= 4 ? 'r-good' : avg >= 3 ? 'r-ok' : 'r-bad'; }
+function isViewActive(id) { return document.getElementById(id)?.classList.contains('active-view'); }
+
+function teacherInitials(name) {
+  const clean = String(name || '').replace(/^(mr|mrs|ms|mx|dr|prof|coach)\.?\s+/i, '');
+  const parts = clean.split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] || '?') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
 }
 
-async function deleteReview(id) {
-  if (!currentUserId) return showToast('Sign in first.', 'warn');
-  if (!confirm('Delete this review?')) return;
-  const { error } = await supabaseClient.from('instructor_reviews').delete().eq('id', id);
-  if (error) return showToast('Could not delete: ' + error.message, 'error');
-  showToast('Review deleted.', 'success');
+function timeAgo(iso) {
+  if (!iso) return '';
+  const s = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return 'just now';
+  const units = [[31536000, 'y'], [2592000, 'mo'], [604800, 'w'], [86400, 'd'], [3600, 'h'], [60, 'm']];
+  for (const [secs, u] of units) if (s >= secs) return `${Math.floor(s / secs)}${u} ago`;
+  return 'just now';
 }
 
-function updateAnalytics() {
-  const countEl = document.getElementById('total-reviews-count');
-  if (countEl) countEl.textContent = userReviews.length;
+function starsHtml(n) {
+  const r = Math.max(0, Math.min(5, Math.round(n || 0)));
+  return `<span class="stars">${'★'.repeat(r)}<span class="stars-off">${'★'.repeat(5 - r)}</span></span>`;
 }
 
-// Search Engine
-// -------------------- Teacher Directory --------------------
-// The Explore tab lists every teacher that appears in instructor_reviews,
-// with a live average rating and a review count. Tap one to jump to the
-// Reviews tab pre-filtered to just their reviews.
+// ---------- Directory ----------
 
-let teachersAll = [];              // full aggregated list (for whatever school filter is active)
-let teacherViewSchoolId = 'mine';  // 'mine' | <school_id>
-let selectedTeacherName = null;    // when set, Reviews view filters to this teacher
+async function fetchTeacherDirectory() {
+  if (!isSupabaseConnected || !currentUserId) return renderTeacherDirectory();
+  const school = dirSchoolId();
+  if (!school) { teacherDir = []; return renderTeacherDirectory(); }
+  const { data, error } = await supabaseClient
+    .from('teacher_stats').select('*').eq('school_id', school).limit(500);
+  if (error) return showToast('Could not load teachers: ' + error.message, 'error');
+  teacherDir = data || [];
+  renderTeacherDirectory();
+}
 
-async function fetchTeachersForView() {
-  if (!isSupabaseConnected) return;
-  let q = supabaseClient
-    .from('instructor_reviews')
-    .select('teacher, rating, school_id')
-    .order('created_at', { ascending: false })
-    .limit(1000);
-  const school = teacherViewSchoolId === 'mine' ? currentSchoolId : teacherViewSchoolId;
-  if (school) q = q.eq('school_id', school);
-  const { data, error } = await q;
-  if (error) { showToast('Could not load teachers: ' + error.message, 'error'); return; }
+function setTeacherDirSchool(value) {
+  teacherDirSchoolId = value || 'mine';
+  fetchTeacherDirectory();
+}
 
-  // Aggregate: {name -> {count, sumRating, avg, schoolIds:Set}}
-  const map = new Map();
-  (data || []).forEach(r => {
-    const key = (r.teacher || '').trim();
-    if (!key) return;
-    const cur = map.get(key) || { name: key, count: 0, sum: 0, schools: new Set() };
-    const num = parseInt(r.rating, 10) || 0;
-    cur.count += 1;
-    cur.sum   += num;
-    if (r.school_id) cur.schools.add(r.school_id);
-    map.set(key, cur);
-  });
-  teachersAll = [...map.values()]
-    .map(t => ({ name: t.name, count: t.count, avg: t.count ? t.sum / t.count : 0, schools: [...t.schools] }))
-    .sort((a, b) => b.avg - a.avg || b.count - a.count);
+function setTeacherSort(mode, btn) {
+  teacherSort = mode;
+  document.querySelectorAll('#teacher-sort-chips .chip').forEach(c => c.classList.toggle('active', c === btn));
   renderTeacherDirectory();
 }
 
 function renderTeacherSchoolOptions() {
   const sel = document.getElementById('teacher-school-filter');
   if (!sel) return;
-  const cur = sel.value;
-  const opts = [
-    `<option value="mine">${currentSchool ? 'My school (' + escapeHtml(currentSchool.name) + ')' : 'My school'}</option>`,
+  sel.innerHTML = [
+    `<option value="mine">${currentSchool ? 'My school · ' + escapeHtml(currentSchool.name) : 'My school'}</option>`,
     ...schoolsCache.filter(s => s.id !== currentSchoolId)
       .map(s => `<option value="${escapeAttr(s.id)}">${escapeHtml(s.name)}</option>`)
-  ];
-  sel.innerHTML = opts.join('');
-  sel.value = (cur && [...sel.options].some(o => o.value === cur)) ? cur : teacherViewSchoolId;
-  // Wire change to refetch (since the list depends on selected school).
-  sel.onchange = () => { teacherViewSchoolId = sel.value; fetchTeachersForView(); };
+  ].join('');
+  sel.value = [...sel.options].some(o => o.value === teacherDirSchoolId) ? teacherDirSchoolId : 'mine';
 }
 
 function renderTeacherDirectory() {
@@ -1654,42 +1649,466 @@ function renderTeacherDirectory() {
   if (!container) return;
   renderTeacherSchoolOptions();
 
-  const query = (document.getElementById('teacher-search-input')?.value || '').trim().toLowerCase();
-  const list  = teachersAll.filter(t => !query || t.name.toLowerCase().includes(query));
+  if (!currentUserId) {
+    container.innerHTML = `<div class="empty-state"><i class="fa-solid fa-chalkboard-user"></i><p>Sign in to browse teachers.</p></div>`;
+    return;
+  }
+  if (!dirSchoolId()) {
+    container.innerHTML = `<div class="empty-state"><i class="fa-solid fa-graduation-cap"></i>
+      <p>Pick your school to see its teachers.</p>
+      <button class="primary-btn" onclick="openSchoolPicker(false)">Pick school</button></div>`;
+    return;
+  }
+
+  const q = (document.getElementById('teacher-search-input')?.value || '').trim().toLowerCase();
+  const list = teacherDir.filter(t => !q
+    || t.name.toLowerCase().includes(q)
+    || (t.subject || '').toLowerCase().includes(q));
+
+  const byRating = (a, b) => (toNum(b.avg_rating) ?? -1) - (toNum(a.avg_rating) ?? -1) || b.review_count - a.review_count;
+  const sorters = {
+    top:  byRating,
+    most: (a, b) => b.review_count - a.review_count || byRating(a, b),
+    easy: (a, b) => (toNum(a.avg_difficulty) ?? 99) - (toNum(b.avg_difficulty) ?? 99),
+    az:   (a, b) => a.name.localeCompare(b.name)
+  };
+  list.sort(sorters[teacherSort] || byRating);
 
   if (!list.length) {
+    const ownSchool = dirSchoolId() === currentSchoolId;
     container.innerHTML = `<div class="empty-state">
       <i class="fa-solid fa-chalkboard-user"></i>
-      <p>${query ? 'No teachers match your search.' : 'No teachers reviewed yet — be the first to share what a class was like.'}</p>
-      ${currentUserId ? '<button class="primary-btn" onclick="openReviewModal()">+ Add Review</button>' : ''}
+      <p>${q ? `No teachers match "${escapeHtml(q)}".` : 'No teacher pages here yet.'}</p>
+      ${ownSchool ? '<button class="primary-btn" onclick="openAddTeacherModal()">+ Add a teacher</button>' : ''}
     </div>`;
     return;
   }
 
   container.innerHTML = list.map(t => {
-    const starStr  = '⭐'.repeat(Math.round(t.avg));
-    const avgStr   = t.avg.toFixed(1);
+    const avg = toNum(t.avg_rating);
+    const diff = toNum(t.avg_difficulty);
+    const meta = [
+      t.subject ? escapeHtml(t.subject) : null,
+      `${t.review_count} review${t.review_count === 1 ? '' : 's'}`,
+      diff != null ? `Difficulty ${diff.toFixed(1)}` : null
+    ].filter(Boolean).join(' · ');
     return `
-      <button class="teacher-card" onclick="openTeacherReviews('${escapeAttr(t.name)}')">
-        <div class="teacher-avatar"><i class="fa-solid fa-chalkboard-user"></i></div>
+      <button class="teacher-card" onclick="openTeacherPage('${escapeAttr(t.id)}')">
+        <div class="teacher-avatar">${escapeHtml(teacherInitials(t.name))}</div>
         <div class="teacher-meta">
           <strong>${escapeHtml(t.name)}</strong>
-          <small>${t.count} review${t.count === 1 ? '' : 's'} · ${avgStr}★</small>
+          <small>${meta}</small>
         </div>
-        <div class="teacher-stars">${starStr}</div>
-      </button>
-    `;
+        <div class="rating-badge ${ratingClass(avg)}">${avg != null ? avg.toFixed(1) : '–'}</div>
+      </button>`;
   }).join('');
 }
 
-function openTeacherReviews(name) {
-  selectedTeacherName = name;
-  // Sync the reviews view to whatever school the directory is currently on.
-  reviewSchoolFilterId = teacherViewSchoolId;
-  fetchReviews();
-  switchTab('profile-view');
+// ---------- Add teacher ----------
+
+function openAddTeacherModal() {
+  if (!currentUserId) return showToast('Sign in to add a teacher.', 'warn');
+  if (!currentSchoolId) return openSchoolPicker(true);
+  document.getElementById('add-teacher-sub').textContent = `Creates a page for them at ${currentSchool?.name || 'your school'}.`;
+  document.getElementById('addTeacherModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('new-teacher-name')?.focus(), 50);
 }
-function clearTeacherFilter() { selectedTeacherName = null; renderReviews(); }
+function closeAddTeacherModal() { document.getElementById('addTeacherModal').style.display = 'none'; }
+
+async function submitAddTeacher(event) {
+  event.preventDefault();
+  const name = document.getElementById('new-teacher-name').value.replace(/\s+/g, ' ').trim();
+  const subject = document.getElementById('new-teacher-subject').value.trim() || null;
+  if (name.length < 2) return showToast('Enter the teacher\'s name.', 'warn');
+
+  const { data, error } = await supabaseClient
+    .from('teachers')
+    .insert([{ name, subject, school_id: currentSchoolId, created_by: currentUserId }])
+    .select('id').single();
+
+  let teacherId = data?.id;
+  if (error) {
+    if (error.code !== '23505') return showToast('Could not add teacher: ' + error.message, 'error');
+    // Already exists at this school — open their page instead.
+    const { data: existing } = await supabaseClient
+      .from('teachers').select('id')
+      .eq('school_id', currentSchoolId)
+      .ilike('name', name.replace(/[%_\\]/g, '\\$&'))
+      .maybeSingle();
+    if (!existing) return showToast('That teacher already exists.', 'warn');
+    teacherId = existing.id;
+    showToast(`${name} already has a page — opening it.`, 'info');
+  } else {
+    showToast(`Page created for ${name}.`, 'success');
+  }
+  closeAddTeacherModal();
+  event.target.reset();
+  openTeacherPage(teacherId);
+}
+
+// ---------- Teacher page ----------
+
+async function openTeacherPage(id) {
+  teacherTab = 'review';
+  currentTeacher = null;
+  teacherPosts = [];
+  document.getElementById('teacher-hero').innerHTML = '<div class="teacher-loading"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  document.getElementById('teacher-posts').innerHTML = '';
+  switchTab('teacher-view');
+  await loadTeacherPage(id);
+}
+
+async function loadTeacherPage(id) {
+  const [statsRes, postsRes] = await Promise.all([
+    supabaseClient.from('teacher_stats').select('*').eq('id', id).maybeSingle(),
+    supabaseClient.from('teacher_posts').select('*').eq('teacher_id', id)
+      .order('created_at', { ascending: false }).limit(200)
+  ]);
+  if (statsRes.error || !statsRes.data) {
+    showToast('That teacher page could not be found.', 'error');
+    return switchTab('search-view');
+  }
+  currentTeacher = statsRes.data;
+  teacherPosts = postsRes.data || [];
+
+  teacherVotes = {};
+  const ids = teacherPosts.map(p => p.id);
+  if (ids.length) {
+    const { data: votes } = await supabaseClient
+      .from('teacher_post_votes').select('post_id, user_id').in('post_id', ids);
+    (votes || []).forEach(v => {
+      const cur = teacherVotes[v.post_id] || { count: 0, mine: false };
+      cur.count += 1;
+      if (v.user_id === currentUserId) cur.mine = true;
+      teacherVotes[v.post_id] = cur;
+    });
+  }
+  renderTeacherPage();
+}
+
+function canPostOnTeacher() {
+  return !!(currentUserId && currentTeacher && currentTeacher.school_id === currentSchoolId);
+}
+function myReviewOnTeacher() {
+  return teacherPosts.find(p => p.kind === 'review' && p.author_id === currentUserId) || null;
+}
+
+function renderTeacherPage() {
+  if (!currentTeacher) return;
+  renderTeacherHero();
+  ['review', 'requirement', 'note'].forEach(k => {
+    const el = document.getElementById(`tt-count-${k}`);
+    if (el) el.textContent = teacherPosts.filter(p => p.kind === k).length;
+  });
+  document.querySelectorAll('#teacher-tabs .teacher-tab')
+    .forEach(b => b.classList.toggle('active', b.dataset.kind === teacherTab));
+  renderTeacherCourseFilter();
+  renderTeacherPosts();
+}
+
+function renderTeacherHero() {
+  const t = currentTeacher;
+  const reviews = teacherPosts.filter(p => p.kind === 'review');
+  const avg = toNum(t.avg_rating);
+  const diff = toNum(t.avg_difficulty);
+  const again = toNum(t.take_again_pct);
+
+  const dist = [5, 4, 3, 2, 1].map(n => {
+    const c = reviews.filter(r => r.rating === n).length;
+    const pct = reviews.length ? Math.round(100 * c / reviews.length) : 0;
+    return `<div class="dist-row"><span>${n}★</span><div class="dist-bar"><div style="width:${pct}%"></div></div><span>${c}</span></div>`;
+  }).join('');
+
+  const tagCounts = {};
+  reviews.forEach(r => (r.tags || []).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }));
+  const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+
+  const courses = [...new Set(teacherPosts.map(p => (p.course || '').trim()).filter(Boolean))];
+
+  document.getElementById('teacher-hero').innerHTML = `
+    <div class="teacher-hero-top">
+      <div class="teacher-avatar lg">${escapeHtml(teacherInitials(t.name))}</div>
+      <div class="teacher-hero-text">
+        <h1>${escapeHtml(t.name)}</h1>
+        <p>${[t.subject, schoolName(t.school_id)].filter(Boolean).map(escapeHtml).join(' · ')}</p>
+      </div>
+    </div>
+    <div class="teacher-stat-grid">
+      <div class="tstat"><span class="tstat-num ${ratingClass(avg)}">${avg != null ? avg.toFixed(1) : '–'}</span><span class="tstat-label">Rating</span></div>
+      <div class="tstat"><span class="tstat-num">${diff != null ? diff.toFixed(1) : '–'}</span><span class="tstat-label">Difficulty</span></div>
+      <div class="tstat"><span class="tstat-num">${again != null ? Math.round(again) + '%' : '–'}</span><span class="tstat-label">Take again</span></div>
+      <div class="tstat"><span class="tstat-num">${t.review_count}</span><span class="tstat-label">Reviews</span></div>
+    </div>
+    ${reviews.length ? `<div class="rating-dist">${dist}</div>` : ''}
+    ${topTags.length ? `<div class="teacher-top-tags">${topTags.map(([tag, c]) =>
+      `<span class="tag-chip">${escapeHtml(tag)} <b>${c}</b></span>`).join('')}</div>` : ''}
+    ${courses.length ? `<div class="teacher-courses"><i class="fa-solid fa-book"></i> ${courses.map(escapeHtml).join(' · ')}</div>` : ''}
+    ${canPostOnTeacher() ? '' : `<div class="teacher-readonly"><i class="fa-solid fa-eye"></i> ${currentUserId
+      ? `Only students at ${escapeHtml(schoolName(t.school_id))} can post here.` : 'Sign in to post.'}</div>`}
+  `;
+}
+
+function setTeacherTab(kind) {
+  if (!POST_KIND_META[kind]) return;
+  teacherTab = kind;
+  renderTeacherPage();
+}
+
+function renderTeacherCourseFilter() {
+  const sel = document.getElementById('teacher-course-filter');
+  if (!sel) return;
+  const prev = sel.value;
+  const courses = [...new Set(teacherPosts.filter(p => p.kind === teacherTab)
+    .map(p => (p.course || '').trim()).filter(Boolean))].sort();
+  sel.innerHTML = `<option value="all">All courses</option>` +
+    courses.map(c => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('');
+  sel.value = courses.includes(prev) ? prev : 'all';
+  sel.style.visibility = courses.length ? 'visible' : 'hidden';
+
+  const btn = document.getElementById('teacher-compose-btn');
+  if (btn) {
+    const mine = teacherTab === 'review' && myReviewOnTeacher();
+    btn.textContent = mine ? 'Edit my review' : POST_KIND_META[teacherTab].cta;
+    btn.disabled = !canPostOnTeacher();
+  }
+}
+
+function renderTeacherPosts() {
+  const container = document.getElementById('teacher-posts');
+  if (!container || !currentTeacher) return;
+  const meta = POST_KIND_META[teacherTab];
+  const course = document.getElementById('teacher-course-filter')?.value || 'all';
+
+  const list = teacherPosts
+    .filter(p => p.kind === teacherTab && (course === 'all' || (p.course || '').trim() === course))
+    .sort((a, b) =>
+      (b.author_id === currentUserId) - (a.author_id === currentUserId)
+      || (teacherVotes[b.id]?.count || 0) - (teacherVotes[a.id]?.count || 0)
+      || new Date(b.created_at) - new Date(a.created_at));
+
+  if (!list.length) {
+    container.innerHTML = `<div class="empty-state">
+      <i class="fa-solid fa-${teacherTab === 'review' ? 'star' : teacherTab === 'requirement' ? 'list-check' : 'note-sticky'}"></i>
+      <p>${meta.empty}</p>
+      ${canPostOnTeacher() ? `<button class="primary-btn" onclick="openTeacherPostModal()">${meta.cta}</button>` : ''}
+    </div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(p => {
+    const mine = p.author_id && p.author_id === currentUserId;
+    const votes = teacherVotes[p.id] || { count: 0, mine: false };
+    const author = p.author_name || ANON_AUTHOR;
+    const sub = [p.course ? escapeHtml(p.course) : null, timeAgo(p.created_at), p.updated_at ? 'edited' : null]
+      .filter(Boolean).join(' · ');
+    const reviewBits = p.kind === 'review' ? `
+      <div class="tpost-metrics">
+        ${starsHtml(p.rating)}
+        ${p.difficulty ? `<span>Difficulty <b>${p.difficulty}/5</b></span>` : ''}
+        ${p.would_take_again != null ? `<span>Take again <b>${p.would_take_again ? 'Yes' : 'No'}</b></span>` : ''}
+      </div>` : '';
+    return `
+      <div class="info-card tpost ${mine ? 'tpost-mine' : ''}">
+        <div class="tpost-head">
+          <span class="friend-avatar sm">${escapeHtml(author[0].toUpperCase())}</span>
+          <div class="tpost-author">
+            <strong>${escapeHtml(author)}${mine ? ' <em>(you)</em>' : ''}</strong>
+            <small>${sub}</small>
+          </div>
+          ${p.kind === 'review' ? `<div class="rating-badge sm ${ratingClass(p.rating)}">${p.rating}</div>` : ''}
+        </div>
+        ${reviewBits}
+        ${(p.tags || []).length ? `<div class="tpost-tags">${p.tags.map(tag => `<span class="tag-chip">${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
+        <p class="tpost-body">${renderSafeMessage(p.body || '')}</p>
+        <div class="tpost-actions">
+          <button class="helpful-btn ${votes.mine ? 'active' : ''}" onclick="toggleHelpful('${escapeAttr(p.id)}')" ${mine ? 'disabled' : ''}>
+            <i class="fa-solid fa-thumbs-up"></i> Helpful${votes.count ? ' · ' + votes.count : ''}
+          </button>
+          ${mine ? `
+            <button class="text-btn" onclick="openTeacherPostModal('${escapeAttr(p.id)}')">Edit</button>
+            <button class="text-btn danger-text" onclick="deleteTeacherPost('${escapeAttr(p.id)}')">Delete</button>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function toggleHelpful(postId) {
+  if (!currentUserId) return showToast('Sign in to vote.', 'warn');
+  const cur = teacherVotes[postId] || { count: 0, mine: false };
+  const req = cur.mine
+    ? supabaseClient.from('teacher_post_votes').delete().eq('post_id', postId).eq('user_id', currentUserId)
+    : supabaseClient.from('teacher_post_votes').insert([{ post_id: postId, user_id: currentUserId }]);
+  const { error } = await req;
+  if (error) return showToast('Vote failed: ' + error.message, 'error');
+  teacherVotes[postId] = { count: Math.max(0, cur.count + (cur.mine ? -1 : 1)), mine: !cur.mine };
+  renderTeacherPosts();
+}
+
+async function deleteTeacherPost(postId) {
+  if (!confirm('Delete this post? This can\'t be undone.')) return;
+  const { error } = await supabaseClient.from('teacher_posts').delete().eq('id', postId);
+  if (error) return showToast('Could not delete: ' + error.message, 'error');
+  showToast('Post deleted.', 'success');
+  fetchMyReviewCount();
+  loadTeacherPage(currentTeacher.id);
+}
+
+// ---------- Composer ----------
+
+function openTeacherPostModal(editId) {
+  if (!currentUserId) return showToast('Sign in to post.', 'warn');
+  if (!currentTeacher) return;
+  if (!canPostOnTeacher()) {
+    return showToast(`Only students at ${schoolName(currentTeacher.school_id)} can post here.`, 'warn');
+  }
+
+  let post = editId ? teacherPosts.find(p => p.id === editId) : null;
+  if (!post && teacherTab === 'review') post = myReviewOnTeacher();
+  editingPostId = post?.id || null;
+  composerKind = post?.kind || teacherTab;
+  const meta = POST_KIND_META[composerKind];
+
+  tpDraft = {
+    rating: post?.rating || 0,
+    difficulty: post?.difficulty || 0,
+    again: post?.would_take_again == null ? null : (post.would_take_again ? 'yes' : 'no'),
+    tags: [...(post?.tags || [])]
+  };
+
+  document.getElementById('tp-modal-title').textContent = editingPostId ? meta.editTitle : meta.title;
+  document.getElementById('tp-modal-sub').textContent = `About ${currentTeacher.name}`;
+  document.getElementById('tp-review-fields').style.display = composerKind === 'review' ? 'block' : 'none';
+  document.getElementById('tp-tags-label').textContent = meta.tagLabel;
+  document.getElementById('tp-body-label').textContent = meta.bodyLabel;
+
+  const courseInput = document.getElementById('tp-course');
+  courseInput.value = post?.course || '';
+  courseInput.placeholder = composerKind === 'requirement' ? 'Which course? (required)' : 'Course (optional)';
+  const courses = [...new Set(teacherPosts.map(p => (p.course || '').trim()).filter(Boolean))];
+  document.getElementById('tp-course-list').innerHTML = courses.map(c => `<option value="${escapeAttr(c)}"></option>`).join('');
+
+  const body = document.getElementById('tp-body');
+  body.value = post?.body || '';
+  body.placeholder = meta.placeholder;
+  document.getElementById('tp-anon').checked = post ? post.author_name === ANON_AUTHOR : !!appSettings.anonymous;
+  document.getElementById('tp-submit-btn').textContent = editingPostId ? 'Save changes' : 'Post';
+
+  renderTpScale('tp-rating', 'rating', RATING_WORDS);
+  renderTpScale('tp-difficulty', 'difficulty', DIFFICULTY_WORDS);
+  syncTpAgain();
+  renderTpTags();
+  updateTpCounter();
+  document.getElementById('teacherPostModal').style.display = 'flex';
+}
+
+function closeTeacherPostModal() { document.getElementById('teacherPostModal').style.display = 'none'; }
+
+function renderTpScale(containerId, field, words) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const val = tpDraft[field];
+  el.innerHTML = [1, 2, 3, 4, 5].map(n =>
+    `<button type="button" class="tp-scale-btn ${n <= val ? 'on' : ''} ${n === val ? 'picked' : ''}"
+       onclick="setTpScale('${containerId}', '${field}', ${n})">${n}</button>`).join('') +
+    `<span class="tp-scale-word">${val ? words[val] : 'Tap to rate'}</span>`;
+}
+function setTpScale(containerId, field, n) {
+  tpDraft[field] = n;
+  renderTpScale(containerId, field, field === 'rating' ? RATING_WORDS : DIFFICULTY_WORDS);
+}
+function setTpAgain(val) {
+  tpDraft.again = tpDraft.again === val ? null : val;  // tap again to clear
+  syncTpAgain();
+}
+function syncTpAgain() {
+  document.querySelectorAll('#tp-again .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.val === tpDraft.again));
+}
+
+function renderTpTags() {
+  const meta = POST_KIND_META[composerKind];
+  document.getElementById('tp-tags').innerHTML = meta.tags.map(tag =>
+    `<button type="button" class="tp-tag ${tpDraft.tags.includes(tag) ? 'on' : ''}" onclick="toggleTpTag('${escapeAttr(tag)}')">${escapeHtml(tag)}</button>`
+  ).join('');
+}
+function toggleTpTag(tag) {
+  const meta = POST_KIND_META[composerKind];
+  if (tpDraft.tags.includes(tag)) tpDraft.tags = tpDraft.tags.filter(t => t !== tag);
+  else if (tpDraft.tags.length >= meta.maxTags) return showToast(`Pick up to ${meta.maxTags}.`, 'info', 2000);
+  else tpDraft.tags.push(tag);
+  renderTpTags();
+}
+
+function updateTpCounter() {
+  const len = document.getElementById('tp-body')?.value.length || 0;
+  const el = document.getElementById('tp-counter');
+  if (el) { el.textContent = `${len}/2000`; el.classList.toggle('over-limit', len >= 2000); }
+}
+
+async function submitTeacherPost(event) {
+  event.preventDefault();
+  if (!canPostOnTeacher()) return;
+  const kind = composerKind;
+  const body = document.getElementById('tp-body').value.trim();
+  const course = document.getElementById('tp-course').value.replace(/\s+/g, ' ').trim() || null;
+
+  if (kind === 'review' && !tpDraft.rating) return showToast('Pick an overall rating.', 'warn');
+  if (kind === 'requirement' && !course) return showToast('Which course are these requirements for?', 'warn');
+  if (!body) return showToast('Write something first.', 'warn');
+
+  const anon = document.getElementById('tp-anon').checked;
+  const row = {
+    kind, course, body,
+    tags: tpDraft.tags.slice(0, 8),
+    author_name: anon ? ANON_AUTHOR : sanitizeName(currentHandle || currentUser.split('@')[0])
+  };
+  if (kind === 'review') {
+    row.rating = tpDraft.rating;
+    row.difficulty = tpDraft.difficulty || null;
+    row.would_take_again = tpDraft.again == null ? null : tpDraft.again === 'yes';
+  }
+
+  const btn = document.getElementById('tp-submit-btn');
+  btn.disabled = true;
+  const { error } = editingPostId
+    ? await supabaseClient.from('teacher_posts').update({ ...row, updated_at: new Date().toISOString() }).eq('id', editingPostId)
+    : await supabaseClient.from('teacher_posts').insert([{ ...row, teacher_id: currentTeacher.id, author_id: currentUserId }]);
+  btn.disabled = false;
+
+  if (error) {
+    if (error.code === '23505') return showToast('You already reviewed this teacher — edit that review instead.', 'warn', 4500);
+    return showToast('Could not post: ' + error.message, 'error');
+  }
+  showToast(editingPostId ? 'Saved.' : 'Posted — thanks for helping other students!', 'success');
+  closeTeacherPostModal();
+  teacherTab = kind;
+  fetchMyReviewCount();
+  loadTeacherPage(currentTeacher.id);
+}
+
+// ---------- Home stat + realtime ----------
+
+async function fetchMyReviewCount() {
+  if (!currentUserId || !isSupabaseConnected) { myReviewCount = 0; return updateAnalytics(); }
+  const { count } = await supabaseClient
+    .from('teacher_posts').select('id', { count: 'exact', head: true })
+    .eq('author_id', currentUserId).eq('kind', 'review');
+  myReviewCount = count || 0;
+  updateAnalytics();
+}
+
+function updateAnalytics() {
+  const el = document.getElementById('total-reviews-count');
+  if (el) el.textContent = myReviewCount;
+}
+
+// Debounced so a burst of votes/posts doesn't trigger a burst of refetches.
+function onTeacherDataChanged() {
+  clearTimeout(teacherRefreshTimer);
+  teacherRefreshTimer = setTimeout(() => {
+    if (isViewActive('teacher-view') && currentTeacher) loadTeacherPage(currentTeacher.id);
+    if (isViewActive('search-view')) fetchTeacherDirectory();
+  }, 400);
+}
 
 function openModal(title, text) {
   document.getElementById('modalTitle').textContent = title;

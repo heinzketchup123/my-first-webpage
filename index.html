@@ -52,7 +52,7 @@
         <span class="brand-title">Campus Hub</span>
       </div>
       <div class="header-actions">
-        <button class="review-trigger-btn" onclick="openReviewModal()">+ Review</button>
+        <button class="review-trigger-btn" onclick="switchTab('search-view')"><i class="fa-solid fa-chalkboard-user"></i> Teachers</button>
         <button class="icon-header-btn" onclick="toggleNotifications()" aria-label="Notifications">
           <i class="fa-solid fa-bell"></i>
           <span id="notif-badge" class="notif-badge" style="display:none;">0</span>
@@ -83,8 +83,8 @@
           
           <div class="analytics-row">
             <div class="stat-box">
-              <span id="total-reviews-count" class="stat-number">--</span>
-              <span class="stat-label">Reviews</span>
+              <span id="total-reviews-count" class="stat-number">0</span>
+              <span class="stat-label">My Reviews</span>
             </div>
             <div class="stat-box">
               <span id="gpa-summary-val" class="stat-number">0.00</span>
@@ -103,9 +103,9 @@
             <i class="fa-solid fa-calculator"></i>
             <span>GPA Calc</span>
           </button>
-          <button class="tool-btn" onclick="openTimerModal()">
+          <button class="tool-btn" id="pomo-tool-btn" onclick="openTimerModal()">
             <i class="fa-solid fa-stopwatch"></i>
-            <span>Pomodoro</span>
+            <span id="pomo-tool-label">Pomodoro</span>
           </button>
           <button class="tool-btn" onclick="switchTab('chat-view')">
             <i class="fa-solid fa-comments"></i>
@@ -138,20 +138,57 @@
 
       <!-- Tab 2: Teacher Directory -->
       <section id="search-view" class="view">
-        <h1 class="page-title">Find a Teacher</h1>
-        <p class="description">Every teacher your peers have reviewed, ranked by rating.</p>
+        <div class="chat-header-row">
+          <h1 class="page-title" style="margin:0;">Teachers</h1>
+          <button class="review-trigger-btn" onclick="openAddTeacherModal()">+ Add Teacher</button>
+        </div>
+        <p class="description">Reviews, course requirements and notes from students who've had them.</p>
 
         <div class="search-input-wrapper">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
-          <input type="text" id="teacher-search-input" class="search-bar" placeholder="Search by teacher name..." oninput="renderTeacherDirectory()" />
+          <input type="text" id="teacher-search-input" class="search-bar" placeholder="Search teachers or subjects..." oninput="renderTeacherDirectory()" autocomplete="off" />
         </div>
 
-        <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-          <span class="filter-label">School:</span>
-          <select id="teacher-school-filter" class="mini-select flex-1" onchange="renderTeacherDirectory()"></select>
+        <div class="teacher-dir-controls">
+          <select id="teacher-school-filter" class="mini-select flex-1" onchange="setTeacherDirSchool(this.value)"></select>
+        </div>
+
+        <div class="filter-chips" id="teacher-sort-chips">
+          <button class="chip active" data-sort="top" onclick="setTeacherSort('top', this)">Top Rated</button>
+          <button class="chip" data-sort="most" onclick="setTeacherSort('most', this)">Most Reviewed</button>
+          <button class="chip" data-sort="easy" onclick="setTeacherSort('easy', this)">Easiest</button>
+          <button class="chip" data-sort="az" onclick="setTeacherSort('az', this)">A–Z</button>
         </div>
 
         <div id="teacher-directory" class="stack-list"></div>
+      </section>
+
+      <!-- Teacher Page (opened from the directory) -->
+      <section id="teacher-view" class="view">
+        <button class="teacher-back-btn" onclick="switchTab('search-view')">
+          <i class="fa-solid fa-arrow-left"></i> All teachers
+        </button>
+
+        <div id="teacher-hero" class="teacher-hero"></div>
+
+        <div class="teacher-tabs" id="teacher-tabs">
+          <button class="teacher-tab active" data-kind="review" onclick="setTeacherTab('review')">
+            <i class="fa-solid fa-star"></i> Reviews <span class="tt-count" id="tt-count-review">0</span>
+          </button>
+          <button class="teacher-tab" data-kind="requirement" onclick="setTeacherTab('requirement')">
+            <i class="fa-solid fa-list-check"></i> Course Info <span class="tt-count" id="tt-count-requirement">0</span>
+          </button>
+          <button class="teacher-tab" data-kind="note" onclick="setTeacherTab('note')">
+            <i class="fa-solid fa-note-sticky"></i> Notes <span class="tt-count" id="tt-count-note">0</span>
+          </button>
+        </div>
+
+        <div class="teacher-toolbar">
+          <select id="teacher-course-filter" class="mini-select flex-1" onchange="renderTeacherPosts()"></select>
+          <button id="teacher-compose-btn" class="primary-btn teacher-compose-btn" onclick="openTeacherPostModal()">+ Write</button>
+        </div>
+
+        <div id="teacher-posts" class="stack-list"></div>
       </section>
 
       <!-- Tab 3: Study Groups -->
@@ -226,31 +263,6 @@
 
         <div id="gpa-rows-container" class="stack-list">
           <!-- Dynamic GPA Rows -->
-        </div>
-      </section>
-
-      <!-- Tab 7: Reviews View -->
-      <section id="profile-view" class="view">
-        <h1 class="page-title">Instructor Reviews</h1>
-        
-        <div class="filter-reviews-bar" style="flex-direction:column; align-items:stretch; gap:6px;">
-          <div style="display:flex; gap:8px; align-items:center;">
-            <span class="filter-label">School:</span>
-            <select id="review-school-filter" class="mini-select flex-1" onchange="setReviewSchool(this.value)"></select>
-          </div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <span class="filter-label">Rating:</span>
-            <select id="rating-filter" class="mini-select flex-1" onchange="renderReviews()">
-              <option value="all">All Ratings</option>
-              <option value="5">5 Stars</option>
-              <option value="4">4 Stars</option>
-              <option value="3">3 Stars</option>
-            </select>
-          </div>
-        </div>
-
-        <div id="user-reviews-list" class="stack-list">
-          <!-- Reviews render dynamically -->
         </div>
       </section>
 
@@ -381,27 +393,23 @@
 
     <!-- Navigation Bar -->
     <nav class="bottom-nav">
-      <button class="nav-btn active" onclick="switchTab('home-view', this)" aria-label="Home">
+      <button class="nav-btn active" data-view="home-view" onclick="switchTab('home-view', this)" aria-label="Home">
         <i class="fa-solid fa-house"></i>
         <span class="nav-label">Home</span>
       </button>
-      <button class="nav-btn" onclick="switchTab('search-view', this)" aria-label="Explore">
-        <i class="fa-solid fa-compass"></i>
-        <span class="nav-label">Explore</span>
+      <button class="nav-btn" data-view="search-view" onclick="switchTab('search-view', this)" aria-label="Teachers">
+        <i class="fa-solid fa-chalkboard-user"></i>
+        <span class="nav-label">Teachers</span>
       </button>
-      <button class="nav-btn" onclick="switchTab('groups-view', this)" aria-label="Groups">
+      <button class="nav-btn" data-view="groups-view" onclick="switchTab('groups-view', this)" aria-label="Groups">
         <i class="fa-solid fa-user-group"></i>
         <span class="nav-label">Groups</span>
       </button>
-      <button class="nav-btn" onclick="switchTab('chat-view', this)" aria-label="Messages">
+      <button class="nav-btn" data-view="chat-view" onclick="switchTab('chat-view', this)" aria-label="Messages">
         <i class="fa-solid fa-comments"></i>
         <span class="nav-label">Chat</span>
       </button>
-      <button class="nav-btn" onclick="switchTab('profile-view', this)" aria-label="Reviews">
-        <i class="fa-solid fa-star"></i>
-        <span class="nav-label">Reviews</span>
-      </button>
-      <button class="nav-btn" onclick="switchTab('settings-view', this)" aria-label="Settings">
+      <button class="nav-btn" data-view="settings-view" onclick="switchTab('settings-view', this)" aria-label="Settings">
         <i class="fa-solid fa-gear"></i>
         <span class="nav-label">Me</span>
       </button>
@@ -420,26 +428,63 @@
     </div>
   </div>
 
-  <!-- Review Modal -->
-  <div id="reviewModal" class="modal-overlay">
-    <div class="modal-content text-left">
-      <h2 class="modal-title">Add Instructor Review</h2>
-      <form onsubmit="submitReview(event)">
-        <input type="text" id="review-teacher" class="auth-input modal-input" placeholder="Course or Instructor Name" required />
-        <div class="rating-picker">
-          <label for="review-rating">Rating:</label>
-          <select id="review-rating" class="mini-select flex-1">
-            <option value="5">5 Stars ⭐⭐⭐⭐⭐</option>
-            <option value="4">4 Stars ⭐⭐⭐⭐</option>
-            <option value="3">3 Stars ⭐⭐⭐</option>
-            <option value="2">2 Stars ⭐⭐</option>
-            <option value="1">1 Star ⭐</option>
-          </select>
+  <!-- Teacher Post Composer (review / requirement / note) -->
+  <div id="teacherPostModal" class="modal-overlay">
+    <div class="modal-content text-left tp-modal">
+      <div class="friends-modal-head">
+        <h2 class="modal-title" id="tp-modal-title" style="margin:0;">Write a review</h2>
+        <i class="fa-solid fa-xmark friends-close" onclick="closeTeacherPostModal()"></i>
+      </div>
+      <p class="friends-hint" id="tp-modal-sub"></p>
+      <form onsubmit="submitTeacherPost(event)">
+        <label class="tp-label" for="tp-course">Course</label>
+        <input type="text" id="tp-course" class="auth-input modal-input" list="tp-course-list" maxlength="60" placeholder="e.g. AP Biology" autocomplete="off" />
+        <datalist id="tp-course-list"></datalist>
+
+        <div id="tp-review-fields">
+          <label class="tp-label">Overall rating</label>
+          <div class="tp-scale" id="tp-rating"></div>
+          <label class="tp-label">Difficulty</label>
+          <div class="tp-scale" id="tp-difficulty"></div>
+          <label class="tp-label">Would you take them again?</label>
+          <div class="segmented" id="tp-again">
+            <button type="button" class="seg-btn" data-val="yes" onclick="setTpAgain('yes')">Yes</button>
+            <button type="button" class="seg-btn" data-val="no" onclick="setTpAgain('no')">No</button>
+          </div>
         </div>
-        <textarea id="review-text" class="auth-input textarea-input modal-input" placeholder="Share course feedback..." required></textarea>
+
+        <label class="tp-label" id="tp-tags-label">Tags</label>
+        <div class="tp-tags" id="tp-tags"></div>
+
+        <label class="tp-label" for="tp-body" id="tp-body-label">Your review</label>
+        <textarea id="tp-body" class="auth-input textarea-input modal-input" maxlength="2000" oninput="updateTpCounter()"></textarea>
+        <div class="tp-body-foot">
+          <label class="tp-anon"><input type="checkbox" id="tp-anon" /> Post anonymously</label>
+          <span id="tp-counter" class="chat-char-counter">0/2000</span>
+        </div>
+
         <div class="modal-actions">
-          <button type="button" class="secondary-btn" onclick="closeReviewModal()">Cancel</button>
-          <button type="submit" class="primary-btn">Submit</button>
+          <button type="button" class="secondary-btn" onclick="closeTeacherPostModal()">Cancel</button>
+          <button type="submit" class="primary-btn" id="tp-submit-btn">Post</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add Teacher Modal -->
+  <div id="addTeacherModal" class="modal-overlay">
+    <div class="modal-content text-left">
+      <div class="friends-modal-head">
+        <h2 class="modal-title" style="margin:0;">Add a teacher</h2>
+        <i class="fa-solid fa-xmark friends-close" onclick="closeAddTeacherModal()"></i>
+      </div>
+      <p class="friends-hint" id="add-teacher-sub">Adds a page for them at your school.</p>
+      <form onsubmit="submitAddTeacher(event)">
+        <input type="text" id="new-teacher-name" class="auth-input modal-input" placeholder="Name (e.g. Ms. Rivera)" maxlength="80" required autocomplete="off" />
+        <input type="text" id="new-teacher-subject" class="auth-input modal-input" placeholder="Subject (e.g. Chemistry)" maxlength="60" autocomplete="off" />
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" onclick="closeAddTeacherModal()">Cancel</button>
+          <button type="submit" class="primary-btn">Create page</button>
         </div>
       </form>
     </div>
@@ -461,14 +506,22 @@
   </div>
 
   <!-- Pomodoro Timer Modal -->
-  <div id="timerModal" class="modal-overlay">
+  <div id="timerModal" class="modal-overlay" onclick="if (event.target === this) closeTimerModal()">
     <div class="modal-content">
-      <h2 class="modal-title">Pomodoro Timer</h2>
+      <div class="friends-modal-head">
+        <h2 class="modal-title" style="margin:0;">Pomodoro</h2>
+        <i class="fa-solid fa-xmark friends-close" onclick="closeTimerModal()"></i>
+      </div>
+      <div class="segmented" id="timer-mode-seg">
+        <button type="button" class="seg-btn active" data-mode="focus" onclick="setTimerMode('focus')">Focus · 25</button>
+        <button type="button" class="seg-btn" data-mode="break" onclick="setTimerMode('break')">Break · 5</button>
+      </div>
       <div class="timer-display" id="timer-display">25:00</div>
+      <div class="timer-progress"><div class="timer-progress-fill" id="timer-progress-fill"></div></div>
+      <p class="timer-hint" id="timer-hint">Keeps running if you close this.</p>
       <div class="modal-actions">
-        <button id="timer-start-btn" class="primary-btn" onclick="toggleTimer()">Start Focus</button>
+        <button id="timer-start-btn" class="primary-btn" onclick="toggleTimer()">Start</button>
         <button class="secondary-btn" onclick="resetTimer()">Reset</button>
-        <button class="secondary-btn" onclick="closeTimerModal()">Close</button>
       </div>
     </div>
   </div>

@@ -508,6 +508,144 @@ create policy "groups: creator deletes"
   using (auth.uid() = creator_id);
 
 -- ============================================================
+-- 6d. TEACHER PAGES
+-- ============================================================
+-- Each teacher belongs to one school and has a page made of posts:
+--   review       — rating, difficulty, would-take-again, tags, text
+--   requirement  — course requirements (textbook, grading, workload...)
+--   note         — tips / heads-ups / resources about the teacher
+-- Everyone can read every school's teachers. Only students at the
+-- teacher's school can add posts.
+
+create table if not exists public.teachers (
+  id         uuid primary key default gen_random_uuid(),
+  school_id  uuid not null references public.schools(id) on delete cascade,
+  name       text not null check (char_length(name) between 2 and 80),
+  subject    text check (subject is null or char_length(subject) <= 60),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists teachers_school_name_uniq
+  on public.teachers (school_id, lower(name));
+
+alter table public.teachers enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='teachers' loop
+    execute format('drop policy if exists %I on public.teachers', p.policyname);
+  end loop;
+end $$;
+create policy "teachers: everyone reads"
+  on public.teachers for select using (true);
+create policy "teachers: students add to own school"
+  on public.teachers for insert
+  with check (auth.uid() is not null and created_by = auth.uid()
+              and school_id = public.my_school_id());
+create policy "teachers: creator edits"
+  on public.teachers for update
+  using (auth.uid() = created_by) with check (auth.uid() = created_by);
+
+create table if not exists public.teacher_posts (
+  id               uuid primary key default gen_random_uuid(),
+  teacher_id       uuid not null references public.teachers(id) on delete cascade,
+  author_id        uuid references auth.users(id) on delete cascade,
+  author_name      text check (author_name is null or char_length(author_name) <= 40),
+  kind             text not null check (kind in ('review','requirement','note')),
+  course           text check (course is null or char_length(course) <= 60),
+  rating           smallint check (rating between 1 and 5),
+  difficulty       smallint check (difficulty between 1 and 5),
+  would_take_again boolean,
+  tags             text[] not null default '{}' check (coalesce(array_length(tags, 1), 0) <= 8),
+  body             text not null check (char_length(body) between 1 and 2000),
+  legacy_review_id uuid unique,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz,
+  check (kind <> 'review' or rating is not null)
+);
+create index if not exists teacher_posts_teacher_idx
+  on public.teacher_posts (teacher_id, created_at desc);
+-- One review per student per teacher (they can edit it instead).
+create unique index if not exists teacher_posts_one_review_per_user
+  on public.teacher_posts (teacher_id, author_id) where kind = 'review';
+
+alter table public.teacher_posts enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='teacher_posts' loop
+    execute format('drop policy if exists %I on public.teacher_posts', p.policyname);
+  end loop;
+end $$;
+create policy "teacher_posts: everyone reads"
+  on public.teacher_posts for select using (true);
+create policy "teacher_posts: same-school students write"
+  on public.teacher_posts for insert
+  with check (
+    auth.uid() is not null and auth.uid() = author_id
+    and exists (select 1 from public.teachers t
+                where t.id = teacher_id and t.school_id = public.my_school_id())
+  );
+create policy "teacher_posts: author edits own"
+  on public.teacher_posts for update
+  using (auth.uid() = author_id) with check (auth.uid() = author_id);
+create policy "teacher_posts: author deletes own"
+  on public.teacher_posts for delete using (auth.uid() = author_id);
+
+-- "Helpful" votes on posts.
+create table if not exists public.teacher_post_votes (
+  post_id    uuid not null references public.teacher_posts(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (post_id, user_id)
+);
+alter table public.teacher_post_votes enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='teacher_post_votes' loop
+    execute format('drop policy if exists %I on public.teacher_post_votes', p.policyname);
+  end loop;
+end $$;
+create policy "votes: everyone reads"
+  on public.teacher_post_votes for select using (true);
+create policy "votes: user casts own"
+  on public.teacher_post_votes for insert with check (auth.uid() = user_id);
+create policy "votes: user removes own"
+  on public.teacher_post_votes for delete using (auth.uid() = user_id);
+
+-- Aggregated numbers for the directory and the page header.
+drop view if exists public.teacher_stats;
+create view public.teacher_stats with (security_invoker = true) as
+select
+  t.id, t.school_id, t.name, t.subject, t.created_at,
+  count(p.id) filter (where p.kind = 'review')                        as review_count,
+  round(avg(p.rating)     filter (where p.kind = 'review'), 2)        as avg_rating,
+  round(avg(p.difficulty) filter (where p.kind = 'review'), 2)        as avg_difficulty,
+  round(100.0 * avg(case when p.would_take_again then 1
+                         when p.would_take_again = false then 0 end)
+        filter (where p.kind = 'review'))                             as take_again_pct,
+  count(p.id)                                                         as post_count
+from public.teachers t
+left join public.teacher_posts p on p.teacher_id = t.id
+group by t.id;
+grant select on public.teacher_stats to anon, authenticated;
+
+-- Copy old instructor_reviews into teacher pages (safe to re-run).
+insert into public.teachers (school_id, name, created_by)
+select distinct on (r.school_id, lower(trim(r.teacher)))
+       r.school_id, trim(r.teacher), r.author_id
+from public.instructor_reviews r
+where r.school_id is not null
+  and char_length(trim(coalesce(r.teacher, ''))) between 2 and 80
+order by r.school_id, lower(trim(r.teacher)), r.created_at
+on conflict do nothing;
+
+insert into public.teacher_posts
+  (teacher_id, author_id, author_name, kind, rating, body, legacy_review_id, created_at)
+select t.id, r.author_id, 'Student', 'review', r.rating::smallint, r.text, r.id, r.created_at
+from public.instructor_reviews r
+join public.teachers t
+  on t.school_id = r.school_id and lower(t.name) = lower(trim(r.teacher))
+where r.rating in ('1','2','3','4','5')
+  and char_length(coalesce(r.text, '')) between 1 and 2000
+on conflict do nothing;
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -518,7 +656,8 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['campus_chat','campus_feed','friendships','study_groups','study_group_members'] loop
+  foreach t in array array['campus_chat','campus_feed','friendships','study_groups','study_group_members',
+                           'teachers','teacher_posts','teacher_post_votes'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'
