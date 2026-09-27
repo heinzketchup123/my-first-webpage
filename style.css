@@ -2486,3 +2486,244 @@ button.notif-item:hover { border-color: var(--accent-soft-border); }
 .settings-list li .setting-text { flex: 1; min-width: 0; gap: 2px; }
 .settings-list li .setting-text small { line-height: 1.35; }
 .settings-list li .toggle-btn { flex-shrink: 0; }
+
+/* =====================================================================
+   PHONE + COMPUTER LAYOUTS
+   <html> gets .layout-phone or .layout-desktop (set in index.html before
+   first paint, then kept in sync by applyLayout() in script.js).
+   ===================================================================== */
+.desktop-only { display: none !important; }
+
+/* ---------- Phone layout: full screen, no phone mockup frame ---------- */
+html.layout-phone .mobile-frame {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+/* Tablets / narrow windows: keep the phone design, centered and readable */
+html.layout-phone .content-container > .view { max-width: 680px; margin: 0 auto; }
+html.layout-phone .bottom-nav { width: calc(100% - 32px); max-width: 560px; align-self: center; }
+html.layout-phone .app-header { width: 100%; max-width: 712px; align-self: center; }
+
+/* ---------- Computer layout: sidebar + wide pages ---------- */
+html.layout-desktop .desktop-only { display: revert !important; }
+html.layout-desktop .phone-only { display: none !important; }
+
+html.layout-desktop .mobile-frame {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "nav header" "nav main";
+}
+
+/* Sidebar */
+html.layout-desktop .bottom-nav {
+  grid-area: nav;
+  height: auto;
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid var(--card-border);
+  box-shadow: none;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 2px;
+  padding: 22px 14px 18px;
+  overflow-y: auto;
+}
+html.layout-desktop .sidebar-brand {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 18px;
+}
+html.layout-desktop .sidebar-brand .brand-badge { font-size: 0.7rem; padding: 3px 7px; }
+html.layout-desktop .sidebar-brand .brand-title { font-size: 1.1rem; }
+html.layout-desktop .sidebar-post-btn {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border-radius: 12px;
+}
+html.layout-desktop .nav-btn {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 1rem;
+}
+html.layout-desktop .nav-btn.desktop-only { display: flex !important; }
+html.layout-desktop .nav-btn i { width: 22px; height: auto; background: transparent !important; font-size: 1rem; }
+html.layout-desktop .nav-label { font-size: 0.9rem; font-weight: 600; }
+html.layout-desktop .nav-btn:hover { background: var(--input-bg); color: var(--main-text-color); }
+html.layout-desktop .nav-btn.active { background: var(--accent-muted); color: var(--accent-color); }
+html.layout-desktop .nav-btn.active i { color: var(--accent-color); }
+html.layout-desktop .nav-settings { margin-top: auto; }
+html.layout-desktop .nav-badge { top: 50%; right: 12px; transform: translateY(-50%); }
+
+/* Top bar: just the actions, on the right */
+html.layout-desktop .app-header {
+  grid-area: header;
+  padding: 16px 32px 8px;
+  justify-content: flex-end;
+}
+html.layout-desktop .app-header .brand-group { display: none; }
+
+/* Notifications: a dropdown under the bell instead of a full-width drawer */
+html.layout-desktop .notif-drawer {
+  left: auto;
+  right: 28px;
+  top: 64px;
+  width: 400px;
+  max-height: min(620px, calc(100vh - 90px));
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  transform: translateY(-8px);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease, visibility 0s linear 0.2s;
+}
+html.layout-desktop .notif-drawer.open {
+  transform: translateY(0);
+  opacity: 1;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+/* Main area */
+html.layout-desktop .content-container { grid-area: main; padding: 8px 40px 40px; }
+html.layout-desktop .content-container > .view { max-width: 1120px; margin: 0 auto; }
+html.layout-desktop .page-title { font-size: 1.9rem; }
+html.layout-desktop .page-header { margin-bottom: 20px; }
+html.layout-desktop .page-header .description { font-size: 0.92rem; }
+
+/* Home: feed on the left, dashboard + tools on the right */
+html.layout-desktop #home-view.active-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  grid-template-rows: auto auto 1fr;
+  grid-template-areas: "feed hero" "feed tools" "feed .";
+  column-gap: 28px;
+  align-items: start;
+  height: auto;
+}
+html.layout-desktop #home-view .hero-card { grid-area: hero; }
+html.layout-desktop #home-view .quick-tools-bar { grid-area: tools; grid-template-columns: repeat(2, 1fr); }
+html.layout-desktop #home-view .feed-section { grid-area: feed; }
+html.layout-desktop #home-view .section-header h3 { font-size: 1.25rem; }
+
+/* Card lists become grids */
+html.layout-desktop #teacher-directory,
+html.layout-desktop #groups-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+html.layout-desktop #teacher-directory > .empty-state,
+html.layout-desktop #groups-list > .empty-state { grid-column: 1 / -1; }
+html.layout-desktop #search-view .search-input-wrapper,
+html.layout-desktop #search-view .teacher-dir-controls { max-width: 560px; align-self: flex-start; }
+
+/* Teacher page, GPA: comfortable reading width */
+html.layout-desktop .content-container > #teacher-view { max-width: 900px; }
+html.layout-desktop .content-container > #gpa-view { max-width: 760px; }
+
+/* Messages: friends list on the left, conversation on the right */
+html.layout-desktop #chat-view.active-view {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "head head" "friends chat";
+  column-gap: 18px;
+  align-items: stretch;
+  height: 100%;
+  min-height: 520px;
+}
+html.layout-desktop #chat-view > .friends-strip > .friends-empty { margin: auto 0; }
+html.layout-desktop #chat-view > .page-header { grid-area: head; }
+html.layout-desktop #chat-view > .friends-strip {
+  grid-area: friends;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 10px;
+  gap: 4px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 22px;
+  min-height: 0;
+}
+html.layout-desktop #chat-view .friend-chip {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  max-width: none;
+  padding: 8px 10px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+html.layout-desktop #chat-view .friend-chip:hover { background: var(--input-bg); }
+html.layout-desktop #chat-view .friend-chip.active { background: var(--accent-muted); border-color: var(--accent-soft-border); box-shadow: none; }
+html.layout-desktop #chat-view .friend-name { max-width: none; font-size: 0.88rem; text-align: left; }
+html.layout-desktop #chat-view .friends-empty { flex-direction: column; text-align: center; border: none; }
+html.layout-desktop #chat-view > .chat-container { grid-area: chat; min-height: 0; height: 100%; }
+
+/* Calendar: month grid on the left, event list on the right */
+html.layout-desktop #events-view.active-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-rows: auto auto 1fr;
+  grid-template-areas: "head head" "cal listhead" "cal list";
+  column-gap: 24px;
+  align-items: start;
+  height: auto;
+}
+html.layout-desktop #events-view > .page-header { grid-area: head; }
+html.layout-desktop #events-view > .cal-card { grid-area: cal; margin: 0; padding: 18px; }
+html.layout-desktop #events-view > .cal-list-head { grid-area: listhead; margin-top: 0; }
+html.layout-desktop #events-view > #events-list { grid-area: list; }
+
+/* Settings: two columns of cards */
+html.layout-desktop #settings-view.active-view {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+  max-width: 1000px;
+  height: auto;
+}
+html.layout-desktop #settings-view > .page-header,
+html.layout-desktop #settings-view > #admin-card,
+html.layout-desktop #settings-view > .settings-list,
+html.layout-desktop #settings-view > .settings-btn-row { grid-column: 1 / -1; }
+html.layout-desktop #settings-view > .page-header { margin-bottom: 4px; }
+html.layout-desktop #settings-view .pref-card { margin: 0; }
+html.layout-desktop #settings-view .settings-btn-row { flex-direction: row; max-width: 520px; }
+
+/* Dialogs get more room on a big screen */
+html.layout-desktop .modal-content { max-width: 460px; }
+html.layout-desktop .auth-box { max-width: 380px; }
+
+/* Toasts: centered in the content area, near the bottom */
+html.layout-desktop .toast-container { bottom: 28px; left: calc(50% + 124px); }
+.layout-hint { margin-top: 10px; }

@@ -15,6 +15,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" />
   <link rel="stylesheet" href="style.css" />
+  <!-- Pick phone vs computer layout before the first paint (no flash). -->
+  <script>
+    (function () {
+      var l = 'auto';
+      try { l = (JSON.parse(localStorage.getItem('appearance') || '{}').layout) || 'auto'; } catch (e) {}
+      var desktop = l === 'desktop' || (l === 'auto' && window.innerWidth >= 960);
+      document.documentElement.classList.add(desktop ? 'layout-desktop' : 'layout-phone');
+    })();
+  </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   
   <!-- Supabase JS SDK -->
@@ -55,7 +64,7 @@
         <span class="brand-title">Campus Hub</span>
       </div>
       <div class="header-actions">
-        <button class="review-trigger-btn" onclick="switchTab('search-view')"><i class="fa-solid fa-chalkboard-user"></i> Teachers</button>
+        <button class="review-trigger-btn phone-only" onclick="switchTab('search-view')"><i class="fa-solid fa-chalkboard-user"></i> Teachers</button>
         <button class="icon-header-btn" onclick="toggleNotifications()" aria-label="Notifications">
           <i class="fa-solid fa-bell"></i>
           <span id="notif-badge" class="notif-badge" style="display:none;">0</span>
@@ -360,6 +369,26 @@
           </div>
         </div>
 
+        <!-- Layout: phone vs computer -->
+        <div class="pref-card">
+          <div class="pref-header">
+            <i class="fa-solid fa-display"></i>
+            <h3>Layout</h3>
+          </div>
+          <div class="segmented" id="layout-segmented">
+            <button class="seg-btn active" data-layout="auto" onclick="setLayout('auto')">
+              <i class="fa-solid fa-wand-magic-sparkles"></i><span>Auto</span>
+            </button>
+            <button class="seg-btn" data-layout="phone" onclick="setLayout('phone')">
+              <i class="fa-solid fa-mobile-screen"></i><span>Phone</span>
+            </button>
+            <button class="seg-btn" data-layout="desktop" onclick="setLayout('desktop')">
+              <i class="fa-solid fa-desktop"></i><span>Computer</span>
+            </button>
+          </div>
+          <p class="admin-hint layout-hint">Auto uses the computer layout on wide screens and the phone layout on narrow ones.</p>
+        </div>
+
         <!-- Color Theme Presets -->
         <div class="pref-card">
           <div class="pref-header">
@@ -447,7 +476,15 @@
     </main>
 
     <!-- Navigation Bar -->
+    <!-- Phones: bottom tab bar. Computers: left sidebar (extra items shown there). -->
     <nav class="bottom-nav">
+      <div class="sidebar-brand desktop-only">
+        <span class="brand-badge">PULSE</span>
+        <span class="brand-title">Campus Hub</span>
+      </div>
+      <button class="primary-btn sidebar-post-btn desktop-only" onclick="openNewPostModal()">
+        <i class="fa-solid fa-pen"></i> New Post
+      </button>
       <button class="nav-btn active" data-view="home-view" onclick="switchTab('home-view', this)" aria-label="Home">
         <i class="fa-solid fa-house"></i>
         <span class="nav-label">Home</span>
@@ -463,11 +500,23 @@
       <button class="nav-btn" data-view="chat-view" onclick="switchTab('chat-view', this)" aria-label="Messages">
         <i class="fa-solid fa-comments"></i>
         <span id="chat-nav-badge" class="notif-badge nav-badge" style="display:none;">0</span>
-        <span class="nav-label">Chat</span>
+        <span class="nav-label"><span class="phone-only">Chat</span><span class="desktop-only">Messages</span></span>
       </button>
-      <button class="nav-btn" data-view="settings-view" onclick="switchTab('settings-view', this)" aria-label="Settings">
+      <button class="nav-btn desktop-only" data-view="events-view" onclick="switchTab('events-view', this)" aria-label="Calendar">
+        <i class="fa-solid fa-calendar-days"></i>
+        <span class="nav-label">Calendar</span>
+      </button>
+      <button class="nav-btn desktop-only" data-view="gpa-view" onclick="switchTab('gpa-view', this)" aria-label="GPA Calculator">
+        <i class="fa-solid fa-calculator"></i>
+        <span class="nav-label">GPA Calculator</span>
+      </button>
+      <button class="nav-btn desktop-only" onclick="openTimerModal()" aria-label="Focus timer">
+        <i class="fa-solid fa-stopwatch"></i>
+        <span class="nav-label">Focus Timer</span>
+      </button>
+      <button class="nav-btn nav-settings" data-view="settings-view" onclick="switchTab('settings-view', this)" aria-label="Settings">
         <i class="fa-solid fa-gear"></i>
-        <span class="nav-label">Me</span>
+        <span class="nav-label"><span class="phone-only">Me</span><span class="desktop-only">Settings</span></span>
       </button>
     </nav>
 

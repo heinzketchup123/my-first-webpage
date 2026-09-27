@@ -122,7 +122,8 @@ function applyPalette(palette) {
 }
 
 const defaultSettings = { lightMode: false, anonymous: true, autoSystemTheme: false };
-const defaultAppearance = { themeName: 'cyber', mode: 'dark', fontSize: 1, density: 'normal', customColors: null };
+const defaultAppearance = { themeName: 'cyber', mode: 'dark', fontSize: 1, density: 'normal', customColors: null, layout: 'auto' };
+const DESKTOP_MIN_WIDTH = 960;   // Auto layout switches to the computer version at this width
 
 // Human-facing metadata for the theme swatch grid.
 const THEME_META = [
@@ -172,6 +173,8 @@ document.addEventListener("DOMContentLoaded", () => {
   loadPomo();
   syncDeviceAlertsToggle();
   document.addEventListener('visibilitychange', markOpenThreadRead);
+  let layoutTimer = null;
+  window.addEventListener('resize', () => { clearTimeout(layoutTimer); layoutTimer = setTimeout(applyLayout, 120); });
 
   if (!isSupabaseConnected) {
     // Supabase misconfigured — surface it instead of silently degrading.
@@ -493,6 +496,9 @@ function applyAppearance() {
     b.classList.toggle('active', b.dataset.density === appAppearance.density);
   });
 
+  // 6) Phone or computer layout
+  applyLayout();
+
   renderThemeSwatchGrid();
   syncCustomColorPickers();
 }
@@ -570,6 +576,24 @@ function setDensity(mode, btn) {
   appAppearance.density = mode;
   saveAppearance();
   applyAppearance();
+}
+
+// The computer layout (sidebar + wide, multi-column pages) is turned on by
+// a class on <html>, so it can follow the screen width or be picked by hand.
+function applyLayout() {
+  const pref = ['auto', 'phone', 'desktop'].includes(appAppearance.layout) ? appAppearance.layout : 'auto';
+  const desktop = pref === 'desktop' || (pref === 'auto' && window.innerWidth >= DESKTOP_MIN_WIDTH);
+  document.documentElement.classList.toggle('layout-desktop', desktop);
+  document.documentElement.classList.toggle('layout-phone', !desktop);
+  document.querySelectorAll('#layout-segmented .seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.layout === pref);
+  });
+}
+
+function setLayout(layout) {
+  appAppearance.layout = layout;
+  saveAppearance();
+  applyLayout();
 }
 
 function resetAppearance() {
