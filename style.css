@@ -2985,6 +2985,18 @@ html.layout-phone .auth-overlay {
 html.layout-phone .toast-container { bottom: calc(var(--nav-gap) + 70px); }
 html.layout-desktop .app-header { padding-top: calc(14px + var(--safe-top)); }
 html.layout-desktop .bottom-nav { padding-top: calc(20px + var(--safe-top)); }
+html.layout-desktop .notif-drawer {   /* stays under the (taller) top bar */
+  top: calc(64px + var(--safe-top));
+  max-height: min(620px, calc(100vh - 90px - var(--safe-top)));
+}
+/* A dialog taller than the screen scrolls inside itself instead of running
+   off the top and bottom (e.g. a study group with a long topic list). */
+.modal-overlay > .modal-content {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 .rotate-overlay { padding: calc(24px + var(--safe-top)) calc(24px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(24px + var(--safe-left)); }
 
 /* Installed on an iPhone the status bar is solid black (see the status-bar
@@ -2998,8 +3010,9 @@ html.ios-standalone.layout-phone body:not(.light-mode) .app-header::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
+  /* Full screen width even when the header is capped and centered (iPad) */
+  left: calc(50% - 50vw);
+  right: calc(50% - 50vw);
   height: 56px;
   background: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 35%, rgba(0, 0, 0, 0) 100%);
   pointer-events: none;
