@@ -171,6 +171,7 @@ function initSupabaseRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => fetchFriendships())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_feed' }, () => fetchFeed())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'study_groups' }, () => fetchGroups())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'study_group_members' }, () => fetchGroups())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_reviews' }, () => fetchReviews())
     .subscribe();
 }
@@ -196,13 +197,72 @@ async function fetchFeed() {
 }
 
 async function fetchGroups() {
+  const [{ data, error }, memRes] = await Promise.all([
+    supabaseClient.from('study_groups').select('*').order('created_at', { ascending: false }),
+    supabaseClient.from('study_group_members').select('group_id, user_id')
+  ]);
+  if (error) { showToast('Groups load failed: ' + error.message, 'error'); return; }
+
+  // Build member counts and my-membership set from the join table so the
+  // "members" and "joined" fields on the card are true per-user facts.
+  const counts = {};
+  const mine   = new Set();
+  (memRes?.data || []).forEach(m => {
+    counts[m.group_id] = (counts[m.group_id] || 0) + 1;
+    if (m.user_id === currentUserId) mine.add(m.group_id);
+  });
+
+  studyGroups = (data || []).map(g => ({
+    ...g,
+    members: counts[g.id] || 0,
+    joined:  mine.has(g.id)
+  }));
+  renderGroups();
+}
+
+// -------------------- Study group creation --------------------
+
+function openCreateGroupModal() {
+  if (!currentUserId) return showToast('Sign in to create a study group.', 'warn');
+  if (!currentSchoolId) return openSchoolPicker(true);
+  document.getElementById('groupModal').style.display = 'flex';
+}
+function closeCreateGroupModal() {
+  document.getElementById('groupModal').style.display = 'none';
+}
+
+async function createGroup(event) {
+  event.preventDefault();
+  if (!currentUserId || !currentSchoolId) return;
+
+  const name     = document.getElementById('group-name').value.trim();
+  const course   = document.getElementById('group-course').value.trim();
+  const schedule = document.getElementById('group-schedule').value.trim();
+  const location = document.getElementById('group-location').value.trim();
+  const max      = Math.max(2, Math.min(30, parseInt(document.getElementById('group-max').value, 10) || 6));
+  const topics   = document.getElementById('group-topics').value.split(',').map(s => s.trim()).filter(Boolean);
+  if (!name || !course) return showToast('Give the group a name and a course.', 'warn');
+
+  const host = currentHandle || currentUser.split('@')[0];
   const { data, error } = await supabaseClient
     .from('study_groups')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (error) { showToast('Groups load failed: ' + error.message, 'error'); return; }
-  studyGroups = data || [];
-  renderGroups();
+    .insert([{
+      name, course, schedule, location, max,
+      topics, roster: [host],
+      host,
+      creator_id: currentUserId,
+      school_id: currentSchoolId
+    }])
+    .select().single();
+  if (error) return showToast('Could not create group: ' + error.message, 'error');
+
+  // Auto-join the creator as the first member.
+  await supabaseClient.from('study_group_members').insert([{ group_id: data.id, user_id: currentUserId }]);
+
+  showToast('Group created — you\'re in!', 'success');
+  closeCreateGroupModal();
+  event.target.reset();
+  fetchGroups();
 }
 
 async function fetchReviews() {
@@ -463,7 +523,8 @@ function switchTab(viewId, element) {
     if (idx !== -1 && btns[idx]) btns[idx].classList.add('active');
   }
 
-  if (viewId === 'chat-view') { renderFriendsStrip(); renderDMThread(); }
+  if (viewId === 'chat-view')   { renderFriendsStrip(); renderDMThread(); }
+  if (viewId === 'search-view') { fetchTeachersForView(); }
 }
 
 function toggleNotifications() {
@@ -1287,20 +1348,22 @@ function filterGroups(type, btn) {
 }
 
 async function toggleGroupJoin(id) {
+  if (!currentUserId) return showToast('Sign in to join a group.', 'warn');
   const group = studyGroups.find(g => g.id === id);
   if (!group) return;
-
   if (!group.joined && group.members >= group.max) return showToast('Group is full.', 'warn');
 
-  const isJoining = !group.joined;
-  const newMembers = Math.max(0, group.members + (isJoining ? 1 : -1));
-  group.joined = isJoining;
-  group.members = newMembers;
-
-  if (isSupabaseConnected && currentUserId) {
-    await supabaseClient.from('study_groups').update({ joined: isJoining, members: newMembers }).eq('id', id);
+  if (group.joined) {
+    const { error } = await supabaseClient
+      .from('study_group_members').delete()
+      .eq('group_id', id).eq('user_id', currentUserId);
+    if (error) return showToast('Could not leave: ' + error.message, 'error');
+  } else {
+    const { error } = await supabaseClient
+      .from('study_group_members').insert([{ group_id: id, user_id: currentUserId }]);
+    if (error) return showToast('Could not join: ' + error.message, 'error');
   }
-  renderGroups();
+  fetchGroups();
 }
 
 // Events Engine
@@ -1477,17 +1540,28 @@ function renderReviews() {
   renderReviewSchoolOptions();
 
   container.innerHTML = '';
-  const filtered = userReviews.filter(rev => filterVal === 'all' || rev.rating === filterVal);
+  const teacherChipHtml = selectedTeacherName ? `
+    <div class="active-teacher-chip">
+      Showing reviews for <strong>${escapeHtml(selectedTeacherName)}</strong>
+      <button class="teacher-clear-btn" onclick="clearTeacherFilter()"><i class="fa-solid fa-xmark"></i></button>
+    </div>` : '';
+
+  let filtered = userReviews.filter(rev => filterVal === 'all' || rev.rating === filterVal);
+  if (selectedTeacherName) {
+    filtered = filtered.filter(rev => (rev.teacher || '').trim().toLowerCase() === selectedTeacherName.toLowerCase());
+  }
 
   if (!filtered.length) {
     const isOwn = reviewSchoolFilterId === 'mine' && currentSchool;
-    container.innerHTML = `<div class="empty-state">
+    container.innerHTML = teacherChipHtml + `<div class="empty-state">
       <i class="fa-solid fa-star"></i>
-      <p>No reviews${isOwn ? ' for ' + escapeHtml(currentSchool.name) : ''} yet.</p>
+      <p>No reviews${selectedTeacherName ? ' for ' + escapeHtml(selectedTeacherName) : isOwn ? ' for ' + escapeHtml(currentSchool.name) : ''} yet.</p>
       ${currentUserId ? '<button class="primary-btn" onclick="openReviewModal()">+ Add Review</button>' : ''}
     </div>`;
     return;
   }
+
+  container.innerHTML = teacherChipHtml;
 
   filtered.forEach(rev => {
     const isMine = rev.author_id && rev.author_id === currentUserId;
@@ -1521,20 +1595,101 @@ function updateAnalytics() {
 }
 
 // Search Engine
-function filterChip(cat, el) {
-  document.querySelectorAll('#search-view .chip').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-  document.querySelectorAll('#searchGrid .card').forEach(card => {
-    card.style.display = (cat === 'all' || card.dataset.category === cat) ? 'flex' : 'none';
+// -------------------- Teacher Directory --------------------
+// The Explore tab lists every teacher that appears in instructor_reviews,
+// with a live average rating and a review count. Tap one to jump to the
+// Reviews tab pre-filtered to just their reviews.
+
+let teachersAll = [];              // full aggregated list (for whatever school filter is active)
+let teacherViewSchoolId = 'mine';  // 'mine' | <school_id>
+let selectedTeacherName = null;    // when set, Reviews view filters to this teacher
+
+async function fetchTeachersForView() {
+  if (!isSupabaseConnected) return;
+  let q = supabaseClient
+    .from('instructor_reviews')
+    .select('teacher, rating, school_id')
+    .order('created_at', { ascending: false })
+    .limit(1000);
+  const school = teacherViewSchoolId === 'mine' ? currentSchoolId : teacherViewSchoolId;
+  if (school) q = q.eq('school_id', school);
+  const { data, error } = await q;
+  if (error) { showToast('Could not load teachers: ' + error.message, 'error'); return; }
+
+  // Aggregate: {name -> {count, sumRating, avg, schoolIds:Set}}
+  const map = new Map();
+  (data || []).forEach(r => {
+    const key = (r.teacher || '').trim();
+    if (!key) return;
+    const cur = map.get(key) || { name: key, count: 0, sum: 0, schools: new Set() };
+    const num = parseInt(r.rating, 10) || 0;
+    cur.count += 1;
+    cur.sum   += num;
+    if (r.school_id) cur.schools.add(r.school_id);
+    map.set(key, cur);
   });
+  teachersAll = [...map.values()]
+    .map(t => ({ name: t.name, count: t.count, avg: t.count ? t.sum / t.count : 0, schools: [...t.schools] }))
+    .sort((a, b) => b.avg - a.avg || b.count - a.count);
+  renderTeacherDirectory();
 }
 
-function filterCards() {
-  const q = document.getElementById('searchInput').value.toLowerCase();
-  document.querySelectorAll('#searchGrid .card').forEach(card => {
-    card.style.display = card.textContent.toLowerCase().includes(q) ? 'flex' : 'none';
-  });
+function renderTeacherSchoolOptions() {
+  const sel = document.getElementById('teacher-school-filter');
+  if (!sel) return;
+  const cur = sel.value;
+  const opts = [
+    `<option value="mine">${currentSchool ? 'My school (' + escapeHtml(currentSchool.name) + ')' : 'My school'}</option>`,
+    ...schoolsCache.filter(s => s.id !== currentSchoolId)
+      .map(s => `<option value="${escapeAttr(s.id)}">${escapeHtml(s.name)}</option>`)
+  ];
+  sel.innerHTML = opts.join('');
+  sel.value = (cur && [...sel.options].some(o => o.value === cur)) ? cur : teacherViewSchoolId;
+  // Wire change to refetch (since the list depends on selected school).
+  sel.onchange = () => { teacherViewSchoolId = sel.value; fetchTeachersForView(); };
 }
+
+function renderTeacherDirectory() {
+  const container = document.getElementById('teacher-directory');
+  if (!container) return;
+  renderTeacherSchoolOptions();
+
+  const query = (document.getElementById('teacher-search-input')?.value || '').trim().toLowerCase();
+  const list  = teachersAll.filter(t => !query || t.name.toLowerCase().includes(query));
+
+  if (!list.length) {
+    container.innerHTML = `<div class="empty-state">
+      <i class="fa-solid fa-chalkboard-user"></i>
+      <p>${query ? 'No teachers match your search.' : 'No teachers reviewed yet — be the first to share what a class was like.'}</p>
+      ${currentUserId ? '<button class="primary-btn" onclick="openReviewModal()">+ Add Review</button>' : ''}
+    </div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(t => {
+    const starStr  = '⭐'.repeat(Math.round(t.avg));
+    const avgStr   = t.avg.toFixed(1);
+    return `
+      <button class="teacher-card" onclick="openTeacherReviews('${escapeAttr(t.name)}')">
+        <div class="teacher-avatar"><i class="fa-solid fa-chalkboard-user"></i></div>
+        <div class="teacher-meta">
+          <strong>${escapeHtml(t.name)}</strong>
+          <small>${t.count} review${t.count === 1 ? '' : 's'} · ${avgStr}★</small>
+        </div>
+        <div class="teacher-stars">${starStr}</div>
+      </button>
+    `;
+  }).join('');
+}
+
+function openTeacherReviews(name) {
+  selectedTeacherName = name;
+  // Sync the reviews view to whatever school the directory is currently on.
+  reviewSchoolFilterId = teacherViewSchoolId;
+  fetchReviews();
+  switchTab('profile-view');
+}
+function clearTeacherFilter() { selectedTeacherName = null; renderReviews(); }
 
 function openModal(title, text) {
   document.getElementById('modalTitle').textContent = title;

@@ -433,6 +433,81 @@ create policy "friendships: send request"
   );
 
 -- ============================================================
+-- 6c. HOUSEKEEPING + STUDY GROUP MEMBERSHIPS
+-- ============================================================
+
+-- Remove the accidental "HMHS" school row (any profile that pointed at it
+-- gets school_id = null via the ON DELETE SET NULL relation, and will be
+-- prompted to pick a school again on next sign-in).
+delete from public.schools where lower(name) = 'hmhs' or lower(slug) = 'hmhs';
+
+-- Study group members: track who joined which group per user, so member
+-- counts and "am I in this group?" become real facts instead of a shared
+-- boolean everyone toggled.
+alter table public.study_groups add column if not exists creator_id uuid
+  references auth.users(id) on delete set null;
+
+create table if not exists public.study_group_members (
+  group_id  uuid not null references public.study_groups(id) on delete cascade,
+  user_id   uuid not null references auth.users(id) on delete cascade,
+  joined_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+alter table public.study_group_members enable row level security;
+
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='study_group_members' loop
+    execute format('drop policy if exists %I on public.study_group_members', p.policyname);
+  end loop;
+end $$;
+
+-- Anyone in the same school can see who's in a group (so member counts
+-- render); each user can only insert/delete their own row.
+create policy "group_members: same-school reads"
+  on public.study_group_members for select
+  using (
+    exists (
+      select 1 from public.study_groups g
+      where g.id = group_id
+        and (g.school_id is null or g.school_id = public.my_school_id())
+    )
+  );
+create policy "group_members: user manages own membership"
+  on public.study_group_members for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- Now that groups have a creator_id, extend the groups policies with
+-- INSERT / UPDATE / DELETE for the creator inside their school.
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='study_groups' loop
+    execute format('drop policy if exists %I on public.study_groups', p.policyname);
+  end loop;
+end $$;
+
+create policy "groups: same-school reads"
+  on public.study_groups for select
+  using (school_id is null or school_id = public.my_school_id());
+
+create policy "groups: signed-in creates own"
+  on public.study_groups for insert
+  with check (
+    auth.uid() is not null
+    and auth.uid() = creator_id
+    and school_id  = public.my_school_id()
+    and char_length(name) between 1 and 80
+  );
+
+create policy "groups: creator updates"
+  on public.study_groups for update
+  using (auth.uid() = creator_id)
+  with check (auth.uid() = creator_id);
+
+create policy "groups: creator deletes"
+  on public.study_groups for delete
+  using (auth.uid() = creator_id);
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -443,7 +518,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['campus_chat','campus_feed','friendships'] loop
+  foreach t in array array['campus_chat','campus_feed','friendships','study_groups','study_group_members'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'

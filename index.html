@@ -136,61 +136,31 @@
         </div>
       </section>
 
-      <!-- Tab 2: Search / Catalog -->
+      <!-- Tab 2: Teacher Directory -->
       <section id="search-view" class="view">
-        <h1 class="page-title">Course & Guide Hub</h1>
-        
+        <h1 class="page-title">Find a Teacher</h1>
+        <p class="description">Every teacher your peers have reviewed, ranked by rating.</p>
+
         <div class="search-input-wrapper">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
-          <input type="text" id="searchInput" class="search-bar" placeholder="Search courses, instructors, or topics..." onkeyup="filterCards()" />
+          <input type="text" id="teacher-search-input" class="search-bar" placeholder="Search by teacher name..." oninput="renderTeacherDirectory()" />
         </div>
 
-        <div class="filter-chips">
-          <button class="chip active" onclick="filterChip('all', this)">All</button>
-          <button class="chip" onclick="filterChip('stem', this)">STEM</button>
-          <button class="chip" onclick="filterChip('humanities', this)">Humanities</button>
-          <button class="chip" onclick="filterChip('business', this)">Business</button>
-          <button class="chip" onclick="filterChip('guides', this)">Guides</button>
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+          <span class="filter-label">School:</span>
+          <select id="teacher-school-filter" class="mini-select flex-1" onchange="renderTeacherDirectory()"></select>
         </div>
 
-        <div id="searchGrid" class="grid-2x2">
-          <div class="card" data-category="stem" onclick="openModal('Physics 101', 'Calculus-based mechanics, thermodynamics, and lab fundamentals.')">
-            <i class="fa-solid fa-atom"></i>
-            <span>Physics 101</span>
-            <span class="card-tag">STEM</span>
-          </div>
-          <div class="card" data-category="stem" onclick="openModal('Calculus II', 'Techniques of integration, sequence and series, differential equations.')">
-            <i class="fa-solid fa-calculator"></i>
-            <span>Calculus II</span>
-            <span class="card-tag">STEM</span>
-          </div>
-          <div class="card" data-category="humanities" onclick="openModal('World History', 'Global historical perspectives from 1500 to modern geopolitics.')">
-            <i class="fa-solid fa-landmark"></i>
-            <span>World History</span>
-            <span class="card-tag">Humanities</span>
-          </div>
-          <div class="card" data-category="business" onclick="openModal('Microeconomics', 'Supply and demand models, market structures, and pricing strategy.')">
-            <i class="fa-solid fa-chart-line"></i>
-            <span>Microeconomics</span>
-            <span class="card-tag">Business</span>
-          </div>
-          <div class="card" data-category="stem" onclick="openModal('Data Structures', 'Arrays, linked lists, trees, graphs, and algorithmic complexity analysis.')">
-            <i class="fa-solid fa-code"></i>
-            <span>Data Structures</span>
-            <span class="card-tag">STEM</span>
-          </div>
-          <div class="card" data-category="guides" onclick="openModal('Exam Prep Blueprint', 'Proven strategies for memorization, flashcard creation, and stress management.')">
-            <i class="fa-solid fa-book-open"></i>
-            <span>Exam Prep</span>
-            <span class="card-tag">Guides</span>
-          </div>
-        </div>
+        <div id="teacher-directory" class="stack-list"></div>
       </section>
 
       <!-- Tab 3: Study Groups -->
       <section id="groups-view" class="view">
-        <h1 class="page-title">Study Groups</h1>
-        <p class="description">Connect with peers in your active courses in real-time.</p>
+        <div class="chat-header-row">
+          <h1 class="page-title" style="margin:0;">Study Groups</h1>
+          <button class="review-trigger-btn" onclick="openCreateGroupModal()">+ New Group</button>
+        </div>
+        <p class="description">Groups scoped to your school. Anyone can create one — anyone in your school can join.</p>
 
         <div class="filter-chips">
           <button class="chip active" onclick="filterGroups('all', this)">All Groups</button>
@@ -500,6 +470,25 @@
         <button class="secondary-btn" onclick="resetTimer()">Reset</button>
         <button class="secondary-btn" onclick="closeTimerModal()">Close</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Create Study Group Modal -->
+  <div id="groupModal" class="modal-overlay">
+    <div class="modal-content text-left">
+      <h2 class="modal-title">Create Study Group</h2>
+      <form onsubmit="createGroup(event)">
+        <input type="text" id="group-name" class="auth-input modal-input" placeholder="Group name (e.g. Physics 101 Midterm Squad)" maxlength="80" required />
+        <input type="text" id="group-course" class="auth-input modal-input" placeholder="Course (e.g. Physics 101)" maxlength="40" required />
+        <input type="text" id="group-schedule" class="auth-input modal-input" placeholder="When (e.g. Tue/Thu 5:00 PM)" maxlength="60" />
+        <input type="text" id="group-location" class="auth-input modal-input" placeholder="Where (e.g. Library Rm 204)" maxlength="60" />
+        <input type="number" id="group-max" class="auth-input modal-input" placeholder="Max members" min="2" max="30" value="6" />
+        <input type="text" id="group-topics" class="auth-input modal-input" placeholder="Topics (comma-separated)" maxlength="200" />
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" onclick="closeCreateGroupModal()">Cancel</button>
+          <button type="submit" class="primary-btn">Create Group</button>
+        </div>
+      </form>
     </div>
   </div>
 

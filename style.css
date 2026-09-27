@@ -1094,6 +1094,70 @@ body.light-mode .nav-btn { color: #555555; }
 .school-row-text strong { font-size: 0.9rem; }
 .school-row-text small { color: var(--sub-text-color); font-size: 0.7rem; }
 
+/* ---------- Teacher directory (Explore tab) ---------- */
+.teacher-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  border-radius: 14px;
+  width: 100%;
+  cursor: pointer;
+  color: var(--main-text-color);
+  text-align: left;
+  transition: transform 0.12s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.teacher-card:hover { border-color: var(--accent-color); }
+.teacher-card:active { transform: scale(0.98); }
+.teacher-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-muted);
+  color: var(--accent-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  border: 1px solid var(--card-border);
+}
+.teacher-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.teacher-meta strong { font-size: 0.92rem; }
+.teacher-meta small { font-size: 0.72rem; color: var(--sub-text-color); }
+.teacher-stars { font-size: 0.85rem; letter-spacing: -1px; flex-shrink: 0; }
+
+.active-teacher-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 14px;
+  background: var(--accent-muted);
+  border: 1px solid var(--accent-color);
+  border-radius: 999px;
+  margin-bottom: 10px;
+  font-size: 0.8rem;
+  color: var(--main-text-color);
+}
+.active-teacher-chip strong { color: var(--accent-color); }
+.teacher-clear-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--sub-text-color);
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 0.9rem;
+}
+.teacher-clear-btn:hover { color: var(--accent-color); }
+
 /* Notification drawer empty state */
 .notif-empty {
   padding: 24px 16px;
