@@ -715,9 +715,10 @@ button:active {
 }
 
 /* Font-size + density body-level scaling */
-body.fs-small  { font-size: 0.88rem; }
-body.fs-medium { font-size: 1rem; }
-body.fs-large  { font-size: 1.12rem; }
+/* On <html>: every size in this stylesheet is rem, which follows the root. */
+html.fs-small  { font-size: 14px; }
+html.fs-medium { font-size: 16px; }
+html.fs-large  { font-size: 18.5px; }
 
 body.density-compact  .info-card,
 body.density-compact  .pref-card { padding: 10px; }
@@ -1331,6 +1332,135 @@ body.light-mode .nav-btn { color: #555555; }
 .tp-body-foot { display: flex; justify-content: space-between; align-items: center; margin-top: -4px; }
 .tp-anon { display: inline-flex; gap: 6px; align-items: center; font-size: 0.76rem; color: var(--sub-text-color); cursor: pointer; }
 .tp-anon input { accent-color: var(--accent-color); }
+
+/* ---------- Event calendar ---------- */
+#events-view { align-items: stretch; }
+#events-view > * { flex-shrink: 0; }
+.cal-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.cal-month-label {
+  background: transparent;
+  border: none;
+  color: var(--main-text-color);
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.cal-month-label:hover { color: var(--accent-color); }
+.cal-nav {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--card-border);
+  background: var(--input-bg);
+  color: var(--main-text-color);
+  cursor: pointer;
+}
+.cal-nav:hover { border-color: var(--accent-color); color: var(--accent-color); }
+.cal-weekdays, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.cal-weekdays span {
+  text-align: center;
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: var(--sub-text-color);
+  text-transform: uppercase;
+  padding: 4px 0;
+}
+.cal-day {
+  aspect-ratio: 1 / 1;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 10px;
+  color: var(--main-text-color);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0;
+}
+.cal-day:hover { background: var(--input-bg); }
+.cal-day.other { color: var(--sub-text-color); opacity: 0.45; }
+.cal-day.today { border-color: var(--accent-color); color: var(--accent-color); }
+.cal-day.selected { background: var(--accent-color); color: var(--text-on-accent); opacity: 1; }
+.cal-dots { display: flex; gap: 2px; height: 5px; font-style: normal; }
+.cal-dots b { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-color); }
+.cal-day.selected .cal-dots b { background: var(--text-on-accent); }
+.cal-list-head { width: 100%; }
+
+.event-card { display: flex; gap: 12px; text-align: left; align-items: flex-start; }
+.event-card.past { opacity: 0.55; }
+.event-date {
+  flex-shrink: 0;
+  width: 48px;
+  border-radius: 12px;
+  background: var(--accent-muted);
+  border: 1px solid var(--card-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0;
+}
+.event-date span { font-size: 0.62rem; font-weight: 800; text-transform: uppercase; color: var(--accent-color); }
+.event-date b { font-size: 1.25rem; font-weight: 900; color: var(--main-text-color); line-height: 1.1; }
+.event-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.event-body strong { font-size: 0.95rem; color: var(--main-text-color); }
+.event-body small { font-size: 0.74rem; color: var(--sub-text-color); }
+.event-body p { font-size: 0.8rem; color: var(--main-text-color); line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+.event-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.event-rsvp-btn { width: auto; padding: 6px 14px; font-size: 0.78rem; }
+.event-rsvp-btn:disabled { opacity: 0.5; cursor: default; }
+.event-going { font-size: 0.74rem; color: var(--sub-text-color); font-weight: 700; margin-right: auto; }
+.ev-row { display: flex; gap: 8px; }
+.ev-row > * { flex: 1; min-width: 0; }
+.ev-hint { font-size: 0.7rem; color: var(--sub-text-color); margin: -4px 0 8px; }
+
+/* ---------- Admin ---------- */
+.admin-card { border-color: #d49b00; }
+.admin-card .pref-header i:first-child { color: #f1c40f; }
+.admin-badge {
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f1c40f;
+  color: #000;
+}
+.admin-hint { font-size: 0.74rem; color: var(--sub-text-color); margin-bottom: 10px; }
+.admin-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--card-border);
+}
+.admin-row:last-child { border-bottom: none; }
+.admin-row .school-row-text strong { color: var(--main-text-color); }
+.admin-row > i { color: var(--accent-color); }
+.admin-del-btn { width: auto !important; padding: 7px 11px !important; margin: 0 !important; color: #ff5b5b; }
+.admin-inline-btn { width: 100%; margin-top: 10px; color: #f1c40f; border-color: #d49b00; }
+.post-meta-right { display: inline-flex; align-items: center; gap: 8px; }
+.post-delete-btn {
+  background: transparent;
+  border: none;
+  color: var(--sub-text-color);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 0.78rem;
+}
+.post-delete-btn:hover { color: #ff5b5b; }
 
 /* ---------- Pomodoro ---------- */
 #timer-mode-seg { margin-top: 12px; }

@@ -30,14 +30,6 @@ const THEME_PRESETS = {
   monochrome: { main: '#222222', light: '#444444', card: 'rgba(255, 255, 255, 0.08)', nav: 'rgba(20, 20, 20, 0.95)', bg: '#0a0a0a', textOnAccent: '#ffffff' }
 };
 
-// Campus-wide events are curated content, kept as a small static seed so
-// the Events tab is not empty on first launch. Everything else (feed,
-// study groups, reviews, GPA) starts empty and is authored by real users.
-const defaultEvents = [
-  { id: "1", title: "Career Fair 2026", date: "Sept 28, 10:00 AM", location: "Student Union", rsvp: false, attendeesCount: 142, description: "Connect with over 40 hiring partners, tech startups, and research institutes." },
-  { id: "2", title: "CS Hackathon Warmup", date: "Oct 2, 4:00 PM", location: "Tech Lab 3", rsvp: true, attendeesCount: 38, description: "Practice rapid prototyping and meet team partners." }
-];
-
 const defaultSettings = { lightMode: false, anonymous: true, autoSystemTheme: false };
 const defaultAppearance = { themeName: 'cyber', mode: 'dark', fontSize: 1, density: 'normal', customColors: null };
 
@@ -66,7 +58,6 @@ let schoolsCache = [];        // all schools known
 let campusFeed = [];
 let studyGroups = [];
 let gpaCourses = [];
-let campusEvents = [];
 let chatMessages = [];         // (legacy — no longer rendered directly)
 let dmMessages = [];           // messages for the currently-selected friend thread
 let selectedFriendId = null;
@@ -88,9 +79,6 @@ document.addEventListener("DOMContentLoaded", () => {
   loadAppearance();
   applyAppearance();
   initSystemThemeListener();
-  // The Events tab is curated campus-life content; not user-generated.
-  campusEvents = [...defaultEvents];
-  renderEvents();
   renderEmptyStates();
   loadPomo();
 
@@ -121,6 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
       friends = []; pendingIncoming = []; pendingOutgoing = [];
       campusFeed = []; studyGroups = [];
       teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
+      calEvents = []; calRsvps = {}; isAdmin = false;
       document.getElementById('auth-screen').style.display = 'flex';
       renderEmptyStates();
     }
@@ -135,6 +124,8 @@ function renderEmptyStates() {
   renderFeed();
   renderGroups();
   renderTeacherDirectory();
+  renderCalendar();
+  renderAdminPanel();
   renderGpaRows();
   renderFriendsStrip();
   renderDMThread();
@@ -173,11 +164,14 @@ function initSupabaseRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, () => onTeacherDataChanged())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'teacher_posts' }, () => onTeacherDataChanged())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'teacher_post_votes' }, () => onTeacherDataChanged())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_events' }, () => onEventsChanged())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'event_rsvps' }, () => onEventsChanged())
     .subscribe();
 }
 
 async function loadAllSupabaseData() {
-  await Promise.all([fetchFeed(), fetchGroups(), fetchFriendships(), fetchTeacherDirectory(), fetchMyReviewCount()]);
+  await Promise.all([fetchFeed(), fetchGroups(), fetchFriendships(), fetchTeacherDirectory(),
+                     fetchMyReviewCount(), fetchEvents()]);
   const savedGpa = localStorage.getItem(`gpa_${currentUserId}`);
   gpaCourses = savedGpa ? JSON.parse(savedGpa) : [];
   renderGpaRows();
@@ -319,6 +313,7 @@ async function logout() {
   campusFeed = []; studyGroups = []; gpaCourses = [];
   selectedFriendId = null; dmMessages = [];
   teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
+  calEvents = []; calRsvps = {}; isAdmin = false;
   switchTab('home-view');
   renderEmptyStates();
 
@@ -357,13 +352,16 @@ function applyAppearance() {
   const config = appAppearance.customColors ? { ...preset, ...appAppearance.customColors } : preset;
   applyPresetConfig(config);
 
-  // 3) Font size scale (0/1/2 → small/medium/large)
-  document.body.classList.remove('fs-small','fs-medium','fs-large');
-  document.body.classList.add(['fs-small','fs-medium','fs-large'][Number(appAppearance.fontSize) || 1]);
+  // 3) Font size scale (0/1/2 → small/medium/large). Applied to <html>
+  // because the stylesheet sizes text in rem, which is relative to the root.
+  const fsRaw = Number(appAppearance.fontSize);
+  const fs = [0, 1, 2].includes(fsRaw) ? fsRaw : 1;   // not `|| 1`: that turned Small (0) into Medium
+  document.documentElement.classList.remove('fs-small', 'fs-medium', 'fs-large');
+  document.documentElement.classList.add(['fs-small', 'fs-medium', 'fs-large'][fs]);
   const fsLabel = document.getElementById('font-size-label');
-  if (fsLabel) fsLabel.textContent = FONT_SIZE_LABELS[Number(appAppearance.fontSize) || 1];
+  if (fsLabel) fsLabel.textContent = FONT_SIZE_LABELS[fs];
   const fsSlider = document.getElementById('font-size-slider');
-  if (fsSlider) fsSlider.value = String(appAppearance.fontSize);
+  if (fsSlider) fsSlider.value = String(fs);
 
   // 4) Density
   document.body.classList.remove('density-compact','density-normal','density-spacious');
@@ -513,6 +511,8 @@ function switchTab(viewId, element) {
 
   if (viewId === 'chat-view')   { renderFriendsStrip(); renderDMThread(); }
   if (viewId === 'search-view') { fetchTeacherDirectory(); }
+  if (viewId === 'events-view') { fetchEvents(); }
+  if (viewId === 'settings-view') { renderAdminPanel(); }
 }
 
 function toggleNotifications() {
@@ -614,6 +614,7 @@ async function ensureProfile() {
     currentSchool = schoolsCache.find(s => s.id === currentSchoolId) || null;
   }
   updateSchoolChrome();
+  await fetchAdminStatus();
   // If signed in without a school, open the picker before doing anything else.
   if (currentUserId && !currentSchoolId) openSchoolPicker(true);
 }
@@ -1092,7 +1093,12 @@ function renderFeed() {
     el.innerHTML = `
       <div class="post-meta">
         <span class="post-author">${escapeHtml(post.author)}</span>
-        <span>${escapeHtml(post.time || '')}</span>
+        <span class="post-meta-right">
+          ${escapeHtml(post.created_at ? timeAgo(post.created_at) : (post.time || ''))}
+          ${isAdmin || (post.author_id && post.author_id === currentUserId)
+            ? `<button class="post-delete-btn" onclick="deleteFeedPost('${escapeAttr(post.id)}')" aria-label="Delete post"><i class="fa-solid fa-trash"></i></button>`
+            : ''}
+        </span>
       </div>
       <div class="post-title">${escapeHtml(post.title)}</div>
       <p class="post-body">${escapeHtml(post.text)}</p>
@@ -1268,20 +1274,23 @@ function renderGroups(filter = 'all') {
   list.forEach(group => {
     const card = document.createElement('div');
     card.className = 'info-card';
+    const gid = escapeAttr(group.id);
+    const canDelete = isAdmin || (group.creator_id && group.creator_id === currentUserId);
     card.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-        <span style="font-weight:800; color:var(--accent-color);">${group.course}</span>
+        <span style="font-weight:800; color:var(--accent-color);">${escapeHtml(group.course || '')}</span>
         <span style="font-size:0.75rem; color:var(--sub-text-color);">${group.members}/${group.max} Members</span>
       </div>
-      <div style="font-weight:700; margin-bottom:6px; cursor:pointer;" onclick="openGroupDetailModal('${group.id}')">${group.name}</div>
+      <div style="font-weight:700; margin-bottom:6px; cursor:pointer;" onclick="openGroupDetailModal('${gid}')">${escapeHtml(group.name || '')}</div>
       <div style="font-size:0.75rem; color:var(--sub-text-color); margin-bottom:10px;">
-        <i class="fa-solid fa-location-dot"></i> ${group.location || 'Campus Center'} • <i class="fa-solid fa-clock"></i> ${group.schedule || 'TBD'}
+        <i class="fa-solid fa-location-dot"></i> ${escapeHtml(group.location || 'Campus Center')} • <i class="fa-solid fa-clock"></i> ${escapeHtml(group.schedule || 'TBD')}
       </div>
       <div style="display:flex; gap:8px;">
-        <button class="secondary-btn" style="flex:1; padding:8px; font-size:0.8rem;" onclick="openGroupDetailModal('${group.id}')">Details</button>
-        <button class="${group.joined ? 'secondary-btn active-state' : 'primary-btn'}" style="flex:1; padding:8px; font-size:0.8rem;" onclick="toggleGroupJoin('${group.id}')">
+        <button class="secondary-btn" style="flex:1; padding:8px; font-size:0.8rem;" onclick="openGroupDetailModal('${gid}')">Details</button>
+        <button class="${group.joined ? 'secondary-btn active-state' : 'primary-btn'}" style="flex:1; padding:8px; font-size:0.8rem;" onclick="toggleGroupJoin('${gid}')">
           ${group.joined ? 'Leave' : 'Join'}
         </button>
+        ${canDelete ? `<button class="secondary-btn danger-text" style="padding:8px 12px;" onclick="deleteGroup('${gid}')" aria-label="Delete group"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
     `;
     container.appendChild(card);
@@ -1292,17 +1301,17 @@ function openGroupDetailModal(groupId) {
   const group = studyGroups.find(g => g.id === groupId);
   if (!group) return;
 
-  const topicsList = (group.topics || []).map(t => `<li style="font-size:0.8rem; color:var(--main-text-color);">${t}</li>`).join('') || '<li>General study</li>';
-  const rosterList = (group.roster || []).map(r => `<span style="font-size:0.72rem; background:var(--card-bg); border:1px solid var(--card-border); padding:2px 8px; border-radius:10px;">${r}</span>`).join(' ');
+  const topicsList = (group.topics || []).map(t => `<li style="font-size:0.8rem; color:var(--main-text-color);">${escapeHtml(t)}</li>`).join('') || '<li>General study</li>';
+  const rosterList = (group.roster || []).map(r => `<span style="font-size:0.72rem; background:var(--card-bg); border:1px solid var(--card-border); padding:2px 8px; border-radius:10px;">${escapeHtml(r)}</span>`).join(' ');
 
   openModal(
     group.name,
     `
       <div style="text-align:left;">
-        <p style="font-size:0.82rem; margin-bottom:8px;"><strong>Course:</strong> ${group.course}</p>
-        <p style="font-size:0.82rem; margin-bottom:8px;"><strong>Host:</strong> ${group.host || 'Student Organizer'}</p>
-        <p style="font-size:0.82rem; margin-bottom:8px;"><strong>Location:</strong> ${group.location || 'Library'}</p>
-        <p style="font-size:0.82rem; margin-bottom:10px;"><strong>Meeting Time:</strong> ${group.schedule || 'Weekly'}</p>
+        <p style="font-size:0.82rem; margin-bottom:8px;"><strong>Course:</strong> ${escapeHtml(group.course || '')}</p>
+        <p style="font-size:0.82rem; margin-bottom:8px;"><strong>Host:</strong> ${escapeHtml(group.host || 'Student Organizer')}</p>
+        <p style="font-size:0.82rem; margin-bottom:8px;"><strong>Location:</strong> ${escapeHtml(group.location || 'Library')}</p>
+        <p style="font-size:0.82rem; margin-bottom:10px;"><strong>Meeting Time:</strong> ${escapeHtml(group.schedule || 'Weekly')}</p>
         <div style="font-weight:700; font-size:0.8rem; color:var(--accent-color); margin-bottom:4px;">Key Topics:</div>
         <ul style="padding-left:18px; margin-bottom:12px;">${topicsList}</ul>
         <div style="font-weight:700; font-size:0.8rem; color:var(--accent-color); margin-bottom:6px;">Active Members (${group.members}/${group.max}):</div>
@@ -1337,32 +1346,299 @@ async function toggleGroupJoin(id) {
   fetchGroups();
 }
 
-// Events Engine
-function renderEvents() {
-  const container = document.getElementById('events-list');
-  if (!container) return;
-  container.innerHTML = '';
+// ==================== Event calendar ====================
+let calEvents = [];                    // campus_events rows for my school
+let calRsvps = {};                     // event_id -> { count, mine }
+let calMonth = startOfMonth(new Date());
+let calSelectedDay = null;             // 'YYYY-MM-DD' (local) or null = upcoming
+let calRefreshTimer = null;
 
-  campusEvents.forEach((ev, idx) => {
-    const card = document.createElement('div');
-    card.className = 'info-card';
-    card.innerHTML = `
-      <div style="font-weight:800; color:var(--accent-color); font-size:1rem;">${ev.title}</div>
-      <div style="font-size:0.8rem; color:var(--sub-text-color); margin:4px 0;"><i class="fa-solid fa-clock"></i> ${ev.date}</div>
-      <div style="font-size:0.8rem; color:var(--sub-text-color); margin-bottom:6px;"><i class="fa-solid fa-location-dot"></i> ${ev.location} • ${ev.attendeesCount || 0} Attending</div>
-      <p style="font-size:0.8rem; color:var(--main-text-color); margin-bottom:10px; line-height:1.3;">${ev.description}</p>
-      <button class="${ev.rsvp ? 'secondary-btn active-state' : 'primary-btn'}" style="width:100%; padding:8px;" onclick="toggleRsvp(${idx})">
-        ${ev.rsvp ? '✓ Attending (Cancel RSVP)' : 'RSVP Now'}
-      </button>
-    `;
-    container.appendChild(card);
+function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+function dayKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function parseDayKey(k) { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); }
+
+async function fetchEvents() {
+  if (!isSupabaseConnected || !currentUserId || !currentSchoolId) {
+    calEvents = []; calRsvps = {};
+    return renderCalendar();
+  }
+  const [evRes, rsvpRes] = await Promise.all([
+    supabaseClient.from('campus_events').select('*')
+      .eq('school_id', currentSchoolId).order('starts_at', { ascending: true }).limit(1000),
+    supabaseClient.from('event_rsvps').select('event_id, user_id')
+  ]);
+  if (evRes.error) {
+    calEvents = []; renderCalendar();
+    return showToast('Could not load events: ' + evRes.error.message, 'error');
+  }
+  calEvents = evRes.data || [];
+  calRsvps = {};
+  (rsvpRes.data || []).forEach(r => {
+    const c = calRsvps[r.event_id] || { count: 0, mine: false };
+    c.count += 1;
+    if (r.user_id === currentUserId) c.mine = true;
+    calRsvps[r.event_id] = c;
   });
+  renderCalendar();
 }
 
-function toggleRsvp(idx) {
-  campusEvents[idx].rsvp = !campusEvents[idx].rsvp;
-  campusEvents[idx].attendeesCount += campusEvents[idx].rsvp ? 1 : -1;
-  renderEvents();
+function onEventsChanged() {
+  clearTimeout(calRefreshTimer);
+  calRefreshTimer = setTimeout(fetchEvents, 400);
+}
+
+function shiftCalMonth(delta) {
+  calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + delta, 1);
+  renderCalendar();
+}
+function goToToday() {
+  calMonth = startOfMonth(new Date());
+  calSelectedDay = dayKey(new Date());
+  renderCalendar();
+}
+function selectCalDay(key) {
+  // Tapping the selected day again goes back to the upcoming list.
+  calSelectedDay = key && key !== calSelectedDay ? key : null;
+  if (calSelectedDay) {
+    const d = parseDayKey(calSelectedDay);
+    if (d.getMonth() !== calMonth.getMonth() || d.getFullYear() !== calMonth.getFullYear()) calMonth = startOfMonth(d);
+  }
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const label = document.getElementById('cal-month-label');
+  if (label) label.textContent = calMonth.toLocaleDateString([], { month: 'long', year: 'numeric' });
+
+  const grid = document.getElementById('cal-grid');
+  if (grid) {
+    const todayKey = dayKey(new Date());
+    const counts = {};
+    calEvents.forEach(e => { const k = dayKey(new Date(e.starts_at)); counts[k] = (counts[k] || 0) + 1; });
+    const start = new Date(calMonth.getFullYear(), calMonth.getMonth(), 1 - calMonth.getDay());
+    const cells = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      const k = dayKey(d);
+      const n = counts[k] || 0;
+      const cls = ['cal-day',
+        d.getMonth() !== calMonth.getMonth() ? 'other' : '',
+        k === todayKey ? 'today' : '',
+        k === calSelectedDay ? 'selected' : '',
+        n ? 'has-events' : ''].filter(Boolean).join(' ');
+      cells.push(`<button class="${cls}" onclick="selectCalDay('${k}')" aria-label="${d.toDateString()}${n ? `, ${n} event${n === 1 ? '' : 's'}` : ''}">
+        <span>${d.getDate()}</span>${n ? `<i class="cal-dots">${'<b></b>'.repeat(Math.min(n, 3))}</i>` : ''}</button>`);
+    }
+    grid.innerHTML = cells.join('');
+  }
+  renderEventList();
+}
+
+function renderEventList() {
+  const container = document.getElementById('events-list');
+  const title = document.getElementById('cal-list-title');
+  const clearBtn = document.getElementById('cal-clear-btn');
+  if (!container || !title) return;
+  if (clearBtn) clearBtn.style.display = calSelectedDay ? 'inline-flex' : 'none';
+
+  if (!currentUserId || !currentSchoolId) {
+    title.textContent = 'Upcoming';
+    container.innerHTML = `<div class="empty-state"><i class="fa-solid fa-calendar-days"></i>
+      <p>${currentUserId ? 'Pick your school to see its calendar.' : "Sign in to see your school's calendar."}</p></div>`;
+    return;
+  }
+
+  let list;
+  if (calSelectedDay) {
+    title.textContent = parseDayKey(calSelectedDay).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+    list = calEvents.filter(e => dayKey(new Date(e.starts_at)) === calSelectedDay);
+  } else {
+    title.textContent = 'Upcoming';
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    list = calEvents.filter(e => new Date(e.starts_at) >= startOfToday).slice(0, 30);
+  }
+
+  if (!list.length) {
+    container.innerHTML = `<div class="empty-state"><i class="fa-solid fa-calendar-plus"></i>
+      <p>${calSelectedDay ? 'Nothing on this day.' : 'No upcoming events yet.'}</p>
+      <button class="primary-btn" onclick="openEventModal()">+ Add Event</button></div>`;
+    return;
+  }
+  container.innerHTML = list.map(eventCardHtml).join('');
+}
+
+function eventCardHtml(e) {
+  const d = new Date(e.starts_at);
+  const r = calRsvps[e.id] || { count: 0, mine: false };
+  const isToday = dayKey(d) === dayKey(new Date());
+  const past = e.all_day ? (d < new Date() && !isToday) : d < new Date();
+  const canDelete = isAdmin || (e.created_by && e.created_by === currentUserId);
+  const when = e.all_day ? 'All day' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `
+    <div class="info-card event-card ${past ? 'past' : ''}">
+      <div class="event-date"><span>${d.toLocaleDateString([], { month: 'short' })}</span><b>${d.getDate()}</b></div>
+      <div class="event-body">
+        <strong>${escapeHtml(e.title)}</strong>
+        <small>${isToday ? 'Today' : d.toLocaleDateString([], { weekday: 'short' })} · ${when}${e.location ? ` · <i class="fa-solid fa-location-dot"></i> ${escapeHtml(e.location)}` : ''}</small>
+        ${e.description ? `<p>${renderSafeMessage(e.description)}</p>` : ''}
+        <div class="event-actions">
+          <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} event-rsvp-btn"
+            onclick="toggleRsvp('${escapeAttr(e.id)}')" ${past ? 'disabled' : ''}>${r.mine ? '✓ Going' : 'RSVP'}</button>
+          <span class="event-going">${r.count} going</span>
+          ${canDelete ? `<button class="text-btn danger-text" onclick="deleteEvent('${escapeAttr(e.id)}')">Delete</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+async function toggleRsvp(id) {
+  if (!currentUserId) return showToast('Sign in to RSVP.', 'warn');
+  const cur = calRsvps[id] || { count: 0, mine: false };
+  const { error } = cur.mine
+    ? await supabaseClient.from('event_rsvps').delete().eq('event_id', id).eq('user_id', currentUserId)
+    : await supabaseClient.from('event_rsvps').insert([{ event_id: id, user_id: currentUserId }]);
+  if (error) return showToast('RSVP failed: ' + error.message, 'error');
+  calRsvps[id] = { count: Math.max(0, cur.count + (cur.mine ? -1 : 1)), mine: !cur.mine };
+  renderEventList();
+}
+
+async function deleteEvent(id) {
+  if (!confirm('Delete this event?')) return;
+  const { data, error } = await supabaseClient.from('campus_events').delete().eq('id', id).select('id');
+  if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
+  calEvents = calEvents.filter(e => e.id !== id);
+  renderCalendar();
+  showToast('Event deleted.', 'success');
+}
+
+function openEventModal() {
+  if (!currentUserId) return showToast('Sign in to add events.', 'warn');
+  if (!currentSchoolId) return openSchoolPicker(true);
+  document.getElementById('ev-modal-sub').textContent = `Everyone at ${currentSchool?.name || 'your school'} will see it.`;
+  document.getElementById('ev-date').value = calSelectedDay || dayKey(new Date());
+  document.getElementById('eventModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('ev-title')?.focus(), 50);
+}
+function closeEventModal() { document.getElementById('eventModal').style.display = 'none'; }
+
+async function submitEvent(event) {
+  event.preventDefault();
+  const title = document.getElementById('ev-title').value.replace(/\s+/g, ' ').trim();
+  const date = document.getElementById('ev-date').value;
+  const time = document.getElementById('ev-time').value;
+  const location = document.getElementById('ev-location').value.trim() || null;
+  const description = document.getElementById('ev-desc').value.trim() || null;
+  if (title.length < 2) return showToast('Give the event a title.', 'warn');
+  const starts = new Date(`${date}T${time || '00:00'}`);   // local time
+  if (!date || isNaN(starts)) return showToast('Pick a valid date.', 'warn');
+
+  const btn = document.getElementById('ev-submit-btn');
+  btn.disabled = true;
+  const { data, error } = await supabaseClient.from('campus_events').insert([{
+    title, description, location,
+    starts_at: starts.toISOString(), all_day: !time,
+    school_id: currentSchoolId, created_by: currentUserId
+  }]).select().single();
+  btn.disabled = false;
+  if (error) return showToast('Could not add event: ' + error.message, 'error');
+
+  calEvents = [...calEvents, data].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+  calMonth = startOfMonth(starts);
+  calSelectedDay = date;
+  renderCalendar();
+  closeEventModal();
+  event.target.reset();
+  showToast('Event added to the calendar.', 'success');
+}
+
+// ==================== Admin ====================
+// Admin status comes from the `admins` table, which can only be edited
+// from the Supabase SQL editor. The UI just shows extra delete buttons;
+// the database policies are what actually allow the deletes.
+let isAdmin = false;
+
+async function fetchAdminStatus() {
+  isAdmin = false;
+  if (isSupabaseConnected && currentUserId) {
+    const { data } = await supabaseClient.from('admins').select('user_id').eq('user_id', currentUserId).maybeSingle();
+    isAdmin = !!data;
+  }
+  renderAdminPanel();
+}
+
+function renderAdminPanel() {
+  const card = document.getElementById('admin-card');
+  if (!card) return;
+  card.style.display = isAdmin ? 'block' : 'none';
+  if (!isAdmin) return;
+  document.getElementById('admin-school-list').innerHTML = schoolsCache.length
+    ? schoolsCache.map(s => `
+        <div class="admin-row">
+          <i class="fa-solid fa-graduation-cap"></i>
+          <div class="school-row-text">
+            <strong>${escapeHtml(s.name)}</strong>
+            <small>${s.id === currentSchoolId ? 'Your school' : '@' + escapeHtml(s.slug)}</small>
+          </div>
+          <button class="secondary-btn admin-del-btn" onclick="adminDeleteSchool('${escapeAttr(s.id)}')" aria-label="Delete ${escapeAttr(s.name)}">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>`).join('')
+    : '<p class="friends-empty-inner">No schools.</p>';
+}
+
+async function adminDeleteSchool(id) {
+  const s = schoolsCache.find(x => x.id === id);
+  if (!s) return;
+  const typed = prompt(
+    `Delete "${s.name}"?\n\nThis permanently removes its teacher pages, reviews, feed posts, ` +
+    `study groups and events. Its students will be asked to pick another school.\n\n` +
+    `Type the school name to confirm:`);
+  if (typed == null) return;
+  if (typed.trim().toLowerCase() !== s.name.toLowerCase()) {
+    return showToast("Name didn't match — nothing was deleted.", 'info');
+  }
+  const { error } = await supabaseClient.rpc('admin_delete_school', { target: id });
+  if (error) return showToast('Could not delete school: ' + error.message, 'error');
+  showToast(`${s.name} deleted.`, 'success');
+  await refreshSchoolsCache();
+  if (id === currentSchoolId) {
+    currentSchoolId = null; currentSchool = null;
+    updateSchoolChrome();
+    openSchoolPicker(true);
+  }
+  renderAdminPanel();
+  loadAllSupabaseData();
+}
+
+async function adminDeleteTeacher() {
+  if (!isAdmin || !currentTeacher) return;
+  const n = teacherPosts.length;
+  if (!confirm(`Delete ${currentTeacher.name}'s page and all ${n} post${n === 1 ? '' : 's'} on it? This can't be undone.`)) return;
+  const { data, error } = await supabaseClient.from('teachers').delete().eq('id', currentTeacher.id).select('id');
+  if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
+  showToast('Teacher page deleted.', 'success');
+  currentTeacher = null;
+  switchTab('search-view');
+}
+
+async function deleteFeedPost(id) {
+  if (!confirm('Delete this post?')) return;
+  const { data, error } = await supabaseClient.from('campus_feed').delete().eq('id', id).select('id');
+  if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
+  campusFeed = campusFeed.filter(p => p.id !== id);
+  renderFeed();
+  showToast('Post deleted.', 'success');
+}
+
+async function deleteGroup(id) {
+  const g = studyGroups.find(x => x.id === id);
+  if (!g || !confirm(`Delete the group "${g.name}"?`)) return;
+  const { data, error } = await supabaseClient.from('study_groups').delete().eq('id', id).select('id');
+  if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
+  showToast('Group deleted.', 'success');
+  fetchGroups();
 }
 
 // GPA Calculator
@@ -1846,6 +2122,8 @@ function renderTeacherHero() {
     ${courses.length ? `<div class="teacher-courses"><i class="fa-solid fa-book"></i> ${courses.map(escapeHtml).join(' · ')}</div>` : ''}
     ${canPostOnTeacher() ? '' : `<div class="teacher-readonly"><i class="fa-solid fa-eye"></i> ${currentUserId
       ? `Only students at ${escapeHtml(schoolName(t.school_id))} can post here.` : 'Sign in to post.'}</div>`}
+    ${isAdmin ? `<button class="secondary-btn admin-inline-btn" onclick="adminDeleteTeacher()">
+      <i class="fa-solid fa-shield-halved"></i> Delete teacher page</button>` : ''}
   `;
 }
 
@@ -1926,7 +2204,8 @@ function renderTeacherPosts() {
             <i class="fa-solid fa-thumbs-up"></i> Helpful${votes.count ? ' · ' + votes.count : ''}
           </button>
           ${mine ? `
-            <button class="text-btn" onclick="openTeacherPostModal('${escapeAttr(p.id)}')">Edit</button>
+            <button class="text-btn" onclick="openTeacherPostModal('${escapeAttr(p.id)}')">Edit</button>` : ''}
+          ${mine || isAdmin ? `
             <button class="text-btn danger-text" onclick="deleteTeacherPost('${escapeAttr(p.id)}')">Delete</button>` : ''}
         </div>
       </div>`;
@@ -1947,8 +2226,9 @@ async function toggleHelpful(postId) {
 
 async function deleteTeacherPost(postId) {
   if (!confirm('Delete this post? This can\'t be undone.')) return;
-  const { error } = await supabaseClient.from('teacher_posts').delete().eq('id', postId);
-  if (error) return showToast('Could not delete: ' + error.message, 'error');
+  // .select() so a delete blocked by the database is reported instead of silently doing nothing.
+  const { data, error } = await supabaseClient.from('teacher_posts').delete().eq('id', postId).select('id');
+  if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
   showToast('Post deleted.', 'success');
   fetchMyReviewCount();
   loadTeacherPage(currentTeacher.id);

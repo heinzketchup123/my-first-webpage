@@ -237,14 +237,29 @@
         </div>
       </section>
 
-      <!-- Tab 5: Events & Deadlines -->
+      <!-- Tab 5: Event Calendar -->
       <section id="events-view" class="view">
-        <h1 class="page-title">Events & Deadlines</h1>
-        <p class="description">Upcoming campus workshops and key dates.</p>
-
-        <div id="events-list" class="stack-list">
-          <!-- Dynamic Events -->
+        <div class="chat-header-row">
+          <h1 class="page-title" style="margin:0;">Calendar</h1>
+          <button class="review-trigger-btn" onclick="openEventModal()">+ Add Event</button>
         </div>
+        <p class="description">Events and deadlines at your school.</p>
+
+        <div class="cal-card">
+          <div class="cal-head">
+            <button class="cal-nav" onclick="shiftCalMonth(-1)" aria-label="Previous month"><i class="fa-solid fa-chevron-left"></i></button>
+            <button id="cal-month-label" class="cal-month-label" onclick="goToToday()" title="Jump to today"></button>
+            <button class="cal-nav" onclick="shiftCalMonth(1)" aria-label="Next month"><i class="fa-solid fa-chevron-right"></i></button>
+          </div>
+          <div class="cal-weekdays"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+          <div id="cal-grid" class="cal-grid"></div>
+        </div>
+
+        <div class="section-header cal-list-head">
+          <h3 id="cal-list-title">Upcoming</h3>
+          <button id="cal-clear-btn" class="text-btn" onclick="selectCalDay(null)" style="display:none;">Show upcoming</button>
+        </div>
+        <div id="events-list" class="stack-list"></div>
       </section>
 
       <!-- Tab 6: GPA Calculator -->
@@ -280,6 +295,18 @@
           <button class="secondary-btn" style="width:100%; margin:0;" onclick="openSchoolPicker(false)">
             <i class="fa-solid fa-pen-to-square"></i> Change School
           </button>
+        </div>
+
+        <!-- Admin tools (only shown to admins) -->
+        <div class="pref-card admin-card" id="admin-card" style="display:none;">
+          <div class="pref-header">
+            <i class="fa-solid fa-shield-halved"></i>
+            <h3>Admin</h3>
+            <span class="admin-badge">ADMIN</span>
+          </div>
+          <p class="admin-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Schools are removed here.</p>
+          <div class="friends-subheading">Schools</div>
+          <div id="admin-school-list"></div>
         </div>
 
         <!-- Appearance Mode -->
@@ -466,6 +493,31 @@
         <div class="modal-actions">
           <button type="button" class="secondary-btn" onclick="closeTeacherPostModal()">Cancel</button>
           <button type="submit" class="primary-btn" id="tp-submit-btn">Post</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add Event Modal -->
+  <div id="eventModal" class="modal-overlay">
+    <div class="modal-content text-left">
+      <div class="friends-modal-head">
+        <h2 class="modal-title" style="margin:0;">Add event</h2>
+        <i class="fa-solid fa-xmark friends-close" onclick="closeEventModal()"></i>
+      </div>
+      <p class="friends-hint" id="ev-modal-sub">Everyone at your school will see it.</p>
+      <form onsubmit="submitEvent(event)">
+        <input type="text" id="ev-title" class="auth-input modal-input" placeholder="What's happening? (e.g. Chem test)" maxlength="100" required autocomplete="off" />
+        <div class="ev-row">
+          <input type="date" id="ev-date" class="auth-input modal-input" required />
+          <input type="time" id="ev-time" class="auth-input modal-input" />
+        </div>
+        <p class="ev-hint">Leave the time empty for an all-day event or deadline.</p>
+        <input type="text" id="ev-location" class="auth-input modal-input" placeholder="Where (optional)" maxlength="100" autocomplete="off" />
+        <textarea id="ev-desc" class="auth-input textarea-input modal-input" placeholder="Details (optional)" maxlength="1000"></textarea>
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" onclick="closeEventModal()">Cancel</button>
+          <button type="submit" class="primary-btn" id="ev-submit-btn">Add event</button>
         </div>
       </form>
     </div>

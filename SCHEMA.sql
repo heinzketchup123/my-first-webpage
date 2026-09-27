@@ -661,6 +661,125 @@ where r.rating in ('1','2','3','4','5')
 on conflict do nothing;
 
 -- ============================================================
+-- 6e. EVENT CALENDAR
+-- ============================================================
+create table if not exists public.campus_events (
+  id          uuid primary key default gen_random_uuid(),
+  school_id   uuid not null references public.schools(id) on delete cascade,
+  title       text not null check (char_length(title) between 2 and 100),
+  description text check (description is null or char_length(description) <= 1000),
+  location    text check (location is null or char_length(location) <= 100),
+  starts_at   timestamptz not null,
+  all_day     boolean not null default false,
+  created_by  uuid references auth.users(id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists campus_events_school_start_idx
+  on public.campus_events (school_id, starts_at);
+
+create table if not exists public.event_rsvps (
+  event_id   uuid not null references public.campus_events(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (event_id, user_id)
+);
+
+alter table public.campus_events enable row level security;
+alter table public.event_rsvps  enable row level security;
+do $$ declare p record; begin
+  for p in select policyname, tablename from pg_policies
+           where schemaname='public' and tablename in ('campus_events','event_rsvps') loop
+    execute format('drop policy if exists %I on public.%I', p.policyname, p.tablename);
+  end loop;
+end $$;
+
+create policy "events: same-school reads"
+  on public.campus_events for select using (school_id = public.my_school_id());
+create policy "events: students add to own school"
+  on public.campus_events for insert
+  with check (auth.uid() is not null and created_by = auth.uid()
+              and school_id = public.my_school_id());
+create policy "events: creator edits"
+  on public.campus_events for update
+  using (auth.uid() = created_by) with check (auth.uid() = created_by);
+create policy "events: creator deletes"
+  on public.campus_events for delete using (auth.uid() = created_by);
+
+create policy "rsvps: same-school reads"
+  on public.event_rsvps for select
+  using (exists (select 1 from public.campus_events e
+                 where e.id = event_id and e.school_id = public.my_school_id()));
+create policy "rsvps: user manages own"
+  on public.event_rsvps for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ============================================================
+-- 6f. ADMINS
+-- ============================================================
+-- Admin status lives in its own table (not on profiles, which users can
+-- edit). There are no insert/update/delete policies, so admins can only
+-- be granted from this SQL editor.
+create table if not exists public.admins (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+alter table public.admins enable row level security;
+drop policy if exists "admins: see own row" on public.admins;
+create policy "admins: see own row"
+  on public.admins for select using (user_id = auth.uid());
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.admins where user_id = auth.uid());
+$$;
+
+-- Grant admin to lh3801866 (matched by handle or email name).
+insert into public.admins (user_id)
+select user_id from public.profiles where lower(handle) = 'lh3801866'
+union
+select id from auth.users where lower(split_part(email, '@', 1)) = 'lh3801866'
+on conflict do nothing;
+
+-- Admins can delete anything moderatable, in addition to authors.
+drop policy if exists "admin: delete feed posts" on public.campus_feed;
+create policy "admin: delete feed posts" on public.campus_feed for delete using (public.is_admin());
+drop policy if exists "admin: delete groups" on public.study_groups;
+create policy "admin: delete groups" on public.study_groups for delete using (public.is_admin());
+drop policy if exists "admin: delete old reviews" on public.instructor_reviews;
+create policy "admin: delete old reviews" on public.instructor_reviews for delete using (public.is_admin());
+drop policy if exists "admin: delete teachers" on public.teachers;
+create policy "admin: delete teachers" on public.teachers for delete using (public.is_admin());
+drop policy if exists "admin: delete teacher posts" on public.teacher_posts;
+create policy "admin: delete teacher posts" on public.teacher_posts for delete using (public.is_admin());
+drop policy if exists "admin: delete events" on public.campus_events;
+create policy "admin: delete events" on public.campus_events for delete using (public.is_admin());
+
+-- Deleting a school removes everything scoped to it in one step (so its
+-- feed posts don't become school-less and visible to everyone).
+create or replace function public.admin_delete_school(target uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can delete schools';
+  end if;
+  delete from public.campus_feed        where school_id = target;
+  delete from public.study_groups       where school_id = target;
+  delete from public.instructor_reviews where school_id = target;
+  delete from public.schools            where id = target;  -- teachers + events cascade
+end $$;
+revoke all on function public.admin_delete_school(uuid) from public, anon;
+grant execute on function public.admin_delete_school(uuid) to authenticated;
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -672,7 +791,8 @@ declare
   t text;
 begin
   foreach t in array array['campus_chat','campus_feed','friendships','study_groups','study_group_members',
-                           'teachers','teacher_posts','teacher_post_votes'] loop
+                           'teachers','teacher_posts','teacher_post_votes',
+                           'campus_events','event_rsvps'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'
