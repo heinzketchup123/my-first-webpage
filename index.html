@@ -304,8 +304,10 @@
             <h3>Admin</h3>
             <span class="admin-badge">ADMIN</span>
           </div>
-          <p class="admin-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Schools are removed here.</p>
-          <div class="friends-subheading">Schools</div>
+          <p class="admin-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Manage who can join each school below.</p>
+          <div class="friends-subheading">Join requests</div>
+          <div id="admin-request-list"></div>
+          <div class="friends-subheading" style="margin-top:12px;">Schools</div>
           <div id="admin-school-list"></div>
         </div>
 
@@ -604,7 +606,7 @@
         <h2 class="modal-title" style="margin:0;">Pick your school</h2>
         <i id="school-picker-cancel" class="fa-solid fa-xmark friends-close" onclick="closeSchoolPicker()"></i>
       </div>
-      <p class="friends-hint">Feed, chat, friends and study groups are all scoped to your school. Reviews are readable across every school.</p>
+      <p class="friends-hint">Feed, chat, friends, groups and events are private to your school. Some schools need a join code, a school email, or admin approval.</p>
       <input id="school-picker-search" type="text" class="auth-input" placeholder="Search existing schools..." oninput="renderSchoolPicker()" autocomplete="off" />
       <div id="school-picker-list" class="friends-tab-body" style="max-height:220px; margin-top:6px;"></div>
       <div class="friends-subheading" style="margin-top:14px;">Don't see it? Add it</div>

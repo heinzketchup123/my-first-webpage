@@ -780,6 +780,185 @@ revoke all on function public.admin_delete_school(uuid) from public, anon;
 grant execute on function public.admin_delete_school(uuid) to authenticated;
 
 -- ============================================================
+-- 6g. SCHOOL JOIN SAFEGUARDS
+-- ============================================================
+-- The school list stays public (anyone, signed in or not, on any device,
+-- can read it). Joining is controlled per school:
+--   open      anyone can join (default — Demo University stays open)
+--   code      needs a join code (stored in a table only admins can read)
+--   domain    needs a confirmed email at one of the school's domains
+--   approval  sends a request that an admin approves or denies
+-- The app can't bypass this: a trigger rejects any change to
+-- profiles.school_id that doesn't come through join_school() or an admin.
+
+alter table public.schools
+  add column if not exists join_mode text not null default 'open',
+  add column if not exists allowed_domains text[] not null default '{}';
+do $$ begin
+  alter table public.schools add constraint schools_join_mode_chk
+    check (join_mode in ('open','code','domain','approval'));
+exception when duplicate_object then null; end $$;
+
+-- Make sure the list is readable by everyone, signed in or not.
+drop policy if exists "schools: everyone reads" on public.schools;
+create policy "schools: everyone reads" on public.schools for select using (true);
+grant select on public.schools to anon, authenticated;
+
+create table if not exists public.school_join_codes (
+  school_id  uuid primary key references public.schools(id) on delete cascade,
+  join_code  text not null check (char_length(join_code) between 4 and 40),
+  updated_at timestamptz not null default now()
+);
+alter table public.school_join_codes enable row level security;
+drop policy if exists "join codes: admins only" on public.school_join_codes;
+create policy "join codes: admins only" on public.school_join_codes
+  for select using (public.is_admin());
+
+create table if not exists public.school_join_requests (
+  id          uuid primary key default gen_random_uuid(),
+  school_id   uuid not null references public.schools(id) on delete cascade,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  status      text not null default 'pending' check (status in ('pending','approved','denied')),
+  created_at  timestamptz not null default now(),
+  reviewed_at timestamptz,
+  reviewed_by uuid references auth.users(id) on delete set null,
+  unique (school_id, user_id)
+);
+alter table public.school_join_requests enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='school_join_requests' loop
+    execute format('drop policy if exists %I on public.school_join_requests', p.policyname);
+  end loop;
+end $$;
+create policy "join requests: see own or admin"
+  on public.school_join_requests for select
+  using (user_id = auth.uid() or public.is_admin());
+create policy "join requests: cancel own"
+  on public.school_join_requests for delete using (user_id = auth.uid());
+
+-- Guard: profiles.school_id can only be set to a school through
+-- join_school() / admin functions (which set app.allow_school_change),
+-- or from the SQL editor (no signed-in user). Leaving (null) is allowed.
+create or replace function public.guard_profile_school()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.school_id is not null
+     and new.school_id is distinct from (case when tg_op = 'UPDATE' then old.school_id end)
+     and auth.uid() is not null
+     and coalesce(current_setting('app.allow_school_change', true), '') <> 'on' then
+    raise exception 'Use the school picker to join a school';
+  end if;
+  return new;
+end $$;
+drop trigger if exists guard_profile_school on public.profiles;
+create trigger guard_profile_school
+  before insert or update of school_id on public.profiles
+  for each row execute function public.guard_profile_school();
+
+create or replace function public.join_school(target uuid, code text default null)
+returns text   -- 'joined' or 'pending'
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  s        public.schools%rowtype;
+  u_email  text;
+  u_conf   timestamptz;
+  dom      text;
+  secret   text;
+begin
+  if auth.uid() is null then raise exception 'Sign in first'; end if;
+  select * into s from public.schools where id = target;
+  if not found then raise exception 'That school no longer exists'; end if;
+
+  if not public.is_admin() then
+    if s.join_mode = 'code' then
+      select join_code into secret from public.school_join_codes where school_id = target;
+      if secret is null or code is null or lower(trim(code)) <> lower(trim(secret)) then
+        raise exception 'That join code is not right';
+      end if;
+    elsif s.join_mode = 'domain' then
+      select email, email_confirmed_at into u_email, u_conf from auth.users where id = auth.uid();
+      dom := lower(split_part(u_email, '@', 2));
+      if u_conf is null then
+        raise exception 'Confirm your email address first';
+      end if;
+      if not exists (select 1 from unnest(s.allowed_domains) d
+                     where dom = lower(d) or dom like '%.' || lower(d)) then
+        raise exception 'This school requires an email ending in @%', array_to_string(s.allowed_domains, ' or @');
+      end if;
+    elsif s.join_mode = 'approval' then
+      insert into public.school_join_requests (school_id, user_id)
+      values (target, auth.uid())
+      on conflict (school_id, user_id) do update
+        set status = 'pending', created_at = now(), reviewed_at = null, reviewed_by = null;
+      return 'pending';
+    end if;
+  end if;
+
+  perform set_config('app.allow_school_change', 'on', true);
+  update public.profiles set school_id = target where user_id = auth.uid();
+  return 'joined';
+end $$;
+revoke all on function public.join_school(uuid, text) from public, anon;
+grant execute on function public.join_school(uuid, text) to authenticated;
+
+create or replace function public.admin_set_school_join(
+  target uuid, mode text, code text default null, domains text[] default '{}')
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then raise exception 'Only admins can change join rules'; end if;
+  if mode not in ('open','code','domain','approval') then raise exception 'Unknown join mode'; end if;
+  if mode = 'code' and char_length(coalesce(trim(code), '')) < 4 then
+    raise exception 'Join codes need at least 4 characters';
+  end if;
+  if mode = 'domain' and coalesce(array_length(domains, 1), 0) = 0 then
+    raise exception 'Add at least one email domain';
+  end if;
+  update public.schools
+     set join_mode = mode,
+         allowed_domains = coalesce((select array_agg(lower(trim(both '@ ' from d)))
+                                     from unnest(domains) d where trim(d) <> ''), '{}')
+   where id = target;
+  if mode = 'code' then
+    insert into public.school_join_codes (school_id, join_code) values (target, trim(code))
+    on conflict (school_id) do update set join_code = excluded.join_code, updated_at = now();
+  end if;
+end $$;
+revoke all on function public.admin_set_school_join(uuid, text, text, text[]) from public, anon;
+grant execute on function public.admin_set_school_join(uuid, text, text, text[]) to authenticated;
+
+create or replace function public.admin_review_join_request(request uuid, approve boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare r public.school_join_requests%rowtype;
+begin
+  if not public.is_admin() then raise exception 'Only admins can review requests'; end if;
+  select * into r from public.school_join_requests where id = request;
+  if not found then raise exception 'Request not found'; end if;
+  update public.school_join_requests
+     set status = case when approve then 'approved' else 'denied' end,
+         reviewed_at = now(), reviewed_by = auth.uid()
+   where id = request;
+  if approve then
+    perform set_config('app.allow_school_change', 'on', true);
+    update public.profiles set school_id = r.school_id where user_id = r.user_id;
+  end if;
+end $$;
+revoke all on function public.admin_review_join_request(uuid, boolean) from public, anon;
+grant execute on function public.admin_review_join_request(uuid, boolean) to authenticated;
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -792,7 +971,7 @@ declare
 begin
   foreach t in array array['campus_chat','campus_feed','friendships','study_groups','study_group_members',
                            'teachers','teacher_posts','teacher_post_votes',
-                           'campus_events','event_rsvps'] loop
+                           'campus_events','event_rsvps','school_join_requests','schools'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'

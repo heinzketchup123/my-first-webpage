@@ -1448,6 +1448,32 @@ body.light-mode .nav-btn { color: #555555; }
 }
 .admin-row:last-child { border-bottom: none; }
 .admin-row .school-row-text strong { color: var(--main-text-color); }
+.admin-row .school-row-text strong small { color: var(--sub-text-color); font-weight: 600; }
+.admin-row .school-row-text small i { margin-right: 3px; }
+.admin-rule-btn { width: auto !important; padding: 7px 10px !important; margin: 0 !important; font-size: 0.72rem !important; white-space: nowrap; }
+.join-rule-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 10px 12px 12px;
+  margin: 0 0 10px;
+}
+.join-rule-editor .tp-label { margin: 0; }
+.join-rule-editor .auth-input { margin: 0; }
+.join-rule-editor .admin-hint { margin: 0; }
+.join-rule-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.join-rule-actions button { width: auto; padding: 8px 14px; font-size: 0.8rem; margin: 0; }
+
+/* School picker: join rules + code entry */
+.school-row small i { margin-right: 3px; color: var(--accent-color); }
+.school-code-row { display: flex; gap: 8px; margin: -2px 0 8px; }
+.school-code-row .auth-input { flex: 1; margin: 0; }
+.school-code-row .primary-btn { width: auto; padding: 8px 16px; margin: 0; }
+.school-load-err { display: block; font-size: 0.7rem; margin: 4px 0 10px; opacity: 0.8; word-break: break-word; }
+.school-retry-btn { width: auto; padding: 8px 14px; margin: 0 auto; display: inline-flex; gap: 6px; align-items: center; }
 .admin-row > i { color: var(--accent-color); }
 .admin-del-btn { width: auto !important; padding: 7px 11px !important; margin: 0 !important; color: #ff5b5b; }
 .admin-inline-btn { width: 100%; margin-top: 10px; color: #f1c40f; border-color: #d49b00; }

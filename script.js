@@ -89,6 +89,9 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
+  // The school list is public; load it right away on every device.
+  refreshSchoolsCache().then(() => { renderTeacherSchoolOptions(); renderAdminPanel(); });
+
   const boot = (session) => {
     if (session) {
       currentUser = session.user.email;
@@ -110,6 +113,7 @@ document.addEventListener("DOMContentLoaded", () => {
       campusFeed = []; studyGroups = [];
       teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
       calEvents = []; calRsvps = {}; isAdmin = false;
+      adminJoinRequests = []; adminJoinCodes = {}; myJoinRequests = {};
       document.getElementById('auth-screen').style.display = 'flex';
       renderEmptyStates();
     }
@@ -166,6 +170,8 @@ function initSupabaseRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'teacher_post_votes' }, () => onTeacherDataChanged())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_events' }, () => onEventsChanged())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'event_rsvps' }, () => onEventsChanged())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'school_join_requests' }, p => onJoinRequestChanged(p))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'schools' }, () => onSchoolsChanged())
     .subscribe();
 }
 
@@ -314,6 +320,7 @@ async function logout() {
   selectedFriendId = null; dmMessages = [];
   teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
   calEvents = []; calRsvps = {}; isAdmin = false;
+  adminJoinRequests = []; adminJoinCodes = {}; myJoinRequests = {};
   switchTab('home-view');
   renderEmptyStates();
 
@@ -536,13 +543,27 @@ function renderNotifications() {
         </div>
       </div>`);
   });
+  if (isAdmin && adminJoinRequests.length) {
+    const n = adminJoinRequests.length;
+    items.push(`
+      <div class="notif-item" style="cursor:pointer;" onclick="toggleNotifications(); switchTab('settings-view'); document.getElementById('admin-card')?.scrollIntoView({ block: 'start' });">
+        <i class="fa-solid fa-user-check notif-icon"></i>
+        <div>
+          <strong>School join request${n === 1 ? '' : 's'}</strong>
+          <p>${n} student${n === 1 ? ' is' : 's are'} waiting for approval. Tap to review.</p>
+        </div>
+      </div>`);
+  }
   body.innerHTML = items.length ? items.join('') : `
     <div class="notif-empty">
       <i class="fa-solid fa-bell-slash"></i>
       <p>You're all caught up.</p>
     </div>`;
 }
-function updateNotifBadgeFromState() { unreadNotifs = pendingIncoming.length; updateNotifBadge(); }
+function updateNotifBadgeFromState() {
+  unreadNotifs = pendingIncoming.length + (isAdmin ? adminJoinRequests.length : 0);
+  updateNotifBadge();
+}
 
 // Chat Engine — security-hardened
 //
@@ -614,15 +635,54 @@ async function ensureProfile() {
     currentSchool = schoolsCache.find(s => s.id === currentSchoolId) || null;
   }
   updateSchoolChrome();
-  await fetchAdminStatus();
+  await Promise.all([fetchAdminStatus(), fetchMyJoinRequests()]);
   // If signed in without a school, open the picker before doing anything else.
   if (currentUserId && !currentSchoolId) openSchoolPicker(true);
 }
 
+// The school list is public: it loads on every device, signed in or not.
+// Returns true on success; on failure the picker shows a Retry button
+// instead of looking like there are no schools.
+let schoolsLoadState = 'idle';   // 'idle' | 'loading' | 'ok' | 'error'
+let schoolsLoadError = '';
+let myJoinRequests = {};         // school_id -> 'pending' | 'approved' | 'denied'
+let pickerCodeSchoolId = null;   // school whose join-code box is open in the picker
+
 async function refreshSchoolsCache() {
-  if (!isSupabaseConnected) return;
-  const { data } = await supabaseClient.from('schools').select('id, name, slug').order('name');
-  schoolsCache = data || [];
+  if (!isSupabaseConnected) { schoolsLoadState = 'error'; schoolsLoadError = 'Offline'; return false; }
+  schoolsLoadState = 'loading';
+  let { data, error } = await supabaseClient
+    .from('schools').select('id, name, slug, join_mode, allowed_domains').order('name');
+  if (error && /join_mode|allowed_domains/.test(error.message)) {
+    // Database not migrated yet — fall back to the basic columns.
+    ({ data, error } = await supabaseClient.from('schools').select('id, name, slug').order('name'));
+  }
+  if (error) {
+    schoolsLoadState = 'error';
+    schoolsLoadError = error.message;
+    return false;
+  }
+  schoolsCache = (data || []).map(s => ({ join_mode: 'open', allowed_domains: [], ...s }));
+  schoolsLoadState = 'ok';
+  if (currentSchoolId) currentSchool = schoolsCache.find(s => s.id === currentSchoolId) || currentSchool;
+  return true;
+}
+
+async function fetchMyJoinRequests() {
+  myJoinRequests = {};
+  if (!isSupabaseConnected || !currentUserId) return;
+  const { data } = await supabaseClient
+    .from('school_join_requests').select('school_id, status').eq('user_id', currentUserId);
+  (data || []).forEach(r => { myJoinRequests[r.school_id] = r.status; });
+}
+
+function joinRuleLabel(s) {
+  switch (s.join_mode) {
+    case 'code':     return { icon: 'key',          text: 'Join code needed' };
+    case 'domain':   return { icon: 'envelope',     text: 'Needs @' + (s.allowed_domains || []).join(' / @') + ' email' };
+    case 'approval': return { icon: 'user-check',   text: 'Admin approval needed' };
+    default:         return { icon: 'lock-open',    text: 'Open to join' };
+  }
 }
 
 function updateSchoolChrome() {
@@ -639,71 +699,168 @@ function updateSchoolChrome() {
 
 // -------------------- School picker --------------------
 
-function openSchoolPicker(required) {
+async function openSchoolPicker(required) {
   const modal = document.getElementById('schoolModal');
   if (!modal) return;
   modal.dataset.required = required ? '1' : '0';
   document.getElementById('school-picker-cancel').style.display = required ? 'none' : 'inline-flex';
+  document.getElementById('school-picker-status').textContent = '';
+  pickerCodeSchoolId = null;
   renderSchoolPicker();
   modal.style.display = 'flex';
+  // Always refresh on open so schools added on another device show up.
+  await Promise.all([refreshSchoolsCache(), fetchMyJoinRequests()]);
+  renderSchoolPicker();
 }
 function closeSchoolPicker() {
   const modal = document.getElementById('schoolModal');
   if (!modal || modal.dataset.required === '1') return; // must pick
   modal.style.display = 'none';
 }
-
-function renderSchoolPicker() {
-  const filterEl = document.getElementById('school-picker-search');
-  const list = document.getElementById('school-picker-list');
-  if (!list) return;
-  const q = (filterEl?.value || '').toLowerCase();
-  const rows = schoolsCache.filter(s => !q || s.name.toLowerCase().includes(q) || s.slug.includes(q));
-  list.innerHTML = rows.length
-    ? rows.map(s => `
-        <button class="school-row ${s.id === currentSchoolId ? 'active' : ''}" onclick="pickSchool('${escapeAttr(s.id)}')">
-          <i class="fa-solid fa-graduation-cap"></i>
-          <div class="school-row-text"><strong>${escapeHtml(s.name)}</strong><small>@${escapeHtml(s.slug)}</small></div>
-          ${s.id === currentSchoolId ? '<i class="fa-solid fa-check"></i>' : ''}
-        </button>`).join('')
-    : `<p class="friends-empty-inner">No schools match "${escapeHtml(q)}".</p>`;
+async function retrySchoolList() {
+  renderSchoolPicker();
+  await refreshSchoolsCache();
+  renderSchoolPicker();
+  renderAdminPanel();
+  renderTeacherSchoolOptions();
 }
 
-async function pickSchool(schoolId) {
-  if (!isSupabaseConnected || !currentUserId) return;
-  const { error } = await supabaseClient.from('profiles').update({ school_id: schoolId }).eq('user_id', currentUserId);
-  if (error) return showToast('Could not set school: ' + error.message, 'error');
+function setPickerStatus(msg, kind) {
+  const el = document.getElementById('school-picker-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'friends-status' + (kind ? ' ' + kind : '');
+}
+
+function renderSchoolPicker() {
+  const list = document.getElementById('school-picker-list');
+  if (!list) return;
+
+  if (!schoolsCache.length && schoolsLoadState === 'loading') {
+    list.innerHTML = `<p class="friends-empty-inner"><i class="fa-solid fa-spinner fa-spin"></i> Loading schools…</p>`;
+    return;
+  }
+  if (!schoolsCache.length && schoolsLoadState === 'error') {
+    list.innerHTML = `<div class="friends-empty-inner">
+      <p>Couldn't load the school list.</p>
+      <small class="school-load-err">${escapeHtml(schoolsLoadError)}</small>
+      <button class="secondary-btn school-retry-btn" onclick="retrySchoolList()"><i class="fa-solid fa-rotate-right"></i> Try again</button>
+    </div>`;
+    return;
+  }
+
+  const q = (document.getElementById('school-picker-search')?.value || '').toLowerCase();
+  const rows = schoolsCache.filter(s => !q || s.name.toLowerCase().includes(q) || s.slug.includes(q));
+  if (!rows.length) {
+    list.innerHTML = `<p class="friends-empty-inner">${q ? `No schools match "${escapeHtml(q)}".` : 'No schools yet.'}</p>`;
+    return;
+  }
+
+  list.innerHTML = rows.map(s => {
+    const rule = joinRuleLabel(s);
+    const current = s.id === currentSchoolId;
+    const req = myJoinRequests[s.id];
+    const note = current ? 'Your school'
+      : req === 'pending' ? 'Request pending'
+      : req === 'denied' && s.join_mode === 'approval' ? 'Request denied — ask an admin'
+      : rule.text;
+    const codeBox = pickerCodeSchoolId === s.id ? `
+      <div class="school-code-row">
+        <input id="school-code-input" class="auth-input" placeholder="Join code" maxlength="40" autocomplete="off"
+               onkeydown="if (event.key === 'Enter') submitSchoolCode()" />
+        <button class="primary-btn" onclick="submitSchoolCode()">Join</button>
+      </div>` : '';
+    return `
+      <div class="school-row-wrap">
+        <button class="school-row ${current ? 'active' : ''}" onclick="pickSchool('${escapeAttr(s.id)}')">
+          <i class="fa-solid fa-graduation-cap"></i>
+          <div class="school-row-text">
+            <strong>${escapeHtml(s.name)}</strong>
+            <small><i class="fa-solid fa-${current ? 'check' : req === 'pending' ? 'hourglass-half' : rule.icon}"></i> ${escapeHtml(note)}</small>
+          </div>
+          ${current ? '<i class="fa-solid fa-check"></i>' : ''}
+        </button>
+        ${codeBox}
+      </div>`;
+  }).join('');
+  if (pickerCodeSchoolId) setTimeout(() => document.getElementById('school-code-input')?.focus(), 30);
+}
+
+function pickSchool(schoolId) {
+  if (!isSupabaseConnected || !currentUserId) return showToast('Sign in to join a school.', 'warn');
+  const s = schoolsCache.find(x => x.id === schoolId);
+  if (!s) return;
+  if (schoolId === currentSchoolId) return closeSchoolPicker();
+  if (s.join_mode === 'code' && !isAdmin) {
+    pickerCodeSchoolId = pickerCodeSchoolId === schoolId ? null : schoolId;
+    setPickerStatus('');
+    return renderSchoolPicker();
+  }
+  return joinSchool(schoolId);
+}
+
+function submitSchoolCode() {
+  const code = document.getElementById('school-code-input')?.value.trim();
+  if (!code) return setPickerStatus('Enter the join code your school gave you.', 'err');
+  joinSchool(pickerCodeSchoolId, code);
+}
+
+async function joinSchool(schoolId, code = null) {
+  const s = schoolsCache.find(x => x.id === schoolId);
+  setPickerStatus(`Joining ${s?.name || 'school'}…`);
+  const { data, error } = await supabaseClient.rpc('join_school', { target: schoolId, code });
+
+  if (error) {
+    // Database not migrated yet: fall back to the old direct update.
+    if (/join_school/.test(error.message) && /(function|schema cache)/i.test(error.message)) {
+      const { error: e2 } = await supabaseClient.from('profiles').update({ school_id: schoolId }).eq('user_id', currentUserId);
+      if (e2) return setPickerStatus('Could not join: ' + e2.message, 'err');
+    } else {
+      return setPickerStatus(error.message, 'err');
+    }
+  } else if (data === 'pending') {
+    myJoinRequests[schoolId] = 'pending';
+    renderSchoolPicker();
+    setPickerStatus(`Request sent to join ${s?.name}. An admin will review it — you'll get in automatically once approved.`, 'ok');
+    return;
+  }
+
   currentSchoolId = schoolId;
-  currentSchool = schoolsCache.find(s => s.id === schoolId) || null;
+  currentSchool = s || null;
+  pickerCodeSchoolId = null;
   updateSchoolChrome();
-  document.getElementById('schoolModal').dataset.required = '0';
-  document.getElementById('schoolModal').style.display = 'none';
+  const modal = document.getElementById('schoolModal');
+  modal.dataset.required = '0';
+  modal.style.display = 'none';
+  showToast(`Joined ${s?.name || 'school'}.`, 'success');
   // Reload everything now that the RLS view of the world changed.
   loadAllSupabaseData();
+  renderAdminPanel();
 }
 
 async function createSchoolFromInput() {
   if (!isSupabaseConnected || !currentUserId) return;
   const nameInput = document.getElementById('school-picker-new');
-  const status = document.getElementById('school-picker-status');
-  const name = (nameInput?.value || '').trim();
-  status.textContent = '';
-  if (name.length < 2) { status.textContent = 'Give the school a real name.'; status.className = 'friends-status err'; return; }
+  const name = (nameInput?.value || '').replace(/\s+/g, ' ').trim();
+  setPickerStatus('');
+  if (name.length < 2) return setPickerStatus('Give the school a real name.', 'err');
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
-  if (slug.length < 2) { status.textContent = "That name doesn't produce a valid handle."; status.className = 'friends-status err'; return; }
+  if (slug.length < 2) return setPickerStatus("That name doesn't produce a valid handle.", 'err');
+
+  const existing = schoolsCache.find(s => s.name.toLowerCase() === name.toLowerCase() || s.slug === slug);
+  if (existing) {
+    setPickerStatus(`${existing.name} already exists — tap it above to join.`, 'err');
+    return;
+  }
   const { data, error } = await supabaseClient
     .from('schools')
     .insert([{ name, slug, created_by: currentUserId }])
     .select().single();
-  if (error) {
-    // Handle unique conflict gracefully
-    const existing = schoolsCache.find(s => s.name.toLowerCase() === name.toLowerCase() || s.slug === slug);
-    if (existing) return pickSchool(existing.id);
-    status.textContent = 'Could not create: ' + error.message; status.className = 'friends-status err'; return;
-  }
-  schoolsCache.push(data);
-  await pickSchool(data.id);
+  if (error) return setPickerStatus('Could not create: ' + error.message, 'err');
+  schoolsCache.push({ join_mode: 'open', allowed_domains: [], ...data });
+  schoolsCache.sort((a, b) => a.name.localeCompare(b.name));
   nameInput.value = '';
+  await joinSchool(data.id);
 }
 
 async function fetchProfilesByIds(ids) {
@@ -1559,13 +1716,34 @@ async function submitEvent(event) {
 // the database policies are what actually allow the deletes.
 let isAdmin = false;
 
+let adminJoinCodes = {};        // school_id -> join code (admins can read these)
+let adminJoinRequests = [];     // pending school_join_requests rows
+let adminEditingSchoolId = null;
+
 async function fetchAdminStatus() {
   isAdmin = false;
   if (isSupabaseConnected && currentUserId) {
     const { data } = await supabaseClient.from('admins').select('user_id').eq('user_id', currentUserId).maybeSingle();
     isAdmin = !!data;
   }
+  if (isAdmin) await fetchAdminJoinData();
+  else { adminJoinCodes = {}; adminJoinRequests = []; renderAdminPanel(); }
+}
+
+async function fetchAdminJoinData() {
+  if (!isAdmin) return;
+  const [codes, reqs] = await Promise.all([
+    supabaseClient.from('school_join_codes').select('school_id, join_code'),
+    supabaseClient.from('school_join_requests').select('id, school_id, user_id, created_at')
+      .eq('status', 'pending').order('created_at')
+  ]);
+  adminJoinCodes = {};
+  (codes.data || []).forEach(c => { adminJoinCodes[c.school_id] = c.join_code; });
+  adminJoinRequests = reqs.data || [];
+  await fetchProfilesByIds(adminJoinRequests.map(r => r.user_id));
   renderAdminPanel();
+  renderNotifications();
+  updateNotifBadgeFromState();
 }
 
 function renderAdminPanel() {
@@ -1573,19 +1751,137 @@ function renderAdminPanel() {
   if (!card) return;
   card.style.display = isAdmin ? 'block' : 'none';
   if (!isAdmin) return;
+
+  const reqEl = document.getElementById('admin-request-list');
+  if (reqEl) {
+    reqEl.innerHTML = adminJoinRequests.length
+      ? adminJoinRequests.map(r => {
+          const p = profileMap[r.user_id] || {};
+          const who = p.display_name || p.handle || 'A student';
+          const school = schoolsCache.find(s => s.id === r.school_id)?.name || 'a school';
+          return `
+            <div class="admin-row">
+              <span class="friend-avatar sm">${escapeHtml(who[0].toUpperCase())}</span>
+              <div class="school-row-text">
+                <strong>${escapeHtml(who)}${p.handle ? ` <small>@${escapeHtml(p.handle)}</small>` : ''}</strong>
+                <small>Wants to join ${escapeHtml(school)} · ${timeAgo(r.created_at)}</small>
+              </div>
+              <button class="primary-btn friend-btn-sm" onclick="reviewJoinRequest('${escapeAttr(r.id)}', true)">Approve</button>
+              <button class="secondary-btn friend-btn-sm" onclick="reviewJoinRequest('${escapeAttr(r.id)}', false)">Deny</button>
+            </div>`;
+        }).join('')
+      : '<p class="friends-empty-inner">No one is waiting to join.</p>';
+  }
+
   document.getElementById('admin-school-list').innerHTML = schoolsCache.length
-    ? schoolsCache.map(s => `
-        <div class="admin-row">
-          <i class="fa-solid fa-graduation-cap"></i>
-          <div class="school-row-text">
-            <strong>${escapeHtml(s.name)}</strong>
-            <small>${s.id === currentSchoolId ? 'Your school' : '@' + escapeHtml(s.slug)}</small>
-          </div>
-          <button class="secondary-btn admin-del-btn" onclick="adminDeleteSchool('${escapeAttr(s.id)}')" aria-label="Delete ${escapeAttr(s.name)}">
-            <i class="fa-solid fa-trash"></i>
-          </button>
-        </div>`).join('')
+    ? schoolsCache.map(s => {
+        const rule = joinRuleLabel(s);
+        const editing = adminEditingSchoolId === s.id;
+        return `
+          <div class="admin-school">
+            <div class="admin-row">
+              <i class="fa-solid fa-graduation-cap"></i>
+              <div class="school-row-text">
+                <strong>${escapeHtml(s.name)}</strong>
+                <small><i class="fa-solid fa-${rule.icon}"></i> ${escapeHtml(rule.text)}${s.id === currentSchoolId ? ' · Your school' : ''}</small>
+              </div>
+              <button class="secondary-btn admin-rule-btn ${editing ? 'active-state' : ''}" onclick="toggleJoinRuleEditor('${escapeAttr(s.id)}')">Join rules</button>
+              <button class="secondary-btn admin-del-btn" onclick="adminDeleteSchool('${escapeAttr(s.id)}')" aria-label="Delete ${escapeAttr(s.name)}">
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            </div>
+            ${editing ? joinRuleEditorHtml(s) : ''}
+          </div>`;
+      }).join('')
     : '<p class="friends-empty-inner">No schools.</p>';
+  if (adminEditingSchoolId) renderJoinRuleFields();
+}
+
+function joinRuleEditorHtml(s) {
+  const opt = (v, label) => `<option value="${v}" ${s.join_mode === v ? 'selected' : ''}>${label}</option>`;
+  return `
+    <div class="join-rule-editor">
+      <label class="tp-label" for="jr-mode">Who can join ${escapeHtml(s.name)}?</label>
+      <select id="jr-mode" class="mini-select" onchange="renderJoinRuleFields()">
+        ${opt('open', 'Anyone (open)')}
+        ${opt('code', 'People with a join code')}
+        ${opt('domain', 'People with a school email')}
+        ${opt('approval', 'Only people an admin approves')}
+      </select>
+      <input id="jr-code" class="auth-input" maxlength="40" autocomplete="off"
+             placeholder="Join code (at least 4 characters)" value="${escapeAttr(adminJoinCodes[s.id] || '')}" />
+      <input id="jr-domains" class="auth-input" autocomplete="off"
+             placeholder="Email domains, e.g. hmhs.org, students.hmhs.org" value="${escapeAttr((s.allowed_domains || []).join(', '))}" />
+      <p class="admin-hint" id="jr-help"></p>
+      <div class="join-rule-actions">
+        <button class="secondary-btn" onclick="toggleJoinRuleEditor(null)">Cancel</button>
+        <button class="primary-btn" onclick="saveJoinRules('${escapeAttr(s.id)}')">Save rules</button>
+      </div>
+    </div>`;
+}
+
+function renderJoinRuleFields() {
+  const mode = document.getElementById('jr-mode')?.value;
+  const code = document.getElementById('jr-code');
+  const domains = document.getElementById('jr-domains');
+  const help = document.getElementById('jr-help');
+  if (!mode || !code || !domains || !help) return;
+  code.style.display = mode === 'code' ? 'block' : 'none';
+  domains.style.display = mode === 'domain' ? 'block' : 'none';
+  help.textContent = {
+    open: 'Anyone can join. Good for testing, not for a real school.',
+    code: 'Share the code only with students (e.g. in class). Change it any time; current members stay.',
+    domain: 'Only accounts with a confirmed email at these domains can join. Turn on "Confirm email" in Supabase → Authentication, or people could sign up with a fake address.',
+    approval: 'Students send a request; you approve or deny it above. Current members stay.'
+  }[mode];
+}
+
+function toggleJoinRuleEditor(id) {
+  adminEditingSchoolId = adminEditingSchoolId === id ? null : id;
+  renderAdminPanel();
+}
+
+async function saveJoinRules(id) {
+  const mode = document.getElementById('jr-mode').value;
+  const code = document.getElementById('jr-code').value.trim() || null;
+  const domains = document.getElementById('jr-domains').value.split(/[\s,;]+/).map(d => d.replace(/^@/, '').trim()).filter(Boolean);
+  const { error } = await supabaseClient.rpc('admin_set_school_join', { target: id, mode, code, domains });
+  if (error) return showToast('Could not save: ' + error.message, 'error');
+  showToast('Join rules saved.', 'success');
+  adminEditingSchoolId = null;
+  await refreshSchoolsCache();
+  await fetchAdminJoinData();
+}
+
+async function reviewJoinRequest(requestId, approve) {
+  const { error } = await supabaseClient.rpc('admin_review_join_request', { request: requestId, approve });
+  if (error) return showToast('Could not update request: ' + error.message, 'error');
+  showToast(approve ? 'Approved — they\'re in.' : 'Request denied.', approve ? 'success' : 'info');
+  fetchAdminJoinData();
+}
+
+// Realtime: an admin sees new requests; a student gets let in when approved.
+async function onJoinRequestChanged(payload) {
+  if (isAdmin) fetchAdminJoinData();
+  const row = payload?.new;
+  if (!row || row.user_id !== currentUserId) return;
+  myJoinRequests[row.school_id] = row.status;
+  if (row.status === 'approved') {
+    const name = schoolsCache.find(s => s.id === row.school_id)?.name || 'your school';
+    showToast(`You've been approved to join ${name}!`, 'success', 6000);
+    await ensureProfile();
+    loadAllSupabaseData();
+  } else if (row.status === 'denied') {
+    showToast('Your request to join was denied.', 'warn', 6000);
+  }
+  if (document.getElementById('schoolModal')?.style.display === 'flex') renderSchoolPicker();
+}
+
+async function onSchoolsChanged() {
+  await refreshSchoolsCache();
+  renderAdminPanel();
+  renderTeacherSchoolOptions();
+  if (document.getElementById('schoolModal')?.style.display === 'flex') renderSchoolPicker();
 }
 
 async function adminDeleteSchool(id) {
