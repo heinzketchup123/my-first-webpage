@@ -139,9 +139,15 @@ function renderEmptyStates() {
 }
 
 function registerServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(err => console.log('SW registration skipped:', err));
-  }
+  if (!('serviceWorker' in navigator)) return;
+  // When a new version takes over, reload once so the page isn't left
+  // running the previous version's CSS/JS. Skipped on the very first install.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !reloaded) { reloaded = true; location.reload(); }
+  });
+  navigator.serviceWorker.register('sw.js').catch(err => console.log('SW registration skipped:', err));
 }
 
 function initSystemThemeListener() {
