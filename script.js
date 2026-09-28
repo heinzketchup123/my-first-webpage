@@ -160,7 +160,8 @@ let profileMap = {};           // user_id -> {handle, display_name}
 let appSettings = { ...defaultSettings };
 
 let currentPostCommentId = null;
-let realtimeChannel = null;
+let realtimeChannels = [];
+let chatLive = false;          // true while live message updates are connected
 let feedSort = 'new'; // 'new' | 'top' | 'comments'
 let unreadNotifs = 0;
 let appAppearance = { ...defaultAppearance };
@@ -174,6 +175,10 @@ document.addEventListener("DOMContentLoaded", () => {
   loadPomo();
   syncDeviceAlertsToggle();
   document.addEventListener('visibilitychange', markOpenThreadRead);
+  document.addEventListener('visibilitychange', () => {
+    // Back in the app with a chat open: pick up messages sent while away.
+    if (!document.hidden && selectedFriendId && isViewActive('chat-view')) fetchDMs(selectedFriendId, { quiet: true });
+  });
   let layoutTimer = null;
   try { localStorage.removeItem('iosFillScreen'); } catch (_) {}   // retired "fill the whole screen" test
   detectShortViewport();
@@ -271,31 +276,40 @@ function initSystemThemeListener() {
 }
 
 // Supabase Realtime Subscriptions Engine
+// One channel per table: if one table is missing (say SCHEMA.sql hasn't been
+// re-run yet), only that table stops updating live instead of all of them.
 function initSupabaseRealtime() {
-  if (realtimeChannel) return;
+  if (realtimeChannels.length) return;
 
-  realtimeChannel = supabaseClient
-    .channel('public-db-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_chat' }, () => {
-      if (selectedFriendId) fetchDMs(selectedFriendId);
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => fetchFriendships())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_feed' }, () => fetchFeed())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'feed_reactions' }, () => onFeedExtrasChanged())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'feed_comments' }, () => onFeedExtrasChanged())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, p => onNotificationChanged(p))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'study_groups' }, () => fetchGroups())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'study_group_members' }, () => fetchGroups())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, () => onTeacherDataChanged())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'teacher_posts' }, () => onTeacherDataChanged())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'teacher_post_votes' }, () => onTeacherDataChanged())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_events' }, () => onEventsChanged())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'event_rsvps' }, () => onEventsChanged())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'school_join_requests' }, p => onJoinRequestChanged(p))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'schools' }, () => onSchoolsChanged())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'admins' }, () => onAdminsChanged())
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'school_bans' }, () => { if (isAdmin) fetchAdminMembers(); })
-    .subscribe();
+  const listen = (table, handler, onStatus) => {
+    realtimeChannels.push(supabaseClient
+      .channel('rt-' + table)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, handler)
+      .subscribe(onStatus));
+  };
+  listen('campus_chat', p => onChatChanged(p), status => {
+    const wasLive = chatLive;
+    chatLive = status === 'SUBSCRIBED';
+    // Catch up on anything sent while the live connection was down.
+    if (chatLive && !wasLive && selectedFriendId) fetchDMs(selectedFriendId, { quiet: true });
+  });
+  listen('friendships', () => fetchFriendships());
+  listen('campus_feed', () => fetchFeed());
+  listen('feed_reactions', () => onFeedExtrasChanged());
+  listen('feed_comments', () => onFeedExtrasChanged());
+  listen('notifications', p => onNotificationChanged(p));
+  listen('study_groups', () => fetchGroups());
+  listen('study_group_members', () => fetchGroups());
+  listen('teachers', () => onTeacherDataChanged());
+  listen('teacher_posts', () => onTeacherDataChanged());
+  listen('teacher_post_votes', () => onTeacherDataChanged());
+  listen('campus_events', () => onEventsChanged());
+  listen('event_rsvps', () => onEventsChanged());
+  listen('school_join_requests', p => onJoinRequestChanged(p));
+  listen('schools', () => onSchoolsChanged());
+  listen('admins', () => onAdminsChanged());
+  listen('school_bans', () => { if (isAdmin) fetchAdminMembers(); });
+  startDmPolling();
 }
 
 async function loadAllSupabaseData() {
@@ -687,7 +701,10 @@ function switchTab(viewId, element) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === navView));
   document.querySelector('.content-container')?.scrollTo(0, 0);
 
-  if (viewId === 'chat-view')   { renderFriendsStrip(); renderDMThread(); markOpenThreadRead(); }
+  if (viewId === 'chat-view') {
+    renderFriendsStrip(); renderDMThread({ toBottom: true }); markOpenThreadRead();
+    if (selectedFriendId) fetchDMs(selectedFriendId, { quiet: true });   // catch up on anything missed
+  }
   if (viewId === 'search-view') {
     // Keep the top-bar search (computer layout) showing the same text.
     const g = document.getElementById('global-search');
@@ -733,6 +750,7 @@ function onNotificationChanged(payload) {
     if (isNew) {
       const viewingThread = row.kind === 'dm' && !document.hidden
         && isViewActive('chat-view') && selectedFriendId === row.ref_id;
+      if (row.kind === 'dm' && selectedFriendId === row.ref_id) fetchDMs(selectedFriendId, { quiet: true });
       if (!viewingThread) {
         const text = notifPlainText(row);
         if (row.kind !== 'dm' || !isViewActive('chat-view')) showToast(text, 'info', 4000);
@@ -1565,16 +1583,44 @@ function renderFriendsModalIfOpen() {
 // -------------------- Direct Messages ------------------------
 
 async function selectFriend(friendId) {
+  if (friendId !== selectedFriendId) dmMessages = [];
   selectedFriendId = friendId;
   renderFriendsStrip();
   markOpenThreadRead();
   await fetchDMs(friendId);
 }
 
-async function fetchDMs(friendId) {
+let dmFetchSeq = 0;
+let dmLastPoll = 0;
+let dmPollTimer = null;
+let dmRenderedFor = null;      // whose thread is on screen (to jump to the newest message on open)
+
+function inThread(msg, friendId) {
+  return (msg.sender_id === currentUserId && msg.recipient_id === friendId)
+      || (msg.sender_id === friendId && msg.recipient_id === currentUserId);
+}
+
+// Confirmed messages in time order, then any still sending at the end.
+function setThread(list) {
+  const done = list.filter(m => !m.pending)
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  dmMessages = done.concat(list.filter(m => m.pending));
+}
+
+// A message still sending that this saved row is the copy of.
+function pendingMatch(list, row) {
+  return list.find(m => m.pending && m.sender_id === row.sender_id
+    && m.recipient_id === row.recipient_id && m.text === row.text);
+}
+
+async function fetchDMs(friendId, opts = {}) {
   if (!friendId || !currentUserId || !isSupabaseConnected) {
     dmMessages = []; renderDMThread(); return;
   }
+  const seq = ++dmFetchSeq;
+  const startedAt = Date.now();
+  dmLastPoll = startedAt;
+  // Newest 200, so long conversations still show their latest messages.
   const { data, error } = await supabaseClient
     .from('campus_chat')
     .select('*')
@@ -1582,11 +1628,57 @@ async function fetchDMs(friendId) {
       `and(sender_id.eq.${currentUserId},recipient_id.eq.${friendId}),`+
       `and(sender_id.eq.${friendId},recipient_id.eq.${currentUserId})`
     )
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(200);
-  if (error) showToast('Could not load messages: ' + error.message, 'error');
-  dmMessages = data || [];
+  // Ignore a slow answer once a newer one was asked for, or after switching chats.
+  if (seq !== dmFetchSeq || friendId !== selectedFriendId) return;
+  if (error) {
+    if (!opts.quiet) showToast('Could not load messages: ' + error.message, 'error');
+    if (!data) return;
+  }
+  const rows = data || [];
+  const ids = new Set(rows.map(m => m.id));
+  const known = new Set(dmMessages.map(m => m.id));
+  const fresh = rows.filter(r => !known.has(r.id));
+  const saved = m => fresh.some(r => r.sender_id === m.sender_id && r.recipient_id === m.recipient_id && r.text === m.text);
+  // Keep messages that arrived while this was loading, and ones still sending.
+  const keep = dmMessages.filter(m => inThread(m, friendId) && !ids.has(m.id)
+    && (m.pending ? !saved(m) : (m._addedAt || 0) > startedAt));
+  const before = dmMessages.map(m => m.id).join();
+  setThread(rows.concat(keep));
+  if (dmMessages.map(m => m.id).join() !== before || dmRenderedFor !== friendId) renderDMThread();
+}
+
+// Live update from the database.
+function onChatChanged(payload) {
+  if (!selectedFriendId) return;
+  const row = payload?.new;
+  if (payload?.eventType === 'INSERT' && row?.id) {
+    if (inThread(row, selectedFriendId)) addDmToThread(row);
+    return;
+  }
+  fetchDMs(selectedFriendId, { quiet: true });   // a deleted message, or something we can't place
+}
+
+function addDmToThread(row) {
+  if (!inThread(row, selectedFriendId) || dmMessages.some(m => m.id === row.id)) return;
+  const list = dmMessages.slice();
+  const stand = pendingMatch(list, row);
+  if (stand) list.splice(list.indexOf(stand), 1);
+  list.push({ ...row, _addedAt: Date.now() });
+  setThread(list);
   renderDMThread();
+}
+
+// Backup for live updates: while a chat is open, check for new messages every
+// few seconds if the live connection is down (and now and then even if it's up).
+function startDmPolling() {
+  if (dmPollTimer) return;
+  dmPollTimer = setInterval(() => {
+    if (!selectedFriendId || !currentUserId || !isSupabaseConnected) return;
+    if (document.hidden || !isViewActive('chat-view')) return;
+    if (Date.now() - dmLastPoll >= (chatLive ? 20000 : 4000)) fetchDMs(selectedFriendId, { quiet: true });
+  }, 2000);
 }
 
 function renderChatThreadHead() {
@@ -1621,10 +1713,15 @@ function sameRun(a, b) {
   return Math.abs(tb - ta) < 5 * 60e3 && ta.toDateString() === tb.toDateString();
 }
 
-function renderDMThread() {
+function renderDMThread(opts = {}) {
   const box = document.getElementById('app-chat-messages');
   if (!box) return;
   renderChatThreadHead();
+  // Stay at the newest message unless you've scrolled up to read older ones.
+  const stick = opts.toBottom || dmRenderedFor !== selectedFriendId
+    || box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+  const prevTop = box.scrollTop;
+  dmRenderedFor = selectedFriendId;
 
   const input = document.getElementById('app-chat-input');
   if (input) {
@@ -1662,15 +1759,20 @@ function renderDMThread() {
     const mine = msg.sender_id === currentUserId;
     const withPrev = sameRun(dmMessages[i - 1], msg);
     const withNext = sameRun(msg, dmMessages[i + 1]);
-    const time = escapeHtml(when ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : String(msg.time || ''));
+    const time = msg.pending ? 'Sending…'
+      : escapeHtml(when ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : String(msg.time || ''));
     html += `
-      <div class="chat-bubble ${mine ? 'chat-bubble-mine' : 'chat-bubble-other'}${withPrev ? ' grouped' : ''}${withNext ? ' has-next' : ''}">
+      <div class="chat-bubble ${mine ? 'chat-bubble-mine' : 'chat-bubble-other'}${withPrev ? ' grouped' : ''}${withNext ? ' has-next' : ''}${msg.pending ? ' pending' : ''}">
         <div class="chat-text">${renderSafeMessage(String(msg.text || '').slice(0, CHAT_MAX_LEN))}</div>
-        ${withNext ? '' : `<span class="chat-time">${time}</span>`}
+        ${withNext && !msg.pending ? '' : `<span class="chat-time">${time}</span>`}
       </div>`;
   });
   box.innerHTML = html;
-  box.scrollTop = box.scrollHeight;
+  // Jump instantly: a smooth scroll still under way would make the next
+  // update think you'd scrolled up, and leave the chat stuck partway.
+  box.style.scrollBehavior = 'auto';
+  box.scrollTop = stick ? box.scrollHeight : prevTop;
+  box.style.scrollBehavior = '';
   updateChatCounter();
 }
 
@@ -1697,16 +1799,39 @@ async function sendDM(event) {
 
   if (!currentUserId || !isSupabaseConnected) return showToast('Sign in to send messages.', 'warn');
 
+  const friendId = selectedFriendId;
   const msgObj = {
     sender_id: currentUserId,
-    recipient_id: selectedFriendId,
+    recipient_id: friendId,
     user: sanitizeName(currentHandle || currentUser.split('@')[0]),
     text, time: timeStr
   };
   chatSendTimestamps.push(now);
   input.value = ''; updateChatCounter();
-  const { error } = await supabaseClient.from('campus_chat').insert([msgObj]);
-  if (error) return showToast('Message blocked — make sure you two are friends.', 'error', 4500);
+
+  // Show it straight away; it's swapped for the saved copy once the database has it.
+  const tempId = 'sending-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  dmMessages.push({ ...msgObj, id: tempId, created_at: new Date().toISOString(), pending: true });
+  renderDMThread({ toBottom: true });
+
+  const { data, error } = await supabaseClient.from('campus_chat').insert([msgObj]).select().single();
+  const i = dmMessages.findIndex(m => m.id === tempId);
+  if (i >= 0) dmMessages.splice(i, 1);
+  if (error) {
+    if (selectedFriendId === friendId) {
+      renderDMThread();
+      if (!input.value) { input.value = text; updateChatCounter(); }   // give the text back to retry
+    }
+    return showToast('Message blocked — make sure you two are friends.', 'error', 4500);
+  }
+  if (selectedFriendId !== friendId) return;
+  if (!data) return fetchDMs(friendId, { quiet: true });
+  if (!dmMessages.some(m => m.id === data.id)) {
+    const list = dmMessages.slice();
+    list.push({ ...data, _addedAt: Date.now() });
+    setThread(list);
+  }
+  renderDMThread();
 }
 
 // Back-compat shim: older code paths / a stale HTML cache may still call

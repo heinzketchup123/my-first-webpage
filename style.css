@@ -2272,6 +2272,7 @@ body.light-mode .teacher-tab:not(.active) .tt-count { background: var(--card-bor
 .chat-text { font-size: 0.88rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
 .chat-bubble-mine .chat-text a { color: inherit; text-decoration: underline; }
 .chat-time { font-size: 0.64rem; opacity: 0.7; margin-top: 3px; align-self: flex-end; }
+.chat-bubble.pending { opacity: 0.65; }
 .chat-day { display: flex; justify-content: center; margin: 14px 0 2px; }
 .chat-day span {
   font-size: 0.68rem;
