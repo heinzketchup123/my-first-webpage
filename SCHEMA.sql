@@ -640,25 +640,18 @@ left join public.teacher_posts p on p.teacher_id = t.id
 group by t.id;
 grant select on public.teacher_stats to anon, authenticated;
 
--- Copy old instructor_reviews into teacher pages (safe to re-run).
-insert into public.teachers (school_id, name, created_by)
-select distinct on (r.school_id, lower(trim(r.teacher)))
-       r.school_id, trim(r.teacher), r.author_id
-from public.instructor_reviews r
-where r.school_id is not null
-  and char_length(trim(coalesce(r.teacher, ''))) between 2 and 80
-order by r.school_id, lower(trim(r.teacher)), r.created_at
-on conflict do nothing;
+-- Old instructor_reviews were copied into teacher pages once, when teacher
+-- pages were added. That copy no longer runs: it re-created every teacher
+-- deleted in the app each time this script was run.
 
-insert into public.teacher_posts
-  (teacher_id, author_id, author_name, kind, rating, body, legacy_review_id, created_at)
-select t.id, r.author_id, 'Student', 'review', r.rating::smallint, r.text, r.id, r.created_at
-from public.instructor_reviews r
-join public.teachers t
-  on t.school_id = r.school_id and lower(t.name) = lower(trim(r.teacher))
-where r.rating in ('1','2','3','4','5')
-  and char_length(coalesce(r.text, '')) between 1 and 2000
-on conflict do nothing;
+-- Remove the demo teachers that came from old test reviews (Mdjdn, Mockle,
+-- Myjddb), with their test reviews. Ms. Lau and her page are kept.
+delete from public.teachers
+ where id in ('b7fc2ff4-2ca2-46af-bd2d-4f5d4cfc6812',
+              '79661cda-1d4f-4e86-bb97-66200195312e',
+              '39baa097-51d5-4376-b6c0-48aee35a475b');
+delete from public.instructor_reviews
+ where lower(trim(teacher)) in ('mdjdn', 'mockle', 'myjddb');
 
 -- ============================================================
 -- 6e. EVENT CALENDAR
