@@ -391,27 +391,63 @@
         </div>
 
         <!-- Admin tools (only shown to admins) -->
+        <!-- Tap the header to fold the whole card; each section folds too. -->
         <div class="pref-card admin-card" id="admin-card" style="display:none;">
-          <div class="pref-header">
+          <div class="pref-header collapsible admin-card-head" role="button" tabindex="0"
+               aria-expanded="true" aria-controls="admin-card-body"
+               onclick="toggleAdminSection('card')" onkeydown="pressOnEnter(event)">
             <i class="fa-solid fa-shield-halved"></i>
             <h3>Admin</h3>
+            <span class="admin-waiting-pill" id="admin-waiting-pill" hidden></span>
             <span class="admin-badge">ADMIN</span>
+            <i class="fa-solid fa-chevron-down pref-chevron"></i>
           </div>
-          <p class="admin-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Manage who can join each school below.</p>
-          <div class="friends-subheading">Join requests</div>
-          <div id="admin-request-list"></div>
-          <div class="friends-subheading admin-members-head" style="margin-top:12px;">
-            <span>Students</span>
-            <button class="text-btn" onclick="fetchAdminMembers()" aria-label="Refresh student list"><i class="fa-solid fa-rotate"></i></button>
+          <div class="admin-collapse" id="admin-card-body">
+            <div class="admin-collapse-inner">
+              <p class="admin-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Manage who can join each school below.</p>
+
+              <div class="admin-section" data-section="requests">
+                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-requests-body"
+                        onclick="toggleAdminSection('requests')">
+                  <span>Join requests</span><span class="admin-count" id="admin-requests-count"></span>
+                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
+                </button>
+                <div class="admin-collapse" id="admin-requests-body">
+                  <div class="admin-collapse-inner"><div id="admin-request-list"></div></div>
+                </div>
+              </div>
+
+              <div class="admin-section" data-section="students">
+                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-students-body"
+                        onclick="toggleAdminSection('students')">
+                  <span>Students</span><span class="admin-count" id="admin-students-count"></span>
+                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
+                </button>
+                <div class="admin-collapse" id="admin-students-body">
+                  <div class="admin-collapse-inner">
+                    <div class="admin-members-controls">
+                      <select id="admin-members-school" class="mini-select" onchange="setAdminMembersSchool(this.value)" aria-label="School"></select>
+                      <input id="admin-members-search" class="auth-input" type="search" autocomplete="off"
+                             placeholder="Search name or @handle" oninput="renderAdminMembers()" />
+                      <button class="secondary-btn admin-refresh-btn" type="button" onclick="fetchAdminMembers()" aria-label="Refresh student list"><i class="fa-solid fa-rotate"></i></button>
+                    </div>
+                    <div id="admin-member-list"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="admin-section" data-section="schools">
+                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-schools-body"
+                        onclick="toggleAdminSection('schools')">
+                  <span>Schools</span><span class="admin-count" id="admin-schools-count"></span>
+                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
+                </button>
+                <div class="admin-collapse" id="admin-schools-body">
+                  <div class="admin-collapse-inner"><div id="admin-school-list"></div></div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="admin-members-controls">
-            <select id="admin-members-school" class="mini-select" onchange="setAdminMembersSchool(this.value)" aria-label="School"></select>
-            <input id="admin-members-search" class="auth-input" type="search" autocomplete="off"
-                   placeholder="Search name or @handle" oninput="renderAdminMembers()" />
-          </div>
-          <div id="admin-member-list"></div>
-          <div class="friends-subheading" style="margin-top:12px;">Schools</div>
-          <div id="admin-school-list"></div>
         </div>
 
         <!-- Appearance Mode -->

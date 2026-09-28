@@ -174,6 +174,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderEmptyStates();
   loadPomo();
   syncDeviceAlertsToggle();
+  applyAdminFolds();   // set folds while the card is still hidden, so nothing animates on load
   document.addEventListener('visibilitychange', markOpenThreadRead);
   document.addEventListener('visibilitychange', () => {
     // Back in the app with a chat open: pick up messages sent while away.
@@ -877,8 +878,7 @@ async function openNotification(id) {
       setFriendsTab('requests');
       break;
     case 'join_request':
-      switchTab('settings-view');
-      document.getElementById('admin-card')?.scrollIntoView({ block: 'start' });
+      showAdminCard('requests');
       break;
     case 'join_decision':
       switchTab('settings-view');
@@ -886,7 +886,7 @@ async function openNotification(id) {
     case 'group_join':  switchTab('groups-view'); break;
     case 'event_rsvp':  switchTab('events-view'); break;
     case 'helpful':     if (n.meta) openTeacherPage(n.meta); break;
-    case 'promoted':    switchTab('settings-view'); document.getElementById('admin-card')?.scrollIntoView({ block: 'start' }); break;
+    case 'promoted':    showAdminCard(); break;
     case 'removed_from_school': openSchoolPicker(!currentSchoolId); break;
   }
 }
@@ -988,7 +988,7 @@ function renderNotifications() {
   if (isAdmin && adminJoinRequests.length) {
     const n = adminJoinRequests.length;
     items.push(`
-      <div class="notif-item" style="cursor:pointer;" onclick="toggleNotifications(); switchTab('settings-view'); document.getElementById('admin-card')?.scrollIntoView({ block: 'start' });">
+      <div class="notif-item" style="cursor:pointer;" onclick="toggleNotifications(); showAdminCard('requests');">
         <i class="fa-solid fa-user-check notif-icon"></i>
         <div>
           <strong>School join request${n === 1 ? '' : 's'}</strong>
@@ -2599,11 +2599,65 @@ async function fetchAdminJoinData() {
   updateNotifBadgeFromState();
 }
 
+// -------------------- Admin card folding --------------------
+// Tap the Admin header to fold the whole card, or a section's header to fold
+// just that section. What you left open or closed is remembered on this device.
+const ADMIN_FOLD_KEY = 'adminFolded';
+let adminFolded = (() => {
+  try { return JSON.parse(localStorage.getItem(ADMIN_FOLD_KEY)) || {}; } catch (_) { return {}; }
+})();
+
+function applyAdminFolds() {
+  const card = document.getElementById('admin-card');
+  if (!card) return;
+  const fold = (key, wrap, head, body) => {
+    const closed = !!adminFolded[key];
+    wrap.classList.toggle('collapsed', closed);
+    head?.setAttribute('aria-expanded', String(!closed));
+    if (body) body.inert = closed;   // folded-away buttons can't be tabbed to
+  };
+  fold('card', card, card.querySelector('.admin-card-head'), document.getElementById('admin-card-body'));
+  card.querySelectorAll('.admin-section').forEach(sec =>
+    fold(sec.dataset.section, sec, sec.querySelector('.admin-section-head'), sec.querySelector('.admin-collapse')));
+}
+
+function toggleAdminSection(key, open) {
+  adminFolded[key] = typeof open === 'boolean' ? !open : !adminFolded[key];
+  try { localStorage.setItem(ADMIN_FOLD_KEY, JSON.stringify(adminFolded)); } catch (_) {}
+  applyAdminFolds();
+}
+
+// Open the Admin card (and one section) and bring it into view, e.g. from a notification.
+function showAdminCard(section) {
+  switchTab('settings-view');
+  toggleAdminSection('card', true);
+  if (section) toggleAdminSection(section, true);
+  document.getElementById('admin-card')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function pressOnEnter(e) {
+  if (e.target !== e.currentTarget) return;
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); }
+}
+
+function setAdminCount(id, n) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = n ? String(n) : '';
+}
+
 function renderAdminPanel() {
   const card = document.getElementById('admin-card');
   if (!card) return;
   card.style.display = isAdmin ? 'block' : 'none';
   if (!isAdmin) return;
+  applyAdminFolds();
+
+  // Waiting requests stay visible on the header even with the card folded.
+  const waiting = adminJoinRequests.length;
+  const pill = document.getElementById('admin-waiting-pill');
+  if (pill) { pill.hidden = !waiting; pill.textContent = `${waiting} waiting`; }
+  setAdminCount('admin-requests-count', waiting);
+  setAdminCount('admin-schools-count', schoolsCache.length);
 
   const reqEl = document.getElementById('admin-request-list');
   if (reqEl) {
@@ -2815,6 +2869,7 @@ function renderAdminMembers() {
       </div>`;
   }).join('');
 
+  setAdminCount('admin-students-count', adminMembers.length);
   const count = `${adminMembers.length} ${adminMembers.length === 1 ? 'person' : 'people'}${nAdmins ? ` · ${nAdmins} admin${nAdmins === 1 ? '' : 's'}` : ''}`;
   list.innerHTML = `
     <p class="admin-hint admin-members-count">${count}</p>
