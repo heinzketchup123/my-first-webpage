@@ -702,7 +702,7 @@ function switchTab(viewId, element) {
   document.querySelector('.content-container')?.scrollTo(0, 0);
 
   if (viewId === 'chat-view') {
-    renderFriendsStrip(); renderDMThread({ toBottom: true }); markOpenThreadRead();
+    renderFriendsStrip(); renderDMThread({ toBottom: true, instant: true }); markOpenThreadRead();
     if (selectedFriendId) fetchDMs(selectedFriendId, { quiet: true });   // catch up on anything missed
   }
   if (viewId === 'search-view') {
@@ -753,7 +753,12 @@ function onNotificationChanged(payload) {
       if (row.kind === 'dm' && selectedFriendId === row.ref_id) fetchDMs(selectedFriendId, { quiet: true });
       if (!viewingThread) {
         const text = notifPlainText(row);
-        if (row.kind !== 'dm' || !isViewActive('chat-view')) showToast(text, 'info', 4000);
+        // Tapping the pop-up opens it (the chat, the post, …).
+        const open = () => {
+          if (!notifications.some(n => n.id === row.id)) notifications.unshift(row);
+          openNotification(row.id);
+        };
+        if (row.kind !== 'dm' || !isViewActive('chat-view')) showToast(text, 'info', 4000, open);
         showDeviceAlert(row, text);
       }
       // An admin removed me from my school: the database already cut access,
@@ -1024,8 +1029,10 @@ function updateNotifBadgeFromState() {
 
 const CHAT_MAX_LEN = 280;
 const CHAT_MAX_NAME_LEN = 32;
-const CHAT_RATE_MAX = 5;             // messages
-const CHAT_RATE_WINDOW_MS = 30_000;  // per 30s window
+// Spam guard only (e.g. a key held down). Normal back-and-forth never hits it:
+// 10 messages in 10 seconds is faster than anyone types.
+const CHAT_RATE_MAX = 10;            // messages
+const CHAT_RATE_WINDOW_MS = 10_000;  // per 10s window
 let chatSendTimestamps = [];         // sliding window of recent send times
 
 // Turn arbitrary user content into safe HTML: escape first, then autolink
@@ -1594,6 +1601,8 @@ let dmFetchSeq = 0;
 let dmLastPoll = 0;
 let dmPollTimer = null;
 let dmRenderedFor = null;      // whose thread is on screen (to jump to the newest message on open)
+let dmShown = new Set();       // message ids already drawn, so only new ones animate in
+let dmAutoScrollUntil = 0;
 
 function inThread(msg, friendId) {
   return (msg.sender_id === currentUserId && msg.recipient_id === friendId)
@@ -1640,7 +1649,11 @@ async function fetchDMs(friendId, opts = {}) {
   const ids = new Set(rows.map(m => m.id));
   const known = new Set(dmMessages.map(m => m.id));
   const fresh = rows.filter(r => !known.has(r.id));
-  const saved = m => fresh.some(r => r.sender_id === m.sender_id && r.recipient_id === m.recipient_id && r.text === m.text);
+  const saved = m => {
+    const r = fresh.find(r => !r._was && r.sender_id === m.sender_id && r.recipient_id === m.recipient_id && r.text === m.text);
+    if (r) r._was = m.id;
+    return !!r;
+  };
   // Keep messages that arrived while this was loading, and ones still sending.
   const keep = dmMessages.filter(m => inThread(m, friendId) && !ids.has(m.id)
     && (m.pending ? !saved(m) : (m._addedAt || 0) > startedAt));
@@ -1665,7 +1678,7 @@ function addDmToThread(row) {
   const list = dmMessages.slice();
   const stand = pendingMatch(list, row);
   if (stand) list.splice(list.indexOf(stand), 1);
-  list.push({ ...row, _addedAt: Date.now() });
+  list.push({ ...row, _addedAt: Date.now(), _was: stand && stand.id });
   setThread(list);
   renderDMThread();
 }
@@ -1718,10 +1731,12 @@ function renderDMThread(opts = {}) {
   if (!box) return;
   renderChatThreadHead();
   // Stay at the newest message unless you've scrolled up to read older ones.
-  const stick = opts.toBottom || dmRenderedFor !== selectedFriendId
+  const onScreen = dmRenderedFor === selectedFriendId;   // same chat as last time
+  const stick = opts.toBottom || !onScreen || Date.now() < dmAutoScrollUntil
     || box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   const prevTop = box.scrollTop;
   dmRenderedFor = selectedFriendId;
+  if (!onScreen) dmShown = new Set();
 
   const input = document.getElementById('app-chat-input');
   if (input) {
@@ -1761,18 +1776,28 @@ function renderDMThread(opts = {}) {
     const withNext = sameRun(msg, dmMessages[i + 1]);
     const time = msg.pending ? 'Sending…'
       : escapeHtml(when ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : String(msg.time || ''));
+    // Animate only what's new since the last draw; a sent message that was
+    // already showing as "Sending…" just fades up instead of popping in again.
+    const motion = !onScreen || dmShown.has(msg.id) ? ''
+      : (msg._was && dmShown.has(msg._was)) ? ' settled' : ' anim-in';
     html += `
-      <div class="chat-bubble ${mine ? 'chat-bubble-mine' : 'chat-bubble-other'}${withPrev ? ' grouped' : ''}${withNext ? ' has-next' : ''}${msg.pending ? ' pending' : ''}">
+      <div class="chat-bubble ${mine ? 'chat-bubble-mine' : 'chat-bubble-other'}${withPrev ? ' grouped' : ''}${withNext ? ' has-next' : ''}${msg.pending ? ' pending' : ''}${motion}">
         <div class="chat-text">${renderSafeMessage(String(msg.text || '').slice(0, CHAT_MAX_LEN))}</div>
         ${withNext && !msg.pending ? '' : `<span class="chat-time">${time}</span>`}
       </div>`;
   });
   box.innerHTML = html;
-  // Jump instantly: a smooth scroll still under way would make the next
-  // update think you'd scrolled up, and leave the chat stuck partway.
-  box.style.scrollBehavior = 'auto';
-  box.scrollTop = stick ? box.scrollHeight : prevTop;
-  box.style.scrollBehavior = '';
+  dmShown = new Set(dmMessages.map(m => m.id));
+  if (stick && onScreen && !opts.instant) {
+    // Glide down to a new message. While that's under way, later updates
+    // keep following it rather than thinking you'd scrolled up.
+    dmAutoScrollUntil = Date.now() + 900;
+    box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+  } else {
+    box.style.scrollBehavior = 'auto';   // opening a chat jumps straight to the newest message
+    box.scrollTop = stick ? box.scrollHeight : prevTop;
+    box.style.scrollBehavior = '';
+  }
   updateChatCounter();
 }
 
@@ -1828,7 +1853,7 @@ async function sendDM(event) {
   if (!data) return fetchDMs(friendId, { quiet: true });
   if (!dmMessages.some(m => m.id === data.id)) {
     const list = dmMessages.slice();
-    list.push({ ...data, _addedAt: Date.now() });
+    list.push({ ...data, _addedAt: Date.now(), _was: tempId });
     setThread(list);
   }
   renderDMThread();
@@ -1934,20 +1959,85 @@ function escapeHtml(str) {
 // -------------------- Toast notifications --------------------
 // Lightweight toast so we can retire the browser's native alert() for
 // user-facing feedback. Kind is 'info' | 'success' | 'warn' | 'error'.
-function showToast(message, kind = 'info', durationMs = 3500) {
+// They drop in at the top of the screen. Tap × or swipe one up (or sideways)
+// to dismiss it; tapping the text runs onTap when given (e.g. open that chat).
+const TOAST_MAX = 3;
+function showToast(message, kind = 'info', durationMs = 3500, onTap = null) {
   const container = document.getElementById('toast-container');
   if (!container) { /* fallback for very early errors */ alert(message); return; }
   const t = document.createElement('div');
-  t.className = `toast toast-${kind}`;
+  t.className = `toast toast-${kind}${onTap ? ' toast-action' : ''}`;
+  t.setAttribute('role', kind === 'error' ? 'alert' : 'status');
   const icons = { info: 'circle-info', success: 'circle-check', warn: 'triangle-exclamation', error: 'circle-xmark' };
-  t.innerHTML = `<i class="fa-solid fa-${icons[kind] || icons.info}"></i><span>${escapeHtml(message)}</span>`;
+  t.innerHTML = `<i class="fa-solid fa-${icons[kind] || icons.info}"></i><span class="toast-text">${escapeHtml(message)}</span>
+    <button class="toast-close" type="button" aria-label="Dismiss"><i class="fa-solid fa-xmark"></i></button>`;
   container.appendChild(t);
+  // Too many at once: the oldest go first.
+  const live = [...container.querySelectorAll('.toast:not(.leaving)')];
+  live.slice(0, Math.max(0, live.length - TOAST_MAX)).forEach(dismissToast);
+
+  let timer = null;
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => dismissToast(t), durationMs); };
+  arm();
+  // Hovering (computer) keeps it up so it can be read.
+  t.addEventListener('mouseenter', () => clearTimeout(timer));
+  t.addEventListener('mouseleave', arm);
+
+  t.querySelector('.toast-close').addEventListener('click', (e) => { e.stopPropagation(); dismissToast(t); });
+
+  // Swipe to dismiss.
+  let start = null, dx = 0, dy = 0, dragged = false;
+  t.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.toast-close')) return;
+    start = { x: e.clientX, y: e.clientY }; dx = dy = 0; dragged = false;
+    clearTimeout(timer);
+    try { t.setPointerCapture(e.pointerId); } catch (_) {}
+    t.classList.add('dragging');
+  });
+  t.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    dx = e.clientX - start.x; dy = Math.min(0, e.clientY - start.y);   // up or sideways only
+    if (Math.abs(dx) > 6 || dy < -6) dragged = true;
+    t.style.transform = `translate(${dx}px, ${dy}px)`;
+    t.style.opacity = String(Math.max(0.2, 1 - Math.max(Math.abs(dx), -dy) / 160));
+  });
+  const release = () => {
+    if (!start) return;
+    start = null;
+    t.classList.remove('dragging');
+    if (Math.abs(dx) > 70 || dy < -32) {
+      t.style.transform = Math.abs(dx) > 70 ? `translate(${dx > 0 ? 120 : -120}%, ${dy}px)` : `translateY(-140%)`;
+      t.style.opacity = '0';
+      dismissToast(t);
+    } else {
+      t.style.transform = ''; t.style.opacity = '';
+      arm();
+    }
+  };
+  t.addEventListener('pointerup', release);
+  t.addEventListener('pointercancel', release);
+  t.addEventListener('click', () => {
+    if (dragged) return;
+    if (onTap) { try { onTap(); } catch (_) {} }
+    dismissToast(t);
+  });
+
   // trigger enter animation
   requestAnimationFrame(() => t.classList.add('show'));
-  setTimeout(() => {
-    t.classList.remove('show');
-    setTimeout(() => t.remove(), 250);
-  }, durationMs);
+}
+
+function dismissToast(t) {
+  if (!t || t.classList.contains('leaving')) return;
+  t.classList.add('leaving');
+  t.classList.remove('show');
+  // Fold its space away so the others slide smoothly into its place.
+  t.style.height = t.offsetHeight + 'px';
+  void t.offsetHeight;
+  t.style.height = '0px';
+  t.style.paddingTop = t.style.paddingBottom = '0px';
+  t.style.borderWidth = '0px';
+  t.style.marginBottom = '-8px';   // swallow the gap between toasts too
+  setTimeout(() => t.remove(), 340);
 }
 
 function renderFeed() {
