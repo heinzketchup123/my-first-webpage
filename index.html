@@ -277,10 +277,12 @@
           <button class="review-trigger-btn" onclick="openCreateGroupModal()"><i class="fa-solid fa-plus"></i> New Group</button>
         </div>
 
-        <div class="filter-chips">
-          <button class="chip active" onclick="filterGroups('all', this)">All Groups</button>
-          <button class="chip" onclick="filterGroups('open', this)">Open Seats</button>
-          <button class="chip" onclick="filterGroups('mine', this)">My Groups</button>
+        <input id="group-search" type="search" class="auth-input group-search" autocomplete="off"
+               placeholder="Search by course, name or topic" oninput="renderGroups()" aria-label="Search groups" />
+        <div class="filter-chips" id="group-chips">
+          <button class="chip active" data-filter="all" onclick="filterGroups('all')">All Groups <span class="chip-count"></span></button>
+          <button class="chip" data-filter="open" onclick="filterGroups('open')">Open Seats <span class="chip-count"></span></button>
+          <button class="chip" data-filter="mine" onclick="filterGroups('mine')">My Groups <span class="chip-count"></span></button>
         </div>
 
         <div id="groups-list" class="stack-list">
@@ -353,20 +355,67 @@
             <p class="description">Estimate your GPA from your current grades. Saved on this device.</p>
           </div>
         </div>
-        
+
         <div class="gpa-dashboard-card">
-          <div class="gpa-score" id="calculated-gpa">0.00</div>
-          <span class="gpa-label">Cumulative Estimated GPA</span>
+          <div class="segmented gpa-mode" id="gpa-mode" role="group" aria-label="GPA type">
+            <button class="seg-btn active" data-mode="unweighted" onclick="setGpaMode('unweighted')">Unweighted</button>
+            <button class="seg-btn" data-mode="weighted" onclick="setGpaMode('weighted')">Weighted</button>
+          </div>
+          <div class="gpa-hero">
+            <div class="gpa-ring" aria-hidden="true">
+              <svg viewBox="0 0 120 120">
+                <circle class="gpa-ring-track" cx="60" cy="60" r="52" />
+                <circle class="gpa-ring-fill" id="gpa-ring-fill" cx="60" cy="60" r="52" />
+              </svg>
+            </div>
+            <div class="gpa-hero-text">
+              <div class="gpa-score" id="calculated-gpa">0.00</div>
+            </div>
+          </div>
+          <div class="gpa-hero-sub">
+            <span class="gpa-label" id="gpa-hero-label">Unweighted · out of 4.0</span>
+            <span class="gpa-letter" id="gpa-letter"></span>
+          </div>
+          <div class="gpa-stats">
+            <div><b id="gpa-term-val">–</b><small>This term</small></div>
+            <div><b id="gpa-cum-val">–</b><small>Overall</small></div>
+            <div><b id="gpa-credits-val">0</b><small>Credits</small></div>
+          </div>
         </div>
 
         <div class="section-header">
-          <h3>Course Grades</h3>
+          <h3>This term's courses</h3>
           <button class="text-btn" onclick="addGpaRow()">+ Add Course</button>
         </div>
 
         <div id="gpa-rows-container" class="stack-list">
           <!-- Dynamic GPA Rows -->
         </div>
+
+        <div class="pref-card gpa-extra">
+          <div class="pref-header">
+            <i class="fa-solid fa-clock-rotate-left"></i>
+            <h3>Past terms &amp; goal</h3>
+          </div>
+          <p class="admin-hint">Add the GPA you already have to see your overall GPA, and set a goal to see what you need this term.</p>
+          <div class="gpa-extra-grid">
+            <label class="gpa-field">
+              <span>GPA so far</span>
+              <input id="gpa-prev" class="auth-input" type="number" inputmode="decimal" min="0" max="5" step="0.01" placeholder="e.g. 3.40" oninput="updateGpaExtra()" />
+            </label>
+            <label class="gpa-field">
+              <span>Credits so far</span>
+              <input id="gpa-prev-credits" class="auth-input" type="number" inputmode="decimal" min="0" max="500" step="0.5" placeholder="e.g. 30" oninput="updateGpaExtra()" />
+            </label>
+            <label class="gpa-field">
+              <span>Goal GPA</span>
+              <input id="gpa-target" class="auth-input" type="number" inputmode="decimal" min="0" max="5" step="0.01" placeholder="e.g. 3.50" oninput="updateGpaExtra()" />
+            </label>
+          </div>
+          <p class="gpa-goal" id="gpa-goal" hidden></p>
+        </div>
+
+        <p class="admin-hint gpa-scale-note">A+/A = 4.0, A- = 3.7, B+ = 3.3 … D- = 0.7, F = 0. Weighted adds +0.5 for Honors and +1.0 for AP/IB/college classes (not for an F).</p>
       </section>
 
       <!-- Tab 8: Settings & Appearance -->
@@ -779,17 +828,20 @@
   <!-- Create Study Group Modal -->
   <div id="groupModal" class="modal-overlay">
     <div class="modal-content text-left">
-      <h2 class="modal-title">Create Study Group</h2>
+      <h2 class="modal-title" id="group-modal-title">Create Study Group</h2>
       <form onsubmit="createGroup(event)">
         <input type="text" id="group-name" class="auth-input modal-input" placeholder="Group name (e.g. Physics 101 Midterm Squad)" maxlength="80" required />
         <input type="text" id="group-course" class="auth-input modal-input" placeholder="Course (e.g. Physics 101)" maxlength="40" required />
         <input type="text" id="group-schedule" class="auth-input modal-input" placeholder="When (e.g. Tue/Thu 5:00 PM)" maxlength="60" />
         <input type="text" id="group-location" class="auth-input modal-input" placeholder="Where (e.g. Library Rm 204)" maxlength="60" />
-        <input type="number" id="group-max" class="auth-input modal-input" placeholder="Max members" min="2" max="30" value="6" />
+        <label class="group-max-row">
+          <span>Max members</span>
+          <input type="number" id="group-max" class="auth-input modal-input" placeholder="6" min="2" max="30" value="6" />
+        </label>
         <input type="text" id="group-topics" class="auth-input modal-input" placeholder="Topics (comma-separated)" maxlength="200" />
         <div class="modal-actions">
           <button type="button" class="secondary-btn" onclick="closeCreateGroupModal()">Cancel</button>
-          <button type="submit" class="primary-btn">Create Group</button>
+          <button type="submit" class="primary-btn" id="group-submit-btn">Create Group</button>
         </div>
       </form>
     </div>

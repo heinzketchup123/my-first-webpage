@@ -316,9 +316,7 @@ function initSupabaseRealtime() {
 async function loadAllSupabaseData() {
   await Promise.all([fetchFeed(), fetchGroups(), fetchFriendships(), fetchTeacherDirectory(),
                      fetchMyReviewCount(), fetchEvents(), fetchNotifications()]);
-  const savedGpa = localStorage.getItem(`gpa_${currentUserId}`);
-  gpaCourses = savedGpa ? JSON.parse(savedGpa) : [];
-  renderGpaRows();
+  loadGpa();
   updateNotifBadge();
 }
 
@@ -342,33 +340,56 @@ async function fetchGroups() {
     supabaseClient.from('study_group_members').select('group_id, user_id')
   ]);
   if (error) { showToast('Groups load failed: ' + error.message, 'error'); return; }
+  if (memRes?.error) console.warn('group members load failed:', memRes.error.message);
 
-  // Build member counts and my-membership set from the join table so the
-  // "members" and "joined" fields on the card are true per-user facts.
-  const counts = {};
-  const mine   = new Set();
-  (memRes?.data || []).forEach(m => {
-    counts[m.group_id] = (counts[m.group_id] || 0) + 1;
-    if (m.user_id === currentUserId) mine.add(m.group_id);
-  });
+  // Who is in each group comes from the join table, so member counts, the
+  // member list and "joined" are real per-person facts.
+  const members = {};
+  (memRes?.data || []).forEach(m => { (members[m.group_id] = members[m.group_id] || []).push(m.user_id); });
+  groupMembers = members;
 
-  studyGroups = (data || []).map(g => ({
-    ...g,
-    members: counts[g.id] || 0,
-    joined:  mine.has(g.id)
-  })).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  studyGroups = (data || []).map(g => {
+    const ids = members[g.id] || [];
+    return { ...g, members: ids.length, joined: ids.includes(currentUserId) };
+  }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   renderGroups();
+  refreshOpenGroup();
+
+  // Names for the faces and member lists (profiles are readable by everyone).
+  const ids = [...new Set(Object.values(members).flat().concat(studyGroups.map(g => g.creator_id)))].filter(Boolean);
+  const before = Object.keys(profileMap).length;
+  await fetchProfilesByIds(ids);
+  if (Object.keys(profileMap).length !== before) { renderGroups(); refreshOpenGroup(); }
 }
 
-// -------------------- Study group creation --------------------
+// -------------------- Study group creation / editing --------------------
 
-function openCreateGroupModal() {
+let editingGroupId = null;     // set while the form is editing an existing group
+
+function openCreateGroupModal(editId) {
   if (!currentUserId) return showToast('Sign in to create a study group.', 'warn');
   if (!currentSchoolId) return openSchoolPicker(true);
+  const g = editId ? findGroup(editId) : null;
+  editingGroupId = g ? String(g.id) : null;
+
+  const form = document.querySelector('#groupModal form');
+  form?.reset();
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
+  if (g) {
+    set('group-name', g.name); set('group-course', g.course);
+    set('group-schedule', g.schedule); set('group-location', g.location);
+    set('group-max', g.max || 6); set('group-topics', (g.topics || []).join(', '));
+    closeModalForce();
+  }
+  document.getElementById('group-max').min = g ? Math.max(2, g.members) : 2;
+  document.getElementById('group-modal-title').textContent = g ? 'Edit Study Group' : 'Create Study Group';
+  document.getElementById('group-submit-btn').textContent = g ? 'Save Changes' : 'Create Group';
   document.getElementById('groupModal').style.display = 'flex';
+  document.getElementById('group-name')?.focus();
 }
 function closeCreateGroupModal() {
   document.getElementById('groupModal').style.display = 'none';
+  editingGroupId = null;
 }
 
 async function createGroup(event) {
@@ -380,29 +401,54 @@ async function createGroup(event) {
   const schedule = document.getElementById('group-schedule').value.trim();
   const location = document.getElementById('group-location').value.trim();
   const max      = Math.max(2, Math.min(30, parseInt(document.getElementById('group-max').value, 10) || 6));
-  const topics   = document.getElementById('group-topics').value.split(',').map(s => s.trim()).filter(Boolean);
+  const seenTopics = new Set();   // drop repeats, ignoring capitals
+  const topics   = document.getElementById('group-topics').value.split(',').map(s => s.trim())
+    .filter(t => t && !seenTopics.has(t.toLowerCase()) && seenTopics.add(t.toLowerCase())).slice(0, 12);
   if (!name || !course) return showToast('Give the group a name and a course.', 'warn');
 
-  const host = currentHandle || currentUser.split('@')[0];
-  const { data, error } = await supabaseClient
-    .from('study_groups')
-    .insert([{
-      name, course, schedule, location, max,
-      topics, roster: [host],
-      host,
-      creator_id: currentUserId,
-      school_id: currentSchoolId
-    }])
-    .select().single();
-  if (error) return showToast('Could not create group: ' + error.message, 'error');
+  const btn = document.getElementById('group-submit-btn');
+  if (btn) btn.disabled = true;
+  try {
+    if (editingGroupId) {
+      const g = findGroup(editingGroupId);
+      if (g && max < g.members) {
+        return showToast(`${g.members} people are already in this group, so the limit can't be lower than that.`, 'warn', 4500);
+      }
+      const { data, error } = await supabaseClient.from('study_groups')
+        .update({ name, course, schedule, location, max, topics })
+        .eq('id', editingGroupId).select('id');
+      if (error || !data?.length) return showToast('Could not save: ' + (error?.message || 'only the host can edit this group'), 'error');
+      const id = editingGroupId;
+      showToast('Group updated.', 'success');
+      closeCreateGroupModal();
+      await fetchGroups();
+      openGroupDetailModal(id);
+      return;
+    }
 
-  // Auto-join the creator as the first member.
-  await supabaseClient.from('study_group_members').insert([{ group_id: data.id, user_id: currentUserId }]);
+    const host = currentHandle || currentUser.split('@')[0];
+    const { data, error } = await supabaseClient
+      .from('study_groups')
+      .insert([{
+        name, course, schedule, location, max,
+        topics, roster: [host],
+        host,
+        creator_id: currentUserId,
+        school_id: currentSchoolId
+      }])
+      .select().single();
+    if (error) return showToast('Could not create group: ' + error.message, 'error');
 
-  showToast('Group created — you\'re in!', 'success');
-  closeCreateGroupModal();
-  event.target.reset();
-  fetchGroups();
+    // Auto-join the creator as the first member.
+    await supabaseClient.from('study_group_members').insert([{ group_id: data.id, user_id: currentUserId }]);
+
+    showToast('Group created — you\'re in!', 'success');
+    closeCreateGroupModal();
+    event.target.reset();
+    fetchGroups();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // Authentication Handlers
@@ -456,6 +502,9 @@ async function logout() {
   currentSchool = null; currentSchoolId = null;
   friends = []; pendingIncoming = []; pendingOutgoing = [];
   campusFeed = []; studyGroups = []; gpaCourses = [];
+  gpaState = { mode: 'unweighted', prevGpa: '', prevCredits: '', target: '' };
+  ['gpa-prev', 'gpa-prev-credits', 'gpa-target'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  groupFilter = 'all'; groupMembers = {};
   selectedFriendId = null; dmMessages = [];
   teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
   calEvents = []; calRsvps = {}; isAdmin = false;
@@ -883,7 +932,7 @@ async function openNotification(id) {
     case 'join_decision':
       switchTab('settings-view');
       break;
-    case 'group_join':  switchTab('groups-view'); break;
+    case 'group_join':  switchTab('groups-view'); openGroupDetailModal(n.ref_id); break;
     case 'event_rsvp':  switchTab('events-view'); break;
     case 'helpful':     if (n.meta) openTeacherPage(n.meta); break;
     case 'promoted':    showAdminCard(); break;
@@ -2260,97 +2309,205 @@ async function submitPost(event) {
 }
 
 // Study Groups Engine
-function renderGroups(filter = 'all') {
+let groupFilter = 'all';       // 'all' | 'open' | 'mine', kept across live refreshes
+let groupMembers = {};         // group id -> [user ids]
+const groupBusy = new Set();   // groups with a join / leave on the way
+let openGroupId = null;        // group whose details are showing
+
+function findGroup(id) { return studyGroups.find(g => String(g.id) === String(id)); }
+function groupIsFull(g) { return g.members >= (g.max || 0); }
+function memberLabel(uid) {
+  if (uid === currentUserId) return 'You';
+  const p = profileMap[uid];
+  return (p && (p.display_name || p.handle)) || 'Student';
+}
+function groupHostName(g) {
+  if (g.creator_id === currentUserId) return 'You';
+  const p = g.creator_id && profileMap[g.creator_id];
+  return (p && (p.display_name || p.handle)) || g.host || 'A student';
+}
+
+function renderGroups(filter) {
+  if (filter) groupFilter = filter;
   renderHomeSide();
   const container = document.getElementById('groups-list');
   if (!container) return;
-  container.innerHTML = '';
 
-  const list = studyGroups.filter(g => {
-    if (filter === 'open') return g.members < g.max;
-    if (filter === 'mine') return g.joined;
-    return true;
+  const counts = {
+    all: studyGroups.length,
+    open: studyGroups.filter(g => !groupIsFull(g)).length,
+    mine: studyGroups.filter(g => g.joined).length
+  };
+  document.querySelectorAll('#group-chips .chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.filter === groupFilter);
+    const n = c.querySelector('.chip-count');
+    if (n) n.textContent = counts[c.dataset.filter] ? String(counts[c.dataset.filter]) : '';
   });
 
+  const q = (document.getElementById('group-search')?.value || '').trim().toLowerCase();
+  const matches = g => !q || [g.name, g.course, g.location, g.schedule, g.host, ...(g.topics || [])]
+    .some(v => String(v || '').toLowerCase().includes(q));
+  const list = studyGroups.filter(g =>
+    (groupFilter === 'open' ? !groupIsFull(g) : groupFilter === 'mine' ? g.joined : true) && matches(g));
+
   if (!list.length) {
+    const msg = q ? `No groups match "${q}".`
+      : groupFilter === 'mine' ? "You haven't joined any groups yet."
+      : groupFilter === 'open' ? 'No groups with open seats right now.'
+      : 'No study groups yet for your school.';
     container.innerHTML = `<div class="empty-state">
       <i class="fa-solid fa-user-group"></i>
-      <p>${filter === 'mine' ? "You haven't joined any groups yet." : filter === 'open' ? 'No groups with open seats right now.' : 'No study groups yet for your school.'}</p>
+      <p>${escapeHtml(msg)}</p>
+      ${q ? '' : '<button class="primary-btn" onclick="openCreateGroupModal()">+ Start a group</button>'}
     </div>`;
     return;
   }
+  container.innerHTML = list.map(groupCardHtml).join('');
+}
 
-  list.forEach(group => {
-    const card = document.createElement('div');
-    card.className = 'info-card';
-    const gid = escapeAttr(group.id);
-    const canDelete = isAdmin || (group.creator_id && group.creator_id === currentUserId);
-    card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-        <span style="font-weight:800; color:var(--accent-color);">${escapeHtml(group.course || '')}</span>
-        <span style="font-size:0.75rem; color:var(--sub-text-color);">${group.members}/${group.max} Members</span>
+function groupJoinButton(g) {
+  const gid = escapeAttr(g.id);
+  const busy = groupBusy.has(String(g.id)) ? ' disabled' : '';
+  if (g.joined) return `<button class="secondary-btn group-join-btn"${busy} onclick="toggleGroupJoin('${gid}')">Leave</button>`;
+  if (groupIsFull(g)) return `<button class="secondary-btn group-join-btn" disabled>Full</button>`;
+  return `<button class="primary-btn group-join-btn"${busy} onclick="toggleGroupJoin('${gid}')">Join</button>`;
+}
+
+function groupCardHtml(g) {
+  const gid = escapeAttr(g.id);
+  const max = g.max || 0;
+  const full = groupIsFull(g);
+  const left = Math.max(0, max - g.members);
+  const host = !!g.creator_id && g.creator_id === currentUserId;
+  const canDelete = isAdmin || host;
+  const ids = groupMembers[g.id] || [];
+  const faces = ids.slice(0, 4).map(uid => {
+    const n = memberLabel(uid);
+    return `<span class="group-face" title="${escapeAttr(n)}">${escapeHtml(n[0].toUpperCase())}</span>`;
+  }).join('') + (ids.length > 4 ? `<span class="group-face more">+${ids.length - 4}</span>` : '');
+  const topics = (g.topics || []);
+  const topicHtml = topics.slice(0, 3).map(t => `<span class="group-topic">${escapeHtml(t)}</span>`).join('')
+    + (topics.length > 3 ? `<span class="group-topic more">+${topics.length - 3}</span>` : '');
+  const pct = max ? Math.min(100, Math.round(g.members / max * 100)) : 0;
+  const badges = (host ? '<span class="group-badge host">Host</span>' : '')
+    + (g.joined && !host ? '<span class="group-badge joined"><i class="fa-solid fa-check"></i> Joined</span>' : '')
+    + (full ? '<span class="group-badge full">Full</span>' : '');
+  return `
+    <article class="info-card group-card${g.joined ? ' joined' : ''}">
+      <div class="group-card-top">
+        <span class="group-course">${escapeHtml(g.course || 'Study group')}</span>
+        <span class="group-badges">${badges}</span>
       </div>
-      <div style="font-weight:700; margin-bottom:6px; cursor:pointer;" onclick="openGroupDetailModal('${gid}')">${escapeHtml(group.name || '')}</div>
-      <div style="font-size:0.75rem; color:var(--sub-text-color); margin-bottom:10px;">
-        <i class="fa-solid fa-location-dot"></i> ${escapeHtml(group.location || 'Campus Center')} • <i class="fa-solid fa-clock"></i> ${escapeHtml(group.schedule || 'TBD')}
+      <button class="group-title" type="button" onclick="openGroupDetailModal('${gid}')">${escapeHtml(g.name || 'Untitled group')}</button>
+      <div class="group-meta">
+        <span><i class="fa-solid fa-location-dot"></i> ${escapeHtml(g.location || 'Place TBD')}</span>
+        <span><i class="fa-regular fa-clock"></i> ${escapeHtml(g.schedule || 'Time TBD')}</span>
       </div>
-      <div style="display:flex; gap:8px;">
-        <button class="secondary-btn" style="flex:1; padding:8px; font-size:0.8rem;" onclick="openGroupDetailModal('${gid}')">Details</button>
-        <button class="${group.joined ? 'secondary-btn active-state' : 'primary-btn'}" style="flex:1; padding:8px; font-size:0.8rem;" onclick="toggleGroupJoin('${gid}')">
-          ${group.joined ? 'Leave' : 'Join'}
-        </button>
-        ${canDelete ? `<button class="secondary-btn danger-text" style="padding:8px 12px;" onclick="deleteGroup('${gid}')" aria-label="Delete group"><i class="fa-solid fa-trash"></i></button>` : ''}
+      ${topicHtml ? `<div class="group-topics">${topicHtml}</div>` : ''}
+      <div class="group-seats">
+        <div class="group-faces">${faces}</div>
+        <span>${g.members}/${max} · ${full ? 'full' : `${left} seat${left === 1 ? '' : 's'} left`}</span>
       </div>
-    `;
-    container.appendChild(card);
-  });
+      <div class="group-bar${full ? ' full' : ''}"><span style="width:${pct}%"></span></div>
+      <div class="group-actions">
+        <button class="secondary-btn" onclick="openGroupDetailModal('${gid}')">Details</button>
+        ${groupJoinButton(g)}
+        ${canDelete ? `<button class="secondary-btn group-icon-btn danger-text" onclick="deleteGroup('${gid}')" aria-label="Delete group"><i class="fa-solid fa-trash"></i></button>` : ''}
+      </div>
+    </article>`;
+}
+
+function groupDetailHtml(g) {
+  const gid = escapeAttr(g.id);
+  const host = !!g.creator_id && g.creator_id === currentUserId;
+  const canDelete = isAdmin || host;
+  // Host first, then you, then everyone else.
+  const ids = (groupMembers[g.id] || []).slice().sort((a, b) =>
+    (b === g.creator_id) - (a === g.creator_id) || (b === currentUserId) - (a === currentUserId)
+    || memberLabel(a).localeCompare(memberLabel(b)));
+  const people = ids.map(uid => {
+    const n = memberLabel(uid);
+    const handle = uid !== currentUserId && profileMap[uid]?.handle ? `<small>@${escapeHtml(profileMap[uid].handle)}</small>` : '';
+    return `
+      <div class="group-member">
+        <span class="friend-avatar sm">${escapeHtml(n[0].toUpperCase())}</span>
+        <span class="group-member-name"><strong>${escapeHtml(n)}</strong>${handle}</span>
+        ${uid === g.creator_id ? '<span class="group-badge host">Host</span>' : ''}
+      </div>`;
+  }).join('') || '<p class="friends-empty-inner">No one has joined yet. Be the first!</p>';
+  const topics = (g.topics || []).map(t => `<span class="group-topic">${escapeHtml(t)}</span>`).join('')
+    || '<span class="group-topic">General study</span>';
+  const max = g.max || 0;
+  return `
+    <div class="group-detail">
+      <div class="group-course">${escapeHtml(g.course || 'Study group')}</div>
+      <div class="group-detail-rows">
+        <div><i class="fa-solid fa-location-dot"></i><span>${escapeHtml(g.location || 'Place TBD')}</span></div>
+        <div><i class="fa-regular fa-clock"></i><span>${escapeHtml(g.schedule || 'Time TBD')}</span></div>
+        <div><i class="fa-solid fa-user"></i><span>Hosted by ${escapeHtml(groupHostName(g))}</span></div>
+      </div>
+      <div class="group-detail-label">Topics</div>
+      <div class="group-topics">${topics}</div>
+      <div class="group-detail-label">Members · ${g.members}/${max}${groupIsFull(g) ? ' · full' : ''}</div>
+      <div class="group-member-list">${people}</div>
+      <div class="group-actions">
+        ${groupJoinButton(g)}
+        ${host ? `<button class="secondary-btn" onclick="openCreateGroupModal('${gid}')"><i class="fa-solid fa-pen"></i> Edit</button>` : ''}
+        ${canDelete ? `<button class="secondary-btn group-icon-btn danger-text" onclick="deleteGroup('${gid}')" aria-label="Delete group"><i class="fa-solid fa-trash"></i></button>` : ''}
+      </div>
+    </div>`;
 }
 
 function openGroupDetailModal(groupId) {
-  const group = studyGroups.find(g => g.id === groupId);
-  if (!group) return;
-
-  const topicsList = (group.topics || []).map(t => `<li style="font-size:0.8rem; color:var(--main-text-color);">${escapeHtml(t)}</li>`).join('') || '<li>General study</li>';
-  const rosterList = (group.roster || []).map(r => `<span style="font-size:0.72rem; background:var(--card-bg); border:1px solid var(--card-border); padding:2px 8px; border-radius:10px;">${escapeHtml(r)}</span>`).join(' ');
-
-  openModal(
-    group.name,
-    `
-      <div style="text-align:left;">
-        <p style="font-size:0.82rem; margin-bottom:8px;"><strong>Course:</strong> ${escapeHtml(group.course || '')}</p>
-        <p style="font-size:0.82rem; margin-bottom:8px;"><strong>Host:</strong> ${escapeHtml(group.host || 'Student Organizer')}</p>
-        <p style="font-size:0.82rem; margin-bottom:8px;"><strong>Location:</strong> ${escapeHtml(group.location || 'Library')}</p>
-        <p style="font-size:0.82rem; margin-bottom:10px;"><strong>Meeting Time:</strong> ${escapeHtml(group.schedule || 'Weekly')}</p>
-        <div style="font-weight:700; font-size:0.8rem; color:var(--accent-color); margin-bottom:4px;">Key Topics:</div>
-        <ul style="padding-left:18px; margin-bottom:12px;">${topicsList}</ul>
-        <div style="font-weight:700; font-size:0.8rem; color:var(--accent-color); margin-bottom:6px;">Active Members (${group.members}/${group.max}):</div>
-        <div style="display:flex; flex-wrap:wrap; gap:4px;">${rosterList}</div>
-      </div>
-    `
-  );
+  const g = findGroup(groupId);
+  if (!g) return showToast('That group is no longer available.', 'info');
+  openModal(g.name || 'Study group', groupDetailHtml(g));
+  openGroupId = String(g.id);
+  document.getElementById('detailModal').dataset.kind = 'group';
 }
 
-function filterGroups(type, btn) {
-  document.querySelectorAll('#groups-view .chip').forEach(c => c.classList.remove('active'));
-  btn.classList.add('active');
+// Keep an open details window in step with joins, leaves and edits.
+function refreshOpenGroup() {
+  const modal = document.getElementById('detailModal');
+  if (!openGroupId || !modal || modal.style.display !== 'flex' || modal.dataset.kind !== 'group') return;
+  const g = findGroup(openGroupId);
+  if (!g) { closeModalForce(); openGroupId = null; return; }
+  document.getElementById('modalTitle').textContent = g.name || 'Study group';
+  document.getElementById('modalBody').innerHTML = groupDetailHtml(g);
+}
+
+function filterGroups(type) {
   renderGroups(type);
 }
 
 async function toggleGroupJoin(id) {
   if (!currentUserId) return showToast('Sign in to join a group.', 'warn');
-  const group = studyGroups.find(g => g.id === id);
-  if (!group) return;
-  if (!group.joined && group.members >= group.max) return showToast('Group is full.', 'warn');
+  const g = findGroup(id);
+  if (!g) return;
+  const key = String(g.id);
+  if (groupBusy.has(key)) return;             // a second tap while the first is on its way
+  const leaving = g.joined;
+  if (!leaving && groupIsFull(g)) return showToast('This group is full.', 'warn');
+  if (leaving && g.creator_id === currentUserId
+      && !confirm("You're the host. Leave anyway? The group stays up and you can still edit or delete it.")) return;
 
-  if (group.joined) {
-    const { error } = await supabaseClient
-      .from('study_group_members').delete()
-      .eq('group_id', id).eq('user_id', currentUserId);
-    if (error) return showToast('Could not leave: ' + error.message, 'error');
-  } else {
-    const { error } = await supabaseClient
-      .from('study_group_members').insert([{ group_id: id, user_id: currentUserId }]);
-    if (error) return showToast('Could not join: ' + error.message, 'error');
+  // Show the change straight away; the refresh below corrects it if the database said no.
+  groupBusy.add(key);
+  const ids = (groupMembers[g.id] || []).filter(u => u !== currentUserId);
+  if (!leaving) ids.push(currentUserId);
+  groupMembers[g.id] = ids;
+  g.joined = !leaving; g.members = ids.length;
+  renderGroups(); refreshOpenGroup();
+
+  const table = supabaseClient.from('study_group_members');
+  const { error } = leaving
+    ? await table.delete().eq('group_id', g.id).eq('user_id', currentUserId)
+    : await table.insert([{ group_id: g.id, user_id: currentUserId }]);
+  groupBusy.delete(key);
+  if (error && error.code !== '23505') {        // 23505: already a member, which is fine
+    showToast((leaving ? 'Could not leave: ' : 'Could not join: ') + error.message, 'error');
+  } else if (!leaving) {
+    showToast(`You joined ${g.name || 'the group'}.`, 'success');
   }
   fetchGroups();
 }
@@ -3001,83 +3158,255 @@ async function deleteFeedPost(id) {
 }
 
 async function deleteGroup(id) {
-  const g = studyGroups.find(x => x.id === id);
-  if (!g || !confirm(`Delete the group "${g.name}"?`)) return;
-  const { data, error } = await supabaseClient.from('study_groups').delete().eq('id', id).select('id');
+  const g = findGroup(id);
+  if (!g || !confirm(`Delete the group "${g.name}"? Everyone in it will lose it.`)) return;
+  const { data, error } = await supabaseClient.from('study_groups').delete().eq('id', g.id).select('id');
   if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
+  studyGroups = studyGroups.filter(x => x !== g);
+  if (openGroupId === String(g.id)) { closeModalForce(); openGroupId = null; }
+  renderGroups();
   showToast('Group deleted.', 'success');
   fetchGroups();
 }
 
-// GPA Calculator
+// ==================== GPA calculator ====================
+// Courses for this term, plus an optional GPA/credits you already have
+// (for an overall GPA) and a goal. Saved per account on this device.
+const GPA_GRADES = [
+  ['A+', 4.0], ['A', 4.0], ['A-', 3.7], ['B+', 3.3], ['B', 3.0], ['B-', 2.7],
+  ['C+', 2.3], ['C', 2.0], ['C-', 1.7], ['D+', 1.3], ['D', 1.0], ['D-', 0.7], ['F', 0.0]
+];
+const GPA_POINTS = Object.fromEntries(GPA_GRADES);
+const GPA_LEVELS = [['reg', 'Regular', 0], ['hon', 'Honors', 0.5], ['ap', 'AP / IB', 1.0]];
+const GPA_BONUS = Object.fromEntries(GPA_LEVELS.map(([k, , b]) => [k, b]));
+let gpaState = { mode: 'unweighted', prevGpa: '', prevCredits: '', target: '' };
+
+function gpaKey() { return currentUserId ? `gpa_${currentUserId}` : null; }
+
+function loadGpa() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(gpaKey()) || 'null'); } catch (_) {}
+  // Older versions saved just the list of courses.
+  const raw = Array.isArray(saved) ? { courses: saved } : (saved || {});
+  gpaCourses = (raw.courses || []).map(c => ({
+    id: c.id || gpaId(),
+    name: String(c.name || ''),
+    grade: GPA_POINTS[c.grade] !== undefined ? c.grade : 'A',
+    level: GPA_BONUS[c.level] !== undefined ? c.level : 'reg',
+    credits: Number.isFinite(+c.credits) ? +c.credits : 3
+  }));
+  gpaState = {
+    mode: raw.mode === 'weighted' ? 'weighted' : 'unweighted',
+    prevGpa: raw.prevGpa ?? '', prevCredits: raw.prevCredits ?? '', target: raw.target ?? ''
+  };
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('gpa-prev', gpaState.prevGpa); set('gpa-prev-credits', gpaState.prevCredits); set('gpa-target', gpaState.target);
+  renderGpaRows();
+}
+
+function saveGpaLocal() {
+  const key = gpaKey();
+  if (!key) return;
+  try { localStorage.setItem(key, JSON.stringify({ v: 2, courses: gpaCourses, ...gpaState })); } catch (_) {}
+}
+
+function gpaId() { return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
 function renderGpaRows() {
   const container = document.getElementById('gpa-rows-container');
   if (!container) return;
-  container.innerHTML = '';
 
   if (!gpaCourses.length) {
     container.innerHTML = `<div class="empty-state">
       <i class="fa-solid fa-calculator"></i>
-      <p>No courses added yet. Add your first course to start tracking.</p>
+      <p>No courses added yet. Add your classes for this term to see your GPA.</p>
       <button class="primary-btn" onclick="addGpaRow()">+ Add Course</button>
     </div>`;
     calculateGPA();
     return;
   }
 
-  gpaCourses.forEach((c, idx) => {
-    const row = document.createElement('div');
-    row.className = 'gpa-row';
-    row.innerHTML = `
-      <input type="text" class="auth-input" value="${c.name}" placeholder="Course" onchange="updateGpaData(${idx}, 'name', this.value)" />
-      <select class="mini-select" onchange="updateGpaData(${idx}, 'grade', this.value)">
-        ${['A','A-','B+','B','B-','C+','C','F'].map(g => `<option value="${g}" ${c.grade===g?'selected':''}>${g}</option>`).join('')}
-      </select>
-      <input type="number" class="auth-input credit-input" value="${c.credits}" min="1" max="6" onchange="updateGpaData(${idx}, 'credits', parseInt(this.value)||0)" />
-      <i class="fa-solid fa-trash" style="color:#ff3b30; cursor:pointer;" onclick="deleteGpaRow(${idx})"></i>
-    `;
-    container.appendChild(row);
-  });
-
+  container.innerHTML = gpaCourses.map(c => {
+    const id = escapeAttr(c.id);
+    return `
+    <div class="gpa-row" data-id="${id}">
+      <input type="text" class="auth-input gpa-name" value="${escapeAttr(c.name)}" placeholder="Course name" maxlength="60"
+             aria-label="Course name" oninput="updateGpaData('${id}', 'name', this.value)" onkeydown="gpaNameKey(event)" />
+      <div class="gpa-fields">
+        <select class="mini-select gpa-grade" aria-label="Grade" onchange="updateGpaData('${id}', 'grade', this.value)">
+          ${GPA_GRADES.map(([g]) => `<option value="${g}" ${c.grade === g ? 'selected' : ''}>${g}</option>`).join('')}
+        </select>
+        <select class="mini-select gpa-level" aria-label="Level" onchange="updateGpaData('${id}', 'level', this.value)">
+          ${GPA_LEVELS.map(([k, label]) => `<option value="${k}" ${c.level === k ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+        <label class="gpa-credits" title="Credits">
+          <input type="number" class="auth-input credit-input" value="${escapeAttr(c.credits)}" min="0" max="10" step="0.5"
+                 inputmode="decimal" aria-label="Credits" oninput="updateGpaData('${id}', 'credits', this.value)" />
+          <span>cr</span>
+        </label>
+        <span class="gpa-pts" data-pts title="Grade points"></span>
+      </div>
+      <button class="gpa-del" type="button" onclick="deleteGpaRow('${id}')" aria-label="Remove ${escapeAttr(c.name || 'course')}">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>`;
+  }).join('');
   calculateGPA();
 }
 
 function addGpaRow() {
-  gpaCourses.push({ name: "New Course", grade: "A", credits: 3 });
+  const last = gpaCourses[gpaCourses.length - 1];
+  gpaCourses.push({ id: gpaId(), name: '', grade: 'A', level: 'reg', credits: last ? last.credits : 3 });
   saveGpaLocal();
   renderGpaRows();
+  const inputs = document.querySelectorAll('#gpa-rows-container .gpa-name');
+  inputs[inputs.length - 1]?.focus();
 }
 
-function updateGpaData(idx, key, val) {
-  gpaCourses[idx][key] = val;
+// Enter in a course name moves to the next course (or adds one).
+function gpaNameKey(e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const row = e.target.closest('.gpa-row');
+  if (row && row.nextElementSibling) row.nextElementSibling.querySelector('.gpa-name')?.focus();
+  else addGpaRow();
+}
+
+function updateGpaData(id, key, val) {
+  const c = gpaCourses.find(x => x.id === id);
+  if (!c) return;
+  if (key === 'credits') {
+    const n = parseFloat(val);
+    c.credits = Number.isFinite(n) ? Math.max(0, Math.min(10, n)) : 0;
+  } else {
+    c[key] = val;
+  }
   saveGpaLocal();
   calculateGPA();
 }
 
-function deleteGpaRow(idx) {
-  gpaCourses.splice(idx, 1);
+function deleteGpaRow(id) {
+  const i = gpaCourses.findIndex(x => x.id === id);
+  if (i < 0) return;
+  const [removed] = gpaCourses.splice(i, 1);
   saveGpaLocal();
   renderGpaRows();
+  // Tapping the pop-up puts it back.
+  showToast(`Removed ${removed.name || 'course'}. Tap to undo.`, 'info', 5000, () => {
+    if (gpaCourses.some(x => x.id === removed.id)) return;
+    gpaCourses.splice(Math.min(i, gpaCourses.length), 0, removed);
+    saveGpaLocal();
+    renderGpaRows();
+  });
 }
 
-function saveGpaLocal() {
-  if (currentUserId) localStorage.setItem(`gpa_${currentUserId}`, JSON.stringify(gpaCourses));
+function setGpaMode(mode) {
+  gpaState.mode = mode === 'weighted' ? 'weighted' : 'unweighted';
+  saveGpaLocal();
+  calculateGPA();
+}
+
+function updateGpaExtra() {
+  gpaState.prevGpa = document.getElementById('gpa-prev')?.value ?? '';
+  gpaState.prevCredits = document.getElementById('gpa-prev-credits')?.value ?? '';
+  gpaState.target = document.getElementById('gpa-target')?.value ?? '';
+  saveGpaLocal();
+  calculateGPA();
+}
+
+function coursePoints(c, weighted) {
+  const base = GPA_POINTS[c.grade] ?? 0;
+  return weighted && base > 0 ? base + (GPA_BONUS[c.level] || 0) : base;
+}
+
+function gpaLetter(g) {
+  const cut = [[3.85, 'A'], [3.5, 'A-'], [3.15, 'B+'], [2.85, 'B'], [2.5, 'B-'], [2.15, 'C+'],
+               [1.85, 'C'], [1.5, 'C-'], [1.15, 'D+'], [0.85, 'D'], [0.5, 'D-']];
+  const hit = cut.find(([min]) => g >= min);
+  return hit ? hit[1] : 'F';
 }
 
 function calculateGPA() {
-  const points = { 'A':4.0, 'A-':3.7, 'B+':3.3, 'B':3.0, 'B-':2.7, 'C+':2.3, 'C':2.0, 'F':0.0 };
-  let totalPts = 0, totalCredits = 0;
-
+  const weighted = gpaState.mode === 'weighted';
+  const scaleMax = weighted ? 5 : 4;
+  let pts = 0, credits = 0;
   gpaCourses.forEach(c => {
-    const pts = points[c.grade] || 0;
-    totalPts += pts * c.credits;
-    totalCredits += c.credits;
+    const cr = +c.credits || 0;
+    pts += coursePoints(c, weighted) * cr;
+    credits += cr;
+  });
+  const term = credits > 0 ? pts / credits : null;
+
+  const prevGpa = parseFloat(gpaState.prevGpa);
+  const prevCr = parseFloat(gpaState.prevCredits);
+  const hasPrev = Number.isFinite(prevGpa) && Number.isFinite(prevCr) && prevCr > 0;
+  const overall = hasPrev ? (prevGpa * prevCr + pts) / (prevCr + credits) : term;
+  const totalCr = +(credits + (hasPrev ? prevCr : 0)).toFixed(1);
+  const fmt = v => v === null || !Number.isFinite(v) ? '–' : v.toFixed(2);
+
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setText('calculated-gpa', fmt(overall ?? 0));
+  setText('gpa-hero-label', `${weighted ? 'Weighted' : 'Unweighted'} · out of ${scaleMax.toFixed(1)}`);
+  setText('gpa-letter', overall === null ? '' : `≈ ${gpaLetter(Math.min(4, overall))} average${hasPrev ? ' overall' : ''}`);
+  setText('gpa-term-val', fmt(term));
+  setText('gpa-cum-val', hasPrev ? fmt(overall) : '–');
+  setText('gpa-credits-val', String(totalCr));
+  // Home screen stats
+  setText('gpa-summary-val', fmt(overall ?? 0));
+  setText('total-credits-val', String(totalCr));
+
+  const ring = document.getElementById('gpa-ring-fill');
+  if (ring) {
+    const len = 2 * Math.PI * 52;
+    ring.style.strokeDasharray = `${len}`;
+    ring.style.strokeDashoffset = `${len * (1 - Math.max(0, Math.min(1, (overall || 0) / scaleMax)))}`;
+  }
+  document.querySelectorAll('#gpa-mode .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === gpaState.mode));
+
+  // What each course is worth, on its row.
+  document.querySelectorAll('#gpa-rows-container .gpa-row').forEach(row => {
+    const c = gpaCourses.find(x => x.id === row.dataset.id);
+    const out = row.querySelector('[data-pts]');
+    if (c && out) out.textContent = coursePoints(c, weighted).toFixed(1);
   });
 
-  const gpa = totalCredits > 0 ? (totalPts / totalCredits).toFixed(2) : "0.00";
-  document.getElementById('calculated-gpa').textContent = gpa;
-  document.getElementById('gpa-summary-val').textContent = gpa;
-  document.getElementById('total-credits-val').textContent = totalCredits;
+  renderGpaGoal({ weighted, scaleMax, credits, hasPrev, prevGpa, prevCr, overall });
+}
+
+// "What do I need this term?" from the goal and the GPA so far.
+function renderGpaGoal({ weighted, scaleMax, credits, hasPrev, prevGpa, prevCr, overall }) {
+  const el = document.getElementById('gpa-goal');
+  if (!el) return;
+  const target = parseFloat(gpaState.target);
+  el.className = 'gpa-goal';
+  if (!Number.isFinite(target)) { el.hidden = true; return; }
+  el.hidden = false;
+  const t = target.toFixed(2);
+  if (!hasPrev) {
+    if (overall === null) { el.textContent = `Add your courses to compare them with your goal of ${t}.`; return; }
+    const onTrack = overall >= target - 1e-9;
+    el.classList.add(onTrack ? 'good' : 'warn');
+    el.textContent = onTrack
+      ? `On track: ${overall.toFixed(2)} meets your goal of ${t}.`
+      : `${(target - overall).toFixed(2)} below your goal of ${t}. Add your GPA so far to see exactly what you need this term.`;
+    return;
+  }
+  if (credits <= 0) { el.textContent = `Add this term's courses to see what you need to reach ${t}.`; return; }
+  const need = (target * (prevCr + credits) - prevGpa * prevCr) / credits;
+  const best = (prevGpa * prevCr + scaleMax * credits) / (prevCr + credits);
+  if (need > scaleMax + 1e-9) {
+    el.classList.add('warn');
+    el.textContent = `${t} isn't reachable this term. A perfect ${scaleMax.toFixed(1)} this term would get you to ${best.toFixed(2)} overall.`;
+  } else if (need <= 0) {
+    el.classList.add('good');
+    el.textContent = `You'll stay at or above ${t} overall whatever you get this term.`;
+  } else {
+    const onTrack = overall >= target - 1e-9;
+    el.classList.add(onTrack ? 'good' : 'warn');
+    el.textContent = `To reach ${t} overall you need ${need.toFixed(2)} this term` +
+      (need <= 4 ? ` (about a${/^[AEF]/.test(gpaLetter(need)) ? 'n' : ''} ${gpaLetter(need)} average${weighted ? ' before the Honors/AP bonus' : ''}).` : '.') +
+      (onTrack ? ' Your grades right now get you there.' : ` Right now you're at ${overall.toFixed(2)}.`);
+  }
 }
 
 // ==================== Pomodoro timer ====================
@@ -3760,6 +4089,7 @@ function onTeacherDataChanged() {
 }
 
 function openModal(title, text) {
+  document.getElementById('detailModal').dataset.kind = '';
   document.getElementById('modalTitle').textContent = title;
   if (typeof text === 'string' && text.trim().startsWith('<')) {
     document.getElementById('modalBody').innerHTML = text;

@@ -515,14 +515,102 @@ button:active {
 .mini-select { background: var(--card-bg); color: var(--main-text-color); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 10px; font-size: 0.8rem; font-weight: 600; outline: none; }
 
 /* GPA Calc Specifics */
-.gpa-dashboard-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 20px; padding: 18px; width: 100%; text-align: center; margin-bottom: 16px; }
-.gpa-score { font-size: 2.8rem; font-weight: 800; color: var(--accent-color); }
-.gpa-label { color: var(--sub-text-color); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; }
+.gpa-dashboard-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 20px; padding: 14px 16px 16px; width: 100%; text-align: center; margin-bottom: 16px; }
+.gpa-mode { max-width: 260px; margin: 0 auto 12px; }
+.gpa-hero { position: relative; width: 140px; height: 140px; margin: 0 auto 8px; }
+.gpa-ring svg { width: 140px; height: 140px; transform: rotate(-90deg); display: block; }
+.gpa-hero-sub { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 12px; }
+.gpa-ring circle { fill: none; stroke-width: 10; }
+.gpa-ring-track { stroke: var(--input-bg); }
+.gpa-ring-fill {
+  stroke: var(--accent-color);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s cubic-bezier(0.2, 0.8, 0.3, 1);
+  filter: drop-shadow(0 0 6px var(--accent-color));
+}
+.gpa-hero-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+.gpa-score { font-size: 2.5rem; font-weight: 800; color: var(--accent-color); line-height: 1; font-variant-numeric: tabular-nums; }
+.gpa-label { color: var(--sub-text-color); font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.gpa-letter { font-size: 0.8rem; font-weight: 700; color: var(--main-text-color); }
+.gpa-letter:empty { display: none; }
+.gpa-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.gpa-stats > div {
+  background: var(--input-bg);
+  border-radius: 12px;
+  padding: 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gpa-stats b { font-size: 1.05rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.gpa-stats small { font-size: 0.64rem; font-weight: 700; color: var(--sub-text-color); text-transform: uppercase; letter-spacing: 0.03em; }
 
-.gpa-row { display: flex; gap: 8px; align-items: center; width: 100%; }
-.gpa-row input { flex: 2; }
-.gpa-row select { flex: 1; }
-.gpa-row .credit-input { flex: 1; }
+/* Course rows: name on top, grade / level / credits underneath (one line on a computer) */
+.gpa-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "name del" "fields fields";
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+}
+.gpa-row .gpa-name { grid-area: name; margin: 0; min-width: 0; }
+.gpa-fields { grid-area: fields; display: grid; grid-template-columns: 1fr 1.3fr 0.9fr auto; gap: 8px; align-items: center; }
+.gpa-fields .mini-select { width: 100%; min-width: 0; padding: 8px 6px; }
+.gpa-credits { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.gpa-credits .credit-input { margin: 0; min-width: 0; width: 100%; padding: 8px 6px; text-align: center; }
+.gpa-credits span { font-size: 0.7rem; font-weight: 700; color: var(--sub-text-color); }
+.gpa-pts {
+  min-width: 34px;
+  text-align: right;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--accent-color);
+  font-variant-numeric: tabular-nums;
+}
+.gpa-del {
+  grid-area: del;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sub-text-color);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.gpa-del:hover { background: var(--input-bg); color: var(--danger); }
+html.layout-desktop .gpa-row { grid-template-columns: 1fr 340px auto; grid-template-areas: "name fields del"; }
+
+.gpa-extra { margin-top: 14px; }
+.gpa-extra-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.gpa-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gpa-field span { font-size: 0.68rem; font-weight: 700; color: var(--sub-text-color); text-transform: uppercase; letter-spacing: 0.03em; }
+.gpa-field .auth-input { margin: 0; min-width: 0; }
+.gpa-goal {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.4;
+  background: var(--input-bg);
+}
+.gpa-goal.good { background: rgba(46, 204, 113, 0.12); color: var(--success); }
+.gpa-goal.warn { background: rgba(255, 177, 66, 0.12); color: var(--warning); }
+.gpa-scale-note { margin: 12px 2px 0; }
 
 /* Timer Display */
 .timer-display { font-size: 3rem; font-weight: 800; color: var(--accent-color); margin: 20px 0; }
@@ -1115,8 +1203,9 @@ body.density-spacious .stack-list { gap: 18px; }
 /* ---------- Teachers: directory ---------- */
 .teacher-dir-controls { display: flex; gap: 8px; width: 100%; margin-bottom: 8px; }
 #search-view .filter-chips { width: 100%; }
-/* Views are height:100% flex columns; without this, long lists squash the header rows. */
-#search-view > *, #teacher-view > * { flex-shrink: 0; }
+/* Views are height:100% flex columns; without this, long lists squash the header rows
+   (e.g. the Groups filter chips shrank to a 2px sliver). Chat sizes itself to fit. */
+.view:not(#chat-view) > * { flex-shrink: 0; }
 
 .teacher-card {
   display: flex;
@@ -3240,3 +3329,119 @@ html.ios-standalone body.light-mode::before {
 .admin-member-actions:empty { display: none; }
 .admin-member-actions .friend-btn-sm { white-space: nowrap; }
 .admin-member-actions .danger-text { color: var(--danger); }
+
+/* ---------- Study groups ---------- */
+.group-search { width: 100%; margin: 0 0 10px; }
+.chip-count:not(:empty) {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--input-bg);
+  font-size: 0.68rem;
+}
+.group-card { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.group-card.joined { border-color: var(--accent-soft-border); }
+.group-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.group-course {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-badges { display: flex; gap: 4px; flex-shrink: 0; }
+.group-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--input-bg);
+  color: var(--sub-text-color);
+}
+.group-badge.host { color: var(--warning); background: rgba(251, 191, 36, 0.14); }
+.group-badge.joined { color: var(--success); background: rgba(52, 211, 153, 0.14); }
+.group-badge.full { color: var(--danger); background: rgba(255, 107, 107, 0.14); }
+.group-title {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--main-text-color);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.group-title:hover { color: var(--accent-color); }
+.group-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.76rem; color: var(--sub-text-color); }
+.group-meta i { width: 14px; text-align: center; margin-right: 2px; }
+.group-topics { display: flex; flex-wrap: wrap; gap: 6px; }
+.group-topic {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--main-text-color);
+}
+.group-topic.more { color: var(--sub-text-color); }
+.group-seats { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.74rem; font-weight: 700; color: var(--sub-text-color); }
+.group-faces { display: flex; padding-left: 6px; min-height: 26px; }
+.group-face {
+  width: 26px;
+  height: 26px;
+  margin-left: -6px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--text-on-accent);
+  background: var(--accent-color);
+  border: 2px solid var(--card-bg-solid, #111);
+}
+.group-face.more { background: var(--input-bg); color: var(--main-text-color); }
+.group-bar { height: 5px; border-radius: 999px; background: var(--input-bg); overflow: hidden; }
+.group-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent-color); transition: width 0.4s ease; }
+.group-bar.full > span { background: var(--danger); }
+.group-actions { display: flex; gap: 8px; margin-top: 2px; }
+.group-actions > button { flex: 1; margin: 0; padding: 9px 10px; font-size: 0.8rem; }
+.group-actions > .group-icon-btn { flex: 0 0 auto; padding: 9px 12px; }
+.group-actions .danger-text { color: var(--danger); }
+.group-join-btn[disabled] { opacity: 0.6; cursor: default; }
+
+/* Group details window */
+.group-detail { text-align: left; display: flex; flex-direction: column; gap: 8px; }
+.group-detail-rows { display: flex; flex-direction: column; gap: 6px; font-size: 0.84rem; }
+.group-detail-rows > div { display: flex; align-items: center; gap: 10px; }
+.group-detail-rows i { width: 16px; text-align: center; color: var(--accent-color); }
+.group-detail-label {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sub-text-color);
+}
+.group-member-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+.group-member { display: flex; align-items: center; gap: 10px; }
+.group-member-name { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 0.84rem; }
+.group-member-name small { color: var(--sub-text-color); font-size: 0.72rem; }
+.group-detail .group-actions { margin-top: 8px; }
+
+/* Create / edit form */
+.group-max-row { display: flex; align-items: center; gap: 10px; }
+.group-max-row span { flex: 1; font-size: 0.82rem; font-weight: 700; color: var(--sub-text-color); }
+.group-max-row .modal-input { width: 90px; flex: 0 0 90px; text-align: center; }
+
