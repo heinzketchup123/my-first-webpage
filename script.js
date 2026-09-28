@@ -172,6 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
   applyAppearance();
   initSystemThemeListener();
   renderEmptyStates();
+  restorePlaceView();
   loadPomo();
   syncDeviceAlertsToggle();
   applyAdminFolds();   // set folds while the card is still hidden, so nothing animates on load
@@ -207,7 +208,7 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById('user-welcome-title').textContent = `Welcome, ${nameDisplay}`;
       ensureProfile().finally(() => {
         initSupabaseRealtime();
-        loadAllSupabaseData();
+        loadAllSupabaseData().then(restorePlaceDetails, () => {});
       });
     } else {
       currentUser = null;
@@ -776,6 +777,53 @@ function switchTab(viewId, element) {
   if (viewId === 'groups-view') { renderGroups(); }
   if (viewId === 'events-view') { fetchEvents(); }
   if (viewId === 'settings-view') { renderAdminPanel(); if (isAdmin) fetchAdminMembers(); }
+  savePlace();
+}
+
+// -------------------- Remember where you were --------------------
+// The page you're on (plus the teacher page or chat that's open) is saved on
+// this device, so refreshing or reopening the app brings you back to it.
+const PLACE_KEY = 'lastPlace';
+let placeQuiet = false;        // true while putting you back, so that doesn't overwrite it
+let startPlace = null;         // where you were when the app opened
+let placeDetailsDone = false;
+let lastTeacherId = null;
+
+function savePlace() {
+  if (placeQuiet) return;
+  const view = document.querySelector('.view.active-view')?.id;
+  if (!view) return;
+  const place = { view };
+  if (view === 'teacher-view' && lastTeacherId) place.teacher = String(lastTeacherId);
+  if (view === 'chat-view' && chatKey()) place.chat = chatKey();
+  try { localStorage.setItem(PLACE_KEY, JSON.stringify(place)); } catch (_) {}
+}
+
+// Straight away on load: show the page you were on (before any data arrives).
+function restorePlaceView() {
+  try { startPlace = JSON.parse(localStorage.getItem(PLACE_KEY) || 'null'); } catch (_) { startPlace = null; }
+  if (!startPlace || !startPlace.view) return;
+  // A teacher page needs its data first; show the Teachers list until then.
+  const view = startPlace.view === 'teacher-view' ? 'search-view' : startPlace.view;
+  if (!document.getElementById(view)?.classList.contains('view')) return;
+  placeQuiet = true;
+  try { switchTab(view); } finally { placeQuiet = false; }
+}
+
+// Once your friends, groups and teachers have loaded: reopen the teacher
+// page or chat you had open, unless you've already gone somewhere else.
+function restorePlaceDetails() {
+  if (placeDetailsDone || !startPlace) return;
+  placeDetailsDone = true;
+  const expected = startPlace.view === 'teacher-view' ? 'search-view' : startPlace.view;
+  if (!isViewActive(expected)) return;
+  if (startPlace.view === 'teacher-view' && startPlace.teacher) {
+    openTeacherPage(startPlace.teacher);
+  } else if (startPlace.view === 'chat-view' && startPlace.chat) {
+    const id = startPlace.chat.slice(2);
+    if (startPlace.chat.startsWith('d:') && friends.some(f => f.friend_id === id)) selectFriend(id);
+    else if (startPlace.chat.startsWith('g:') && studyGroups.some(g => String(g.id) === id && g.joined)) selectGroupChat(id);
+  }
 }
 
 // -------------------- Notifications --------------------
@@ -1705,6 +1753,7 @@ async function selectFriend(friendId) {
   selectedGroupChatId = null;
   renderFriendsStrip();
   markOpenThreadRead();
+  if (isViewActive('chat-view')) savePlace();
   await fetchThread();
 }
 
@@ -1718,6 +1767,7 @@ async function selectGroupChat(groupId) {
   selectedFriendId = null;
   renderFriendsStrip();
   markOpenThreadRead();
+  if (isViewActive('chat-view')) savePlace();
   await fetchThread();
 }
 
@@ -3902,6 +3952,7 @@ async function submitAddTeacher(event) {
 // ---------- Teacher page ----------
 
 async function openTeacherPage(id) {
+  lastTeacherId = id;
   teacherTab = 'review';
   currentTeacher = null;
   teacherPosts = [];
