@@ -295,7 +295,7 @@
         <div class="page-header">
           <div class="page-header-text">
             <h1 class="page-title">Messages</h1>
-            <p class="description">Private messages with your friends.</p>
+            <p class="description">Chat with your friends and your study groups.</p>
           </div>
           <button class="review-trigger-btn friends-open-btn" onclick="openFriendsModal()" aria-label="Friends">
             <i class="fa-solid fa-user-plus"></i> Friends
@@ -388,6 +388,14 @@
           <button class="text-btn" onclick="addGpaRow()">+ Add Course</button>
         </div>
 
+        <div class="gpa-input-row">
+          <span>Enter grades as</span>
+          <div class="segmented" id="gpa-input-mode" role="group" aria-label="Grade type">
+            <button class="seg-btn active" data-input="letter" onclick="setGpaInput('letter')">Letters</button>
+            <button class="seg-btn" data-input="percent" onclick="setGpaInput('percent')">Numbers (%)</button>
+          </div>
+        </div>
+
         <div id="gpa-rows-container" class="stack-list">
           <!-- Dynamic GPA Rows -->
         </div>
@@ -415,7 +423,8 @@
           <p class="gpa-goal" id="gpa-goal" hidden></p>
         </div>
 
-        <p class="admin-hint gpa-scale-note">A+/A = 4.0, A- = 3.7, B+ = 3.3 … D- = 0.7, F = 0. Weighted adds +0.5 for Honors and +1.0 for AP/IB/college classes (not for an F).</p>
+        <p class="admin-hint gpa-scale-note">A+/A = 4.0, A- = 3.7, B+ = 3.3 … D- = 0.7, F = 0. Weighted adds +0.5 for Honors and +1.0 for AP/IB/college classes (not for an F).
+          Numbers: 97+ A+, 93 A, 90 A-, 87 B+, 83 B, 80 B-, 77 C+, 73 C, 70 C-, 67 D+, 63 D, 60 D-, below 60 F.</p>
       </section>
 
       <!-- Tab 8: Settings & Appearance -->

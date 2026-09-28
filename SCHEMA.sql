@@ -1443,6 +1443,67 @@ grant execute on function public.admin_allow_back(uuid, uuid) to authenticated;
 grant execute on function public.admin_set_admin(uuid, boolean) to authenticated;
 
 -- ============================================================
+-- 6j. STUDY GROUP CHATS
+-- ============================================================
+-- Every study group has a chat. Only the group's members can read it or
+-- post in it; leaving the group takes you out of the chat, and deleting
+-- the group deletes its chat.
+create table if not exists public.group_messages (
+  id         uuid primary key default gen_random_uuid(),
+  group_id   uuid not null references public.study_groups(id) on delete cascade,
+  sender_id  uuid not null references auth.users(id) on delete cascade,
+  text       text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists group_messages_group_idx on public.group_messages (group_id, created_at desc);
+
+-- Security definer so the policies below can check membership without
+-- tripping over study_group_members' own policies.
+create or replace function public.is_group_member(gid uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.study_group_members m where m.group_id = gid and m.user_id = auth.uid());
+$$;
+grant execute on function public.is_group_member(uuid) to authenticated;
+
+alter table public.group_messages enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='group_messages' loop
+    execute format('drop policy if exists %I on public.group_messages', p.policyname);
+  end loop;
+end $$;
+create policy "group chat: members read"
+  on public.group_messages for select
+  using (public.is_group_member(group_id) or public.is_admin());
+create policy "group chat: members post"
+  on public.group_messages for insert
+  with check (
+    auth.uid() = sender_id
+    and public.is_group_member(group_id)
+    and char_length(trim(text)) between 1 and 280
+  );
+create policy "group chat: sender or admin deletes"
+  on public.group_messages for delete
+  using (auth.uid() = sender_id or public.is_admin());
+
+-- Tell the other members (folded per sender, like direct messages).
+create or replace function public.notify_group_message()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare m record; gname text; sname text;
+begin
+  select name into gname from public.study_groups where id = new.group_id;
+  sname := coalesce(public.notif_name(new.sender_id), 'Someone');
+  for m in select user_id from public.study_group_members
+            where group_id = new.group_id and user_id <> new.sender_id loop
+    perform public.push_notification(m.user_id, new.sender_id, sname, 'group_msg',
+      new.group_id::text, left(coalesce(new.text, ''), 90), gname);
+  end loop;
+  return null;
+end $$;
+drop trigger if exists notify_group_message on public.group_messages;
+create trigger notify_group_message after insert on public.group_messages
+  for each row execute function public.notify_group_message();
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -1456,7 +1517,8 @@ begin
   foreach t in array array['campus_chat','campus_feed','friendships','study_groups','study_group_members',
                            'teachers','teacher_posts','teacher_post_votes',
                            'campus_events','event_rsvps','school_join_requests','schools',
-                           'feed_reactions','feed_comments','notifications','admins','school_bans'] loop
+                           'feed_reactions','feed_comments','notifications','admins','school_bans',
+                           'group_messages'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'

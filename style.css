@@ -567,7 +567,7 @@ button:active {
   border: 1px solid var(--card-border);
 }
 .gpa-row .gpa-name { grid-area: name; margin: 0; min-width: 0; }
-.gpa-fields { grid-area: fields; display: grid; grid-template-columns: 1fr 1.3fr 0.9fr auto; gap: 8px; align-items: center; }
+.gpa-fields { grid-area: fields; display: grid; grid-template-columns: 1.25fr 1.25fr 0.9fr auto; gap: 8px; align-items: center; }
 .gpa-fields .mini-select { width: 100%; min-width: 0; padding: 8px 6px; }
 .gpa-credits { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .gpa-credits .credit-input { margin: 0; min-width: 0; width: 100%; padding: 8px 6px; text-align: center; }
@@ -592,7 +592,7 @@ button:active {
   transition: background 0.15s ease, color 0.15s ease;
 }
 .gpa-del:hover { background: var(--input-bg); color: var(--danger); }
-html.layout-desktop .gpa-row { grid-template-columns: 1fr 340px auto; grid-template-areas: "name fields del"; }
+html.layout-desktop .gpa-row { grid-template-columns: 1fr 390px auto; grid-template-areas: "name fields del"; }
 
 .gpa-extra { margin-top: 14px; }
 .gpa-extra-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -3445,3 +3445,77 @@ html.ios-standalone body.light-mode::before {
 .group-max-row span { flex: 1; font-size: 0.82rem; font-weight: 700; color: var(--sub-text-color); }
 .group-max-row .modal-input { width: 90px; flex: 0 0 90px; text-align: center; }
 
+
+/* ---------- Group chats ---------- */
+.friend-avatar.group-avatar {
+  border-radius: 12px;
+  background: var(--accent-muted);
+  color: var(--accent-color);
+  border: 1px solid var(--accent-soft-border);
+}
+.friend-avatar.group-avatar i { font-size: 0.85rem; }
+.add-chip .friend-avatar { background: var(--input-bg); color: var(--sub-text-color); }
+.add-chip .friend-avatar i { font-size: 0.85rem; }
+/* Section names in the chat list: shown on a computer; on a phone just a
+   thin line between the group chats and the friends. */
+.strip-label { display: none; }
+html:not(.layout-desktop) .friends-strip .strip-label:not(:first-child) {
+  display: block;
+  flex-shrink: 0;
+  width: 1px;
+  margin: 8px 2px;
+  background: var(--card-border);
+  font-size: 0;
+}
+html.layout-desktop #chat-view .strip-label {
+  display: block;
+  padding: 10px 10px 4px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sub-text-color);
+  text-align: left;
+}
+html.layout-desktop #chat-view .strip-label:first-child { padding-top: 2px; }
+.chat-sender {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--accent-color);
+  margin-bottom: 2px;
+}
+.chat-head-btn { margin: 0 0 0 auto; padding: 6px 12px; font-size: 0.78rem; width: auto; flex-shrink: 0; }
+.chat-thread-who { flex: 1; }
+.chat-unread-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+/* ---------- GPA: number grades ---------- */
+.gpa-input-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; margin: -2px 0 10px; }
+.gpa-input-row > span { font-size: 0.74rem; font-weight: 700; color: var(--sub-text-color); white-space: nowrap; }
+.gpa-input-row .segmented { flex: 0 1 240px; }
+.gpa-percent { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.gpa-percent .auth-input { margin: 0; min-width: 0; width: 100%; padding: 8px 6px; text-align: center; }
+.gpa-letter-chip {
+  flex-shrink: 0;
+  min-width: 26px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-align: center;
+  color: var(--main-text-color);
+}
+.gpa-letter-chip:empty::before { content: '–'; color: var(--sub-text-color); }
+.gpa-percent input { -moz-appearance: textfield; appearance: textfield; }
+.gpa-percent input::-webkit-inner-spin-button,
+.gpa-percent input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }

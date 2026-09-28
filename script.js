@@ -178,7 +178,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener('visibilitychange', markOpenThreadRead);
   document.addEventListener('visibilitychange', () => {
     // Back in the app with a chat open: pick up messages sent while away.
-    if (!document.hidden && selectedFriendId && isViewActive('chat-view')) fetchDMs(selectedFriendId, { quiet: true });
+    if (!document.hidden && chatKey() && isViewActive('chat-view')) fetchThread({ quiet: true });
   });
   let layoutTimer = null;
   try { localStorage.removeItem('iosFillScreen'); } catch (_) {}   // retired "fill the whole screen" test
@@ -292,7 +292,12 @@ function initSupabaseRealtime() {
     const wasLive = chatLive;
     chatLive = status === 'SUBSCRIBED';
     // Catch up on anything sent while the live connection was down.
-    if (chatLive && !wasLive && selectedFriendId) fetchDMs(selectedFriendId, { quiet: true });
+    if (chatLive && !wasLive && selectedFriendId) fetchThread({ quiet: true });
+  });
+  listen('group_messages', p => onChatChanged(p), status => {
+    const wasLive = groupLive;
+    groupLive = status === 'SUBSCRIBED';
+    if (groupLive && !wasLive && selectedGroupChatId) fetchThread({ quiet: true });
   });
   listen('friendships', () => fetchFriendships());
   listen('campus_feed', () => fetchFeed());
@@ -354,6 +359,12 @@ async function fetchGroups() {
   }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   renderGroups();
   refreshOpenGroup();
+  if (selectedGroupChatId) {
+    const g = findGroup(selectedGroupChatId);
+    if (!g || (!g.joined && !isAdmin)) { selectedGroupChatId = null; dmMessages = []; }
+    renderDMThread();
+  }
+  renderFriendsStrip();
 
   // Names for the faces and member lists (profiles are readable by everyone).
   const ids = [...new Set(Object.values(members).flat().concat(studyGroups.map(g => g.creator_id)))].filter(Boolean);
@@ -502,10 +513,10 @@ async function logout() {
   currentSchool = null; currentSchoolId = null;
   friends = []; pendingIncoming = []; pendingOutgoing = [];
   campusFeed = []; studyGroups = []; gpaCourses = [];
-  gpaState = { mode: 'unweighted', prevGpa: '', prevCredits: '', target: '' };
+  gpaState = { mode: 'unweighted', input: 'letter', prevGpa: '', prevCredits: '', target: '' };
   ['gpa-prev', 'gpa-prev-credits', 'gpa-target'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   groupFilter = 'all'; groupMembers = {};
-  selectedFriendId = null; dmMessages = [];
+  selectedFriendId = null; selectedGroupChatId = null; groupChatReady = null; dmMessages = [];
   teacherDir = []; currentTeacher = null; teacherPosts = []; myReviewCount = 0;
   calEvents = []; calRsvps = {}; isAdmin = false;
   adminJoinRequests = []; adminJoinCodes = {}; myJoinRequests = {};
@@ -753,7 +764,7 @@ function switchTab(viewId, element) {
 
   if (viewId === 'chat-view') {
     renderFriendsStrip(); renderDMThread({ toBottom: true, instant: true }); markOpenThreadRead();
-    if (selectedFriendId) fetchDMs(selectedFriendId, { quiet: true });   // catch up on anything missed
+    if (chatKey()) fetchThread({ quiet: true });   // catch up on anything missed
   }
   if (viewId === 'search-view') {
     // Keep the top-bar search (computer layout) showing the same text.
@@ -762,6 +773,7 @@ function switchTab(viewId, element) {
     if (g && p && g.value !== p.value) g.value = p.value;
     fetchTeacherDirectory();
   }
+  if (viewId === 'groups-view') { renderGroups(); }
   if (viewId === 'events-view') { fetchEvents(); }
   if (viewId === 'settings-view') { renderAdminPanel(); if (isAdmin) fetchAdminMembers(); }
 }
@@ -798,9 +810,9 @@ function onNotificationChanged(payload) {
     const known = notifications.find(n => n.id === row.id);
     const isNew = !known || known.times !== row.times || known.created_at !== row.created_at;
     if (isNew) {
-      const viewingThread = row.kind === 'dm' && !document.hidden
-        && isViewActive('chat-view') && selectedFriendId === row.ref_id;
-      if (row.kind === 'dm' && selectedFriendId === row.ref_id) fetchDMs(selectedFriendId, { quiet: true });
+      const forOpenChat = notifChatKey(row) && notifChatKey(row) === chatKey();
+      const viewingThread = forOpenChat && !document.hidden && isViewActive('chat-view');
+      if (forOpenChat) fetchThread({ quiet: true });
       if (!viewingThread) {
         const text = notifPlainText(row);
         // Tapping the pop-up opens it (the chat, the post, …).
@@ -808,7 +820,7 @@ function onNotificationChanged(payload) {
           if (!notifications.some(n => n.id === row.id)) notifications.unshift(row);
           openNotification(row.id);
         };
-        if (row.kind !== 'dm' || !isViewActive('chat-view')) showToast(text, 'info', 4000, open);
+        if (!isChatNotif(row) || !isViewActive('chat-view')) showToast(text, 'info', 4000, open);
         showDeviceAlert(row, text);
       }
       // An admin removed me from my school: the database already cut access,
@@ -830,7 +842,7 @@ function toggleNotifications(force) {
   if (notifsReady) {
     notifFresh = new Set(notifications.filter(n => !n.read_at).map(n => n.id));
     renderNotifications();
-    markNotificationsRead(n => n.kind !== 'dm');   // messages clear when you open the chat
+    markNotificationsRead(n => !isChatNotif(n));   // messages clear when you open the chat
   } else {
     renderNotifications();
     unreadNotifs = 0;
@@ -850,11 +862,21 @@ async function markNotificationsRead(pred) {
   if (error) console.warn('mark read failed:', error.message);
 }
 
-// Opening a chat marks that friend's message notifications as read.
+// Messages (from a friend, or in a group chat) show on the Messages tab
+// instead of the bell, and clear when you open that chat.
+function isChatNotif(n) { return n.kind === 'dm' || n.kind === 'group_msg'; }
+function notifChatKey(n) {
+  if (n.kind === 'dm') return 'd:' + n.ref_id;
+  if (n.kind === 'group_msg') return 'g:' + n.ref_id;
+  return null;
+}
+
+// Opening a chat marks its message notifications as read.
 function markOpenThreadRead() {
-  if (!selectedFriendId || document.hidden || !isViewActive('chat-view')) return;
-  if (notifications.some(n => n.kind === 'dm' && n.ref_id === selectedFriendId && !n.read_at)) {
-    markNotificationsRead(n => n.kind === 'dm' && n.ref_id === selectedFriendId);
+  const key = chatKey();
+  if (!key || document.hidden || !isViewActive('chat-view')) return;
+  if (notifications.some(n => !n.read_at && notifChatKey(n) === key)) {
+    markNotificationsRead(n => notifChatKey(n) === key);
   }
 }
 
@@ -874,6 +896,10 @@ function unreadDmCount(friendId) {
   return notifications.filter(n => n.kind === 'dm' && !n.read_at && (!friendId || n.ref_id === friendId))
     .reduce((sum, n) => sum + (n.times || 1), 0);
 }
+function unreadGroupCount(groupId) {
+  return notifications.filter(n => n.kind === 'group_msg' && !n.read_at && (!groupId || n.ref_id === String(groupId)))
+    .reduce((sum, n) => sum + (n.times || 1), 0);
+}
 
 function describeNotif(n) {
   const times = n.times || 1;
@@ -884,6 +910,7 @@ function describeNotif(n) {
   const em = REACTIONS.find(r => r.key === n.meta)?.em || '';
   switch (n.kind) {
     case 'dm':             return { icon: 'fa-comment',        html: `${who} sent you ${times > 1 ? times + ' messages' : 'a message'}`, sub: n.body };
+    case 'group_msg':      return { icon: 'fa-users',          html: `${who} ${times > 1 ? `sent ${times} messages` : 'sent a message'} in <strong>${escapeHtml(n.meta || 'your study group')}</strong>`, sub: n.body };
     case 'like':           return { icon: 'fa-heart',          html: `${who} liked ${post(n.body)}` };
     case 'reaction':       return { icon: 'fa-face-smile',     html: `${who} reacted ${em} to ${post(n.body)}` };
     case 'comment':        return { icon: 'fa-comment-dots',   html: `${who} ${times > 1 ? `left ${times} comments on` : 'commented on'} ${post(n.meta)}`, sub: n.body };
@@ -918,6 +945,10 @@ async function openNotification(id) {
     case 'friend_accept':
       switchTab('chat-view');
       if (friends.some(f => f.friend_id === n.ref_id)) selectFriend(n.ref_id);
+      break;
+    case 'group_msg':
+      switchTab('chat-view');
+      selectGroupChat(n.ref_id);
       break;
     case 'like': case 'reaction': case 'comment':
       openFeedPost(n.ref_id, n.kind === 'comment');
@@ -1053,15 +1084,17 @@ function renderNotifications() {
 }
 function updateNotifBadgeFromState() {
   unreadNotifs = notifsReady
-    ? notifications.filter(n => !n.read_at && n.kind !== 'dm').length
+    ? notifications.filter(n => !n.read_at && !isChatNotif(n)).length
     : pendingIncoming.length + (isAdmin ? adminJoinRequests.length : 0);
   updateNotifBadge();
   const chatBadge = document.getElementById('chat-nav-badge');
   if (chatBadge) {
-    const dms = notifsReady ? unreadDmCount() : 0;
+    const dms = notifsReady ? unreadDmCount() + unreadGroupCount() : 0;
     chatBadge.textContent = dms > 9 ? '9+' : String(dms);
     chatBadge.style.display = dms > 0 ? 'inline-flex' : 'none';
   }
+  // Unread counts on the group cards' Chat buttons.
+  if (isViewActive('groups-view')) renderGroups();
 }
 
 // Chat Engine — security-hardened
@@ -1534,26 +1567,36 @@ function renderFriendsStrip() {
   const strip = document.getElementById('friends-strip');
   if (!strip) return;
   const list = currentUserId ? friends : [];
-  if (!list.length) {
+  const groups = currentUserId ? studyGroups.filter(g => g.joined) : [];
+  if (!list.length && !groups.length) {
     strip.innerHTML = `
       <div class="friends-empty">
         <i class="fa-solid fa-user-plus"></i>
         <div class="friends-empty-text">
-          <span>${currentUserId ? 'No friends yet — add someone to start a private conversation.' : 'Sign in to message your friends.'}</span>
+          <span>${currentUserId ? 'No chats yet — add a friend, or join a study group to get its group chat.' : 'Sign in to message your friends.'}</span>
           ${currentUserId ? '<button class="primary-btn friends-empty-btn" onclick="openFriendsModal()">+ Add Friend</button>' : ''}
         </div>
       </div>`;
     return;
   }
-  strip.innerHTML = list.map(f => {
-    const unread = unreadDmCount(f.friend_id);
-    return `
+  const badge = n => n ? `<span class="chip-unread" aria-label="${n} unread">${n > 9 ? '9+' : n}</span>` : '';
+  const groupChips = groups.map(g => `
+    <button class="friend-chip group-chip ${String(g.id) === selectedGroupChatId ? 'active' : ''}" onclick="selectGroupChat('${escapeAttr(g.id)}')">
+      <span class="friend-avatar group-avatar"><i class="fa-solid fa-users"></i>${badge(unreadGroupCount(g.id))}</span>
+      <span class="friend-name">${escapeHtml(g.name || 'Study group')}</span>
+    </button>`).join('');
+  const friendChips = list.map(f => `
     <button class="friend-chip ${f.friend_id === selectedFriendId ? 'active' : ''}" onclick="selectFriend('${escapeAttr(f.friend_id)}')">
-      <span class="friend-avatar">${escapeHtml((f.display_name || f.handle || '?')[0].toUpperCase())}${unread
-        ? `<span class="chip-unread" aria-label="${unread} unread">${unread > 9 ? '9+' : unread}</span>` : ''}</span>
+      <span class="friend-avatar">${escapeHtml((f.display_name || f.handle || '?')[0].toUpperCase())}${badge(unreadDmCount(f.friend_id))}</span>
       <span class="friend-name">${escapeHtml(f.display_name || f.handle)}</span>
-    </button>`;
-  }).join('');
+    </button>`).join('');
+  strip.innerHTML =
+    (groups.length ? `<div class="strip-label">Group chats</div>${groupChips}` : '') +
+    (list.length ? `<div class="strip-label">Friends</div>${friendChips}` : `
+      <button class="friend-chip add-chip" onclick="openFriendsModal()">
+        <span class="friend-avatar"><i class="fa-solid fa-user-plus"></i></span>
+        <span class="friend-name">Add friend</span>
+      </button>`);
 }
 
 function escapeAttr(v) { return String(v).replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
@@ -1636,27 +1679,62 @@ function renderFriendsModalIfOpen() {
   renderFriendsBadge();
 }
 
-// -------------------- Direct Messages ------------------------
+// -------------------- Direct Messages + group chats ------------------------
+// One chat is open at a time: a friend (selectedFriendId) or a study group
+// you're in (selectedGroupChatId). Both kinds share the thread code below;
+// a thread is named by a key: 'd:<friend id>' or 'g:<group id>'.
+
+let selectedGroupChatId = null;
+let groupChatReady = null;     // false until SCHEMA.sql section 6j has been run
+
+function chatKey() {
+  if (selectedFriendId) return 'd:' + selectedFriendId;
+  if (selectedGroupChatId) return 'g:' + selectedGroupChatId;
+  return null;
+}
+function msgKey(m) {
+  if (m.group_id) return 'g:' + m.group_id;
+  return 'd:' + (m.sender_id === currentUserId ? m.recipient_id : m.sender_id);
+}
+function inThread(msg, key) { return !!key && msgKey(msg) === key; }
+function openGroupChat() { return selectedGroupChatId ? findGroup(selectedGroupChatId) : null; }
 
 async function selectFriend(friendId) {
   if (friendId !== selectedFriendId) dmMessages = [];
   selectedFriendId = friendId;
+  selectedGroupChatId = null;
   renderFriendsStrip();
   markOpenThreadRead();
-  await fetchDMs(friendId);
+  await fetchThread();
+}
+
+async function selectGroupChat(groupId) {
+  const g = findGroup(groupId);
+  if (!g) return showToast('That group is no longer available.', 'info');
+  if (!g.joined && !isAdmin) return showToast('Join the group to see its chat.', 'info');
+  const id = String(g.id);
+  if (id !== selectedGroupChatId) dmMessages = [];
+  selectedGroupChatId = id;
+  selectedFriendId = null;
+  renderFriendsStrip();
+  markOpenThreadRead();
+  await fetchThread();
+}
+
+// From a group card or its details: jump to that group's chat.
+function openGroupChatFromGroups(groupId) {
+  closeModalForce();
+  switchTab('chat-view');
+  selectGroupChat(groupId);
 }
 
 let dmFetchSeq = 0;
 let dmLastPoll = 0;
 let dmPollTimer = null;
-let dmRenderedFor = null;      // whose thread is on screen (to jump to the newest message on open)
+let dmRenderedFor = null;      // which thread is on screen (to jump to the newest message on open)
 let dmShown = new Set();       // message ids already drawn, so only new ones animate in
 let dmAutoScrollUntil = 0;
-
-function inThread(msg, friendId) {
-  return (msg.sender_id === currentUserId && msg.recipient_id === friendId)
-      || (msg.sender_id === friendId && msg.recipient_id === currentUserId);
-}
+let groupLive = false;         // true while live group-chat updates are connected
 
 // Confirmed messages in time order, then any still sending at the end.
 function setThread(list) {
@@ -1668,28 +1746,36 @@ function setThread(list) {
 // A message still sending that this saved row is the copy of.
 function pendingMatch(list, row) {
   return list.find(m => m.pending && m.sender_id === row.sender_id
-    && m.recipient_id === row.recipient_id && m.text === row.text);
+    && msgKey(m) === msgKey(row) && m.text === row.text);
 }
 
-async function fetchDMs(friendId, opts = {}) {
-  if (!friendId || !currentUserId || !isSupabaseConnected) {
+function missingTable(error) {
+  return !!error && (error.code === '42P01' || error.code === 'PGRST205' || /does not exist|could not find the table/i.test(error.message || ''));
+}
+
+// Load the open chat (newest 200, so long chats still show their latest messages).
+async function fetchThread(opts = {}) {
+  const key = chatKey();
+  if (!key || !currentUserId || !isSupabaseConnected) {
     dmMessages = []; renderDMThread(); return;
   }
   const seq = ++dmFetchSeq;
   const startedAt = Date.now();
   dmLastPoll = startedAt;
-  // Newest 200, so long conversations still show their latest messages.
-  const { data, error } = await supabaseClient
-    .from('campus_chat')
-    .select('*')
-    .or(
-      `and(sender_id.eq.${currentUserId},recipient_id.eq.${friendId}),`+
-      `and(sender_id.eq.${friendId},recipient_id.eq.${currentUserId})`
-    )
-    .order('created_at', { ascending: false })
-    .limit(200);
+  const isGroup = key.startsWith('g:');
+  const id = key.slice(2);
+  const query = isGroup
+    ? supabaseClient.from('group_messages').select('*').eq('group_id', id)
+    : supabaseClient.from('campus_chat').select('*').or(
+        `and(sender_id.eq.${currentUserId},recipient_id.eq.${id}),`+
+        `and(sender_id.eq.${id},recipient_id.eq.${currentUserId})`);
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(200);
   // Ignore a slow answer once a newer one was asked for, or after switching chats.
-  if (seq !== dmFetchSeq || friendId !== selectedFriendId) return;
+  if (seq !== dmFetchSeq || key !== chatKey()) return;
+  if (isGroup) {
+    if (missingTable(error)) { groupChatReady = false; dmMessages = []; renderDMThread(); return; }
+    if (!error) groupChatReady = true;
+  }
   if (error) {
     if (!opts.quiet) showToast('Could not load messages: ' + error.message, 'error');
     if (!data) return;
@@ -1699,37 +1785,44 @@ async function fetchDMs(friendId, opts = {}) {
   const known = new Set(dmMessages.map(m => m.id));
   const fresh = rows.filter(r => !known.has(r.id));
   const saved = m => {
-    const r = fresh.find(r => !r._was && r.sender_id === m.sender_id && r.recipient_id === m.recipient_id && r.text === m.text);
+    const r = fresh.find(r => !r._was && r.sender_id === m.sender_id && msgKey(r) === msgKey(m) && r.text === m.text);
     if (r) r._was = m.id;
     return !!r;
   };
   // Keep messages that arrived while this was loading, and ones still sending.
-  const keep = dmMessages.filter(m => inThread(m, friendId) && !ids.has(m.id)
+  const keep = dmMessages.filter(m => inThread(m, key) && !ids.has(m.id)
     && (m.pending ? !saved(m) : (m._addedAt || 0) > startedAt));
   const before = dmMessages.map(m => m.id).join();
   setThread(rows.concat(keep));
-  if (dmMessages.map(m => m.id).join() !== before || dmRenderedFor !== friendId) renderDMThread();
+  // Names for who said what in a group (only fetch people we don't know yet).
+  const unknown = isGroup ? [...new Set(dmMessages.map(m => m.sender_id))].filter(u => u && !profileMap[u]) : [];
+  if (unknown.length) fetchProfilesByIds(unknown).then(() => { if (key === chatKey()) renderDMThread(); });
+  if (dmMessages.map(m => m.id).join() !== before || dmRenderedFor !== key) renderDMThread();
 }
+// Older name, still used in a few places.
+function fetchDMs(_friendId, opts) { return fetchThread(opts); }
 
-// Live update from the database.
+// Live update from the database (direct messages or group chats).
 function onChatChanged(payload) {
-  if (!selectedFriendId) return;
+  const key = chatKey();
+  if (!key) return;
   const row = payload?.new;
   if (payload?.eventType === 'INSERT' && row?.id) {
-    if (inThread(row, selectedFriendId)) addDmToThread(row);
+    if (inThread(row, key)) addDmToThread(row);
     return;
   }
-  fetchDMs(selectedFriendId, { quiet: true });   // a deleted message, or something we can't place
+  fetchThread({ quiet: true });   // a deleted message, or something we can't place
 }
 
 function addDmToThread(row) {
-  if (!inThread(row, selectedFriendId) || dmMessages.some(m => m.id === row.id)) return;
+  if (!inThread(row, chatKey()) || dmMessages.some(m => m.id === row.id)) return;
   const list = dmMessages.slice();
   const stand = pendingMatch(list, row);
   if (stand) list.splice(list.indexOf(stand), 1);
   list.push({ ...row, _addedAt: Date.now(), _was: stand && stand.id });
   setThread(list);
   renderDMThread();
+  if (row.group_id && !profileMap[row.sender_id]) fetchProfilesByIds([row.sender_id]).then(() => renderDMThread());
 }
 
 // Backup for live updates: while a chat is open, check for new messages every
@@ -1737,15 +1830,31 @@ function addDmToThread(row) {
 function startDmPolling() {
   if (dmPollTimer) return;
   dmPollTimer = setInterval(() => {
-    if (!selectedFriendId || !currentUserId || !isSupabaseConnected) return;
+    const key = chatKey();
+    if (!key || !currentUserId || !isSupabaseConnected) return;
     if (document.hidden || !isViewActive('chat-view')) return;
-    if (Date.now() - dmLastPoll >= (chatLive ? 20000 : 4000)) fetchDMs(selectedFriendId, { quiet: true });
+    if (key.startsWith('g:') && groupChatReady === false) return;
+    const live = key.startsWith('g:') ? groupLive : chatLive;
+    if (Date.now() - dmLastPoll >= (live ? 20000 : 4000)) fetchThread({ quiet: true });
   }, 2000);
 }
 
 function renderChatThreadHead() {
   const head = document.getElementById('chat-thread-head');
   if (!head) return;
+  const g = openGroupChat();
+  if (g) {
+    const n = g.members || 0;
+    head.style.display = 'flex';
+    head.innerHTML = `
+      <span class="friend-avatar group-avatar"><i class="fa-solid fa-users"></i></span>
+      <div class="chat-thread-who">
+        <strong>${escapeHtml(g.name || 'Study group')}</strong>
+        <small>${escapeHtml(g.course || 'Study group')} · ${n} member${n === 1 ? '' : 's'}</small>
+      </div>
+      <button class="secondary-btn chat-head-btn" onclick="openGroupDetailModal('${escapeAttr(g.id)}')">Details</button>`;
+    return;
+  }
   const f = friends.find(x => x.friend_id === selectedFriendId);
   if (!f) { head.style.display = 'none'; head.innerHTML = ''; return; }
   const name = f.display_name || f.handle || 'Friend';
@@ -1779,37 +1888,43 @@ function renderDMThread(opts = {}) {
   const box = document.getElementById('app-chat-messages');
   if (!box) return;
   renderChatThreadHead();
+  const key = chatKey();
+  const group = openGroupChat();
   // Stay at the newest message unless you've scrolled up to read older ones.
-  const onScreen = dmRenderedFor === selectedFriendId;   // same chat as last time
+  const onScreen = dmRenderedFor === key;   // same chat as last time
   const stick = opts.toBottom || !onScreen || Date.now() < dmAutoScrollUntil
     || box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   const prevTop = box.scrollTop;
-  dmRenderedFor = selectedFriendId;
+  dmRenderedFor = key;
   if (!onScreen) dmShown = new Set();
 
+  const groupBlocked = !!group && (groupChatReady === false || !group.joined);
   const input = document.getElementById('app-chat-input');
   if (input) {
-    input.disabled = !selectedFriendId;
-    input.placeholder = selectedFriendId ? 'Message…' : 'Pick a friend to message';
+    input.disabled = !key || groupBlocked;
+    input.placeholder = !key ? 'Pick a chat'
+      : group ? (group.joined ? `Message ${group.name || 'the group'}…` : 'Only members can post here')
+      : 'Message…';
   }
 
-  if (!selectedFriendId) {
-    box.innerHTML = `<div class="chat-empty">
-      <i class="fa-regular fa-comments"></i>
-      <p>${friends.length ? 'Pick a friend above to start chatting.' : 'Add a friend to start a private conversation.'}</p>
-    </div>`;
+  const empty = (icon, text) => {
+    box.innerHTML = `<div class="chat-empty"><i class="${icon}"></i><p>${text}</p></div>`;
     updateChatCounter();
-    return;
+  };
+  if (!key) {
+    const hasGroups = studyGroups.some(g => g.joined);
+    return empty('fa-regular fa-comments', friends.length || hasGroups
+      ? 'Pick a friend or a study group to start chatting.'
+      : 'Add a friend or join a study group to start chatting.');
   }
-
+  if (group && groupChatReady === false) {
+    return empty('fa-solid fa-screwdriver-wrench',
+      'Group chats need a quick database update. An admin needs to run the updated SCHEMA.sql in Supabase (section 6j).');
+  }
   if (!dmMessages.length) {
+    if (group) return empty('fa-regular fa-hand', `No messages yet. Say hi to ${escapeHtml(group.name || 'the group')}!`);
     const f = friends.find(x => x.friend_id === selectedFriendId);
-    box.innerHTML = `<div class="chat-empty">
-      <i class="fa-regular fa-hand"></i>
-      <p>Say hi to ${escapeHtml(f?.display_name || f?.handle || 'your friend')}!</p>
-    </div>`;
-    updateChatCounter();
-    return;
+    return empty('fa-regular fa-hand', `Say hi to ${escapeHtml(f?.display_name || f?.handle || 'your friend')}!`);
   }
 
   let html = '';
@@ -1825,12 +1940,16 @@ function renderDMThread(opts = {}) {
     const withNext = sameRun(msg, dmMessages[i + 1]);
     const time = msg.pending ? 'Sending…'
       : escapeHtml(when ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : String(msg.time || ''));
+    // In a group, say who wrote each run of messages.
+    const sender = group && !mine && !withPrev
+      ? `<div class="chat-sender">${escapeHtml(memberLabel(msg.sender_id))}</div>` : '';
     // Animate only what's new since the last draw; a sent message that was
     // already showing as "Sending…" just fades up instead of popping in again.
     const motion = !onScreen || dmShown.has(msg.id) ? ''
       : (msg._was && dmShown.has(msg._was)) ? ' settled' : ' anim-in';
     html += `
       <div class="chat-bubble ${mine ? 'chat-bubble-mine' : 'chat-bubble-other'}${withPrev ? ' grouped' : ''}${withNext ? ' has-next' : ''}${msg.pending ? ' pending' : ''}${motion}">
+        ${sender}
         <div class="chat-text">${renderSafeMessage(String(msg.text || '').slice(0, CHAT_MAX_LEN))}</div>
         ${withNext && !msg.pending ? '' : `<span class="chat-time">${time}</span>`}
       </div>`;
@@ -1855,7 +1974,10 @@ async function sendDM(event) {
   const input = document.getElementById('app-chat-input');
   if (!input) return;
 
-  if (!selectedFriendId) return showToast('Pick a friend to message first.', 'warn');
+  const key = chatKey();
+  if (!key) return showToast('Pick a chat first.', 'warn');
+  const group = openGroupChat();
+  if (group && !group.joined) return showToast('Join the group to post in its chat.', 'warn');
 
   let text = String(input.value || '').replace(/\s+/g, ' ').trim();
   if (!text) return;
@@ -1869,17 +1991,17 @@ async function sendDM(event) {
     return;
   }
 
-  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
   if (!currentUserId || !isSupabaseConnected) return showToast('Sign in to send messages.', 'warn');
 
-  const friendId = selectedFriendId;
-  const msgObj = {
-    sender_id: currentUserId,
-    recipient_id: friendId,
-    user: sanitizeName(currentHandle || currentUser.split('@')[0]),
-    text, time: timeStr
-  };
+  const table = group ? 'group_messages' : 'campus_chat';
+  const msgObj = group
+    ? { group_id: group.id, sender_id: currentUserId, text }
+    : {
+        sender_id: currentUserId,
+        recipient_id: selectedFriendId,
+        user: sanitizeName(currentHandle || currentUser.split('@')[0]),
+        text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
   chatSendTimestamps.push(now);
   input.value = ''; updateChatCounter();
 
@@ -1888,18 +2010,19 @@ async function sendDM(event) {
   dmMessages.push({ ...msgObj, id: tempId, created_at: new Date().toISOString(), pending: true });
   renderDMThread({ toBottom: true });
 
-  const { data, error } = await supabaseClient.from('campus_chat').insert([msgObj]).select().single();
+  const { data, error } = await supabaseClient.from(table).insert([msgObj]).select().single();
   const i = dmMessages.findIndex(m => m.id === tempId);
   if (i >= 0) dmMessages.splice(i, 1);
   if (error) {
-    if (selectedFriendId === friendId) {
+    if (chatKey() === key) {
       renderDMThread();
       if (!input.value) { input.value = text; updateChatCounter(); }   // give the text back to retry
     }
-    return showToast('Message blocked — make sure you two are friends.', 'error', 4500);
+    if (group && missingTable(error)) { groupChatReady = false; renderDMThread(); return; }
+    return showToast(group ? "Couldn't send — you need to be in this group." : 'Message blocked — make sure you two are friends.', 'error', 4500);
   }
-  if (selectedFriendId !== friendId) return;
-  if (!data) return fetchDMs(friendId, { quiet: true });
+  if (chatKey() !== key) return;
+  if (!data) return fetchThread({ quiet: true });
   if (!dmMessages.some(m => m.id === data.id)) {
     const list = dmMessages.slice();
     list.push({ ...data, _addedAt: Date.now(), _was: tempId });
@@ -2411,6 +2534,7 @@ function groupCardHtml(g) {
       <div class="group-bar${full ? ' full' : ''}"><span style="width:${pct}%"></span></div>
       <div class="group-actions">
         <button class="secondary-btn" onclick="openGroupDetailModal('${gid}')">Details</button>
+        ${g.joined ? `<button class="secondary-btn" onclick="openGroupChatFromGroups('${gid}')"><i class="fa-solid fa-comments"></i> Chat${unreadGroupCount(g.id) ? ` <span class="chat-unread-dot">${unreadGroupCount(g.id)}</span>` : ''}</button>` : ''}
         ${groupJoinButton(g)}
         ${canDelete ? `<button class="secondary-btn group-icon-btn danger-text" onclick="deleteGroup('${gid}')" aria-label="Delete group"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
@@ -2451,6 +2575,7 @@ function groupDetailHtml(g) {
       <div class="group-detail-label">Members · ${g.members}/${max}${groupIsFull(g) ? ' · full' : ''}</div>
       <div class="group-member-list">${people}</div>
       <div class="group-actions">
+        ${g.joined ? `<button class="primary-btn" onclick="openGroupChatFromGroups('${gid}')"><i class="fa-solid fa-comments"></i> Group chat</button>` : ''}
         ${groupJoinButton(g)}
         ${host ? `<button class="secondary-btn" onclick="openCreateGroupModal('${gid}')"><i class="fa-solid fa-pen"></i> Edit</button>` : ''}
         ${canDelete ? `<button class="secondary-btn group-icon-btn danger-text" onclick="deleteGroup('${gid}')" aria-label="Delete group"><i class="fa-solid fa-trash"></i></button>` : ''}
@@ -3179,7 +3304,28 @@ const GPA_GRADES = [
 const GPA_POINTS = Object.fromEntries(GPA_GRADES);
 const GPA_LEVELS = [['reg', 'Regular', 0], ['hon', 'Honors', 0.5], ['ap', 'AP / IB', 1.0]];
 const GPA_BONUS = Object.fromEntries(GPA_LEVELS.map(([k, , b]) => [k, b]));
-let gpaState = { mode: 'unweighted', prevGpa: '', prevCredits: '', target: '' };
+// Number grades (percent) → letter, on the usual US scale.
+const GPA_PERCENT_CUTS = [[97, 'A+'], [93, 'A'], [90, 'A-'], [87, 'B+'], [83, 'B'], [80, 'B-'],
+                          [77, 'C+'], [73, 'C'], [70, 'C-'], [67, 'D+'], [63, 'D'], [60, 'D-']];
+// A typical percent for each letter, used when switching from letters to numbers.
+const GPA_TYPICAL = { 'A+': 98, A: 95, 'A-': 91, 'B+': 88, B: 85, 'B-': 81, 'C+': 78, C: 75, 'C-': 71,
+                      'D+': 68, D: 65, 'D-': 61, F: 50 };
+let gpaState = { mode: 'unweighted', input: 'letter', prevGpa: '', prevCredits: '', target: '' };
+
+function letterFromPercent(p) {
+  const hit = GPA_PERCENT_CUTS.find(([min]) => p >= min);
+  return hit ? hit[1] : 'F';
+}
+function toPercent(v) {
+  if (v === null || v === undefined || String(v).trim() === '') return null;
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? Math.max(0, Math.min(120, n)) : null;
+}
+// The letter a course counts as right now (null = no grade entered yet).
+function courseGrade(c) {
+  if (gpaState.input === 'percent') return c.percent === null ? null : letterFromPercent(c.percent);
+  return c.grade;
+}
 
 function gpaKey() { return currentUserId ? `gpa_${currentUserId}` : null; }
 
@@ -3193,10 +3339,12 @@ function loadGpa() {
     name: String(c.name || ''),
     grade: GPA_POINTS[c.grade] !== undefined ? c.grade : 'A',
     level: GPA_BONUS[c.level] !== undefined ? c.level : 'reg',
-    credits: Number.isFinite(+c.credits) ? +c.credits : 3
+    credits: Number.isFinite(+c.credits) ? +c.credits : 3,
+    percent: toPercent(c.percent)
   }));
   gpaState = {
     mode: raw.mode === 'weighted' ? 'weighted' : 'unweighted',
+    input: raw.input === 'percent' ? 'percent' : 'letter',
     prevGpa: raw.prevGpa ?? '', prevCredits: raw.prevCredits ?? '', target: raw.target ?? ''
   };
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
@@ -3215,6 +3363,7 @@ function gpaId() { return 'c' + Date.now().toString(36) + Math.random().toString
 function renderGpaRows() {
   const container = document.getElementById('gpa-rows-container');
   if (!container) return;
+  document.querySelectorAll('#gpa-input-mode .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.input === gpaState.input));
 
   if (!gpaCourses.length) {
     container.innerHTML = `<div class="empty-state">
@@ -3226,16 +3375,24 @@ function renderGpaRows() {
     return;
   }
 
+  const numbers = gpaState.input === 'percent';
   container.innerHTML = gpaCourses.map(c => {
     const id = escapeAttr(c.id);
+    const gradeField = numbers
+      ? `<label class="gpa-percent">
+          <input type="number" class="auth-input" value="${c.percent === null ? '' : escapeAttr(c.percent)}" min="0" max="120" step="0.1"
+                 inputmode="decimal" placeholder="%" aria-label="Grade in percent" oninput="updateGpaData('${id}', 'percent', this.value)" />
+          <span class="gpa-letter-chip" data-letter></span>
+        </label>`
+      : `<select class="mini-select gpa-grade" aria-label="Grade" onchange="updateGpaData('${id}', 'grade', this.value)">
+          ${GPA_GRADES.map(([g]) => `<option value="${g}" ${c.grade === g ? 'selected' : ''}>${g}</option>`).join('')}
+        </select>`;
     return `
     <div class="gpa-row" data-id="${id}">
       <input type="text" class="auth-input gpa-name" value="${escapeAttr(c.name)}" placeholder="Course name" maxlength="60"
              aria-label="Course name" oninput="updateGpaData('${id}', 'name', this.value)" onkeydown="gpaNameKey(event)" />
       <div class="gpa-fields">
-        <select class="mini-select gpa-grade" aria-label="Grade" onchange="updateGpaData('${id}', 'grade', this.value)">
-          ${GPA_GRADES.map(([g]) => `<option value="${g}" ${c.grade === g ? 'selected' : ''}>${g}</option>`).join('')}
-        </select>
+        ${gradeField}
         <select class="mini-select gpa-level" aria-label="Level" onchange="updateGpaData('${id}', 'level', this.value)">
           ${GPA_LEVELS.map(([k, label]) => `<option value="${k}" ${c.level === k ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
@@ -3256,7 +3413,7 @@ function renderGpaRows() {
 
 function addGpaRow() {
   const last = gpaCourses[gpaCourses.length - 1];
-  gpaCourses.push({ id: gpaId(), name: '', grade: 'A', level: 'reg', credits: last ? last.credits : 3 });
+  gpaCourses.push({ id: gpaId(), name: '', grade: 'A', level: 'reg', credits: last ? last.credits : 3, percent: null });
   saveGpaLocal();
   renderGpaRows();
   const inputs = document.querySelectorAll('#gpa-rows-container .gpa-name');
@@ -3278,6 +3435,8 @@ function updateGpaData(id, key, val) {
   if (key === 'credits') {
     const n = parseFloat(val);
     c.credits = Number.isFinite(n) ? Math.max(0, Math.min(10, n)) : 0;
+  } else if (key === 'percent') {
+    c.percent = toPercent(val);
   } else {
     c[key] = val;
   }
@@ -3300,6 +3459,19 @@ function deleteGpaRow(id) {
   });
 }
 
+// Letters or numbers: carry each course's grade across so nothing is lost.
+function setGpaInput(input) {
+  const next = input === 'percent' ? 'percent' : 'letter';
+  if (next === gpaState.input) return;
+  gpaCourses.forEach(c => {
+    if (next === 'percent' && c.percent === null) c.percent = GPA_TYPICAL[c.grade] ?? null;
+    if (next === 'letter' && c.percent !== null) c.grade = letterFromPercent(c.percent);
+  });
+  gpaState.input = next;
+  saveGpaLocal();
+  renderGpaRows();
+}
+
 function setGpaMode(mode) {
   gpaState.mode = mode === 'weighted' ? 'weighted' : 'unweighted';
   saveGpaLocal();
@@ -3315,7 +3487,9 @@ function updateGpaExtra() {
 }
 
 function coursePoints(c, weighted) {
-  const base = GPA_POINTS[c.grade] ?? 0;
+  const grade = courseGrade(c);
+  if (grade === null) return null;          // no number typed in yet
+  const base = GPA_POINTS[grade] ?? 0;
   return weighted && base > 0 ? base + (GPA_BONUS[c.level] || 0) : base;
 }
 
@@ -3331,8 +3505,10 @@ function calculateGPA() {
   const scaleMax = weighted ? 5 : 4;
   let pts = 0, credits = 0;
   gpaCourses.forEach(c => {
+    const cp = coursePoints(c, weighted);
+    if (cp === null) return;                 // not graded yet: left out
     const cr = +c.credits || 0;
-    pts += coursePoints(c, weighted) * cr;
+    pts += cp * cr;
     credits += cr;
   });
   const term = credits > 0 ? pts / credits : null;
@@ -3367,7 +3543,10 @@ function calculateGPA() {
   document.querySelectorAll('#gpa-rows-container .gpa-row').forEach(row => {
     const c = gpaCourses.find(x => x.id === row.dataset.id);
     const out = row.querySelector('[data-pts]');
-    if (c && out) out.textContent = coursePoints(c, weighted).toFixed(1);
+    const cp = c ? coursePoints(c, weighted) : null;
+    if (out) out.textContent = cp === null ? '–' : cp.toFixed(1);
+    const letter = row.querySelector('[data-letter]');
+    if (letter && c) letter.textContent = courseGrade(c) || '';
   });
 
   renderGpaGoal({ weighted, scaleMax, credits, hasPrev, prevGpa, prevCr, overall });
