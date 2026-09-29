@@ -2707,7 +2707,6 @@ html.layout-desktop .nav-label { font-size: 0.9rem; font-weight: 600; }
 html.layout-desktop .nav-btn:hover { background: var(--input-bg); color: var(--main-text-color); }
 html.layout-desktop .nav-btn.active { background: var(--accent-muted); color: var(--accent-color); }
 html.layout-desktop .nav-btn.active i { color: var(--accent-color); }
-html.layout-desktop .nav-settings { margin-top: auto; }
 html.layout-desktop .nav-badge { top: 50%; right: 12px; transform: translateY(-50%); }
 
 /* Top bar: just the actions, on the right */
@@ -2863,8 +2862,6 @@ html.layout-desktop .toast-container { top: calc(76px + var(--safe-top, 0px)); b
 /* Layout switching is only offered on screens wide enough for both layouts */
 html:not(.wide-screen) .wide-only { display: none !important; }
 html.layout-phone.wide-screen .layout-quick-btn { display: inline-flex !important; align-items: center; justify-content: center; }
-html.layout-desktop .nav-layout-switch { margin-top: auto; }
-html.layout-desktop .nav-layout-switch + .nav-settings { margin-top: 0; }
 
 /* =====================================================================
    COMPUTER LAYOUT POLISH
@@ -4003,3 +4000,68 @@ html.layout-desktop #teacher-directory { grid-template-columns: repeat(auto-fill
   .teacher-tab { padding: 9px 5px; font-size: 0.72rem; gap: 3px; }
   .teacher-tab .tt-count { min-width: 16px; }
 }
+
+/* ---------- Supplies: separate lists (Required, For labs...) ---------- */
+.tp-list-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.tp-list-btn { display: inline-flex; align-items: center; gap: 5px; }
+.tp-list-btn i { font-size: 0.72rem; }
+.tp-list-btn b {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent-muted);
+  color: var(--accent-color);
+  font-size: 0.68rem;
+  line-height: 18px;
+  text-align: center;
+}
+.tp-list-btn.on b { background: rgba(0, 0, 0, 0.18); color: inherit; }
+#tp-item-label b { color: var(--accent-color); }
+.tp-item-suggest { margin-top: 8px; }
+.tp-lists { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 6px; }
+.tp-list-group {
+  padding: 9px 11px;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--input-bg);
+  transition: border-color 0.15s ease;
+}
+.tp-list-group.active { border-color: var(--accent-soft-border); }
+.tp-list-group .tp-items { margin: 7px 0 0; }
+.tp-list-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--sub-text-color);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+.tp-list-group.active .tp-list-group-head { color: var(--accent-color); }
+.tp-list-group-head span { margin-left: auto; font-weight: 700; letter-spacing: 0; }
+
+.supply-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-color);
+}
+.supply-group-head i { width: 14px; text-align: center; }
+.supply-group-head span { margin-left: auto; color: var(--sub-text-color); letter-spacing: 0; }
+.supply-summary .supply-group-head { padding: 0 8px; margin-bottom: 2px; }
+.supply-group + .supply-group { padding-top: 10px; border-top: 1px solid var(--card-border); }
+.tpost-supplies { display: flex; flex-direction: column; gap: 10px; }
+.tpost-supplies:empty { display: none; }
+.tpost-supply-group .supply-group-head { margin-bottom: 6px; }

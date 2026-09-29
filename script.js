@@ -4165,13 +4165,42 @@ const POST_KIND_META = {
   supplies: {
     title: 'Add a supply list', editTitle: 'Edit supply list', bodyLabel: 'Anything else? (optional)',
     placeholder: 'Where to get them, which kind, what you actually ended up using...',
-    tags: ['Required', 'Recommended', 'Bring every day', 'For labs', 'For projects'],
-    tagLabel: 'How needed?', maxTags: 2, empty: 'No supply lists yet. Know what this class needs?', cta: '+ Add supplies'
+    tags: [], tagLabel: '', maxTags: 0,   // supplies go on separate lists instead (SUPPLY_LISTS)
+    empty: 'No supply lists yet. Know what this class needs?', cta: '+ Add supplies'
   }
 };
 // Quick picks in the supply-list form (plus whatever others listed for this teacher).
 const COMMON_SUPPLIES = ['Notebook', 'Binder', 'Folder', 'Pencils', 'Pens', 'Highlighters', 'Graphing calculator',
                          'Laptop / Chromebook', 'Headphones', 'Textbook', 'Lab goggles', 'Colored pencils', 'Index cards'];
+// A supply post keeps its items on separate lists. Each item is saved as
+// "list|Item" (e.g. "labs|Lab goggles"); older posts without a list go under
+// the list their tag named, or Other.
+const SUPPLY_LISTS = [
+  { key: 'required', label: 'Required', icon: 'circle-exclamation' },
+  { key: 'recommended', label: 'Recommended', icon: 'thumbs-up' },
+  { key: 'daily', label: 'Bring every day', icon: 'bag-shopping' },
+  { key: 'labs', label: 'For labs', icon: 'flask' },
+  { key: 'projects', label: 'For projects', icon: 'scissors' },
+  { key: 'other', label: 'Other', icon: 'ellipsis' }
+];
+const SUPPLY_LIST_BY_KEY = Object.fromEntries(SUPPLY_LISTS.map(l => [l.key, l]));
+function supplyEntries(post) {
+  const fallback = (SUPPLY_LISTS.find(l => (post.tags || []).includes(l.label)) || SUPPLY_LIST_BY_KEY.other).key;
+  return (post.items || []).map(raw => {
+    const m = /^([a-z]+)\|(.*)$/.exec(String(raw));
+    return m && SUPPLY_LIST_BY_KEY[m[1]] ? { list: m[1], name: m[2].trim() } : { list: fallback, name: String(raw).trim() };
+  }).filter(e => e.name);
+}
+function groupSupplies(entries) {
+  return SUPPLY_LISTS.map(l => ({ ...l, items: entries.filter(e => e.list === l.key) })).filter(g => g.items.length);
+}
+// What a supply post says when nobody wrote a note: "Required: Pencils, Binder".
+function supplyBodyText(entries) {
+  return groupSupplies(entries).map(g => `${g.label}: ${g.items.map(e => e.name).join(', ')}`).join('\n');
+}
+function isAutoSupplyBody(p) {
+  return p.body === supplyBodyText(supplyEntries(p)) || p.body === (p.items || []).join(', ');
+}
 // Same item however it's written: "Pencils", "pencil ", "PENCILS" → "pencil".
 function supplyKey(item) {
   let k = String(item || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -4669,30 +4698,41 @@ function renderTeacherHero() {
 // listed it, most-mentioned first. Ticks ("I've got this") stay on this device.
 function supplySummaryHtml(posts) {
   const items = {};
+  let lists = 0;
   posts.forEach(p => {
+    const entries = supplyEntries(p);
+    if (entries.length) lists += 1;
     const seen = new Set();
-    (p.items || []).forEach(raw => {
-      const key = supplyKey(raw);
+    entries.forEach(({ list, name }) => {
+      const key = supplyKey(name);
       if (!key || seen.has(key)) return;
       seen.add(key);
-      const it = items[key] = items[key] || { key, n: 0, names: {} };
+      const it = items[key] = items[key] || { key, n: 0, names: {}, lists: {} };
       it.n += 1;
-      const label = String(raw).trim();
-      it.names[label] = (it.names[label] || 0) + 1;
+      it.names[name] = (it.names[name] || 0) + 1;
+      it.lists[list] = (it.lists[list] || 0) + 1;
     });
   });
+  const order = SUPPLY_LISTS.map(l => l.key);
   const rows = Object.values(items)
-    // Show the spelling most people used (capitalised when there's a tie).
+    // Show the spelling most people used (capitalised when there's a tie),
+    // on the list most people put it on (the stricter one when it's a tie).
     .map(it => {
       const best = Object.entries(it.names).sort((a, b) =>
         b[1] - a[1] || (/^[A-Z]/.test(b[0]) - /^[A-Z]/.test(a[0])) || a[0].localeCompare(b[0]))[0][0];
-      return { ...it, label: best.charAt(0).toUpperCase() + best.slice(1) };
+      const list = Object.entries(it.lists).sort((a, b) => b[1] - a[1] || order.indexOf(a[0]) - order.indexOf(b[0]))[0][0];
+      return { ...it, list, label: best.charAt(0).toUpperCase() + best.slice(1) };
     })
     .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
   if (!rows.length) return '';
   const have = supplyChecks();
   const got = rows.filter(r => have.has(r.key)).length;
-  const lists = posts.filter(p => (p.items || []).length).length;
+  const countTitle = r => {
+    const also = Object.entries(r.lists).filter(([k]) => k !== r.list)
+      .map(([k, n]) => `${n} put it under ${SUPPLY_LIST_BY_KEY[k].label}`);
+    return `${r.n} student${r.n === 1 ? '' : 's'} listed this${also.length ? ` (${also.join(', ')})` : ''}`;
+  };
+  const groups = SUPPLY_LISTS.map(l => ({ ...l, rows: rows.filter(r => r.list === l.key) })).filter(g => g.rows.length);
   return `
     <div class="info-card supply-summary">
       <div class="supply-summary-head">
@@ -4702,16 +4742,21 @@ function supplySummaryHtml(posts) {
         </div>
         <span class="supply-progress ${got === rows.length ? 'done' : ''}">${got}/${rows.length}</span>
       </div>
-      <ul class="supply-rows">
-        ${rows.map(r => `
-          <li>
-            <label class="${have.has(r.key) ? 'got' : ''}">
-              <input type="checkbox" ${have.has(r.key) ? 'checked' : ''} onchange="toggleSupplyCheck('${escapeAttr(r.key)}', this.checked)" />
-              <span class="supply-name">${escapeHtml(r.label)}</span>
-              <span class="supply-count" title="${r.n} student${r.n === 1 ? '' : 's'} listed this">${r.n} ${r.n === 1 ? 'student' : 'students'}</span>
-            </label>
-          </li>`).join('')}
-      </ul>
+      ${groups.map(g => `
+        <div class="supply-group">
+          <div class="supply-group-head"><i class="fa-solid fa-${g.icon}"></i> ${escapeHtml(g.label)}
+            <span>${g.rows.filter(r => have.has(r.key)).length}/${g.rows.length}</span></div>
+          <ul class="supply-rows">
+            ${g.rows.map(r => `
+              <li>
+                <label class="${have.has(r.key) ? 'got' : ''}">
+                  <input type="checkbox" ${have.has(r.key) ? 'checked' : ''} onchange="toggleSupplyCheck('${escapeAttr(r.key)}', this.checked)" />
+                  <span class="supply-name">${escapeHtml(r.label)}</span>
+                  <span class="supply-count" title="${escapeAttr(countTitle(r))}">${r.n} ${r.n === 1 ? 'student' : 'students'}</span>
+                </label>
+              </li>`).join('')}
+          </ul>
+        </div>`).join('')}
     </div>`;
 }
 
@@ -4726,36 +4771,77 @@ function toggleSupplyCheck(key, on) {
   renderTeacherPosts();
 }
 
-// Supply-list form: add items one at a time, or tap a suggestion.
+// Supply-list form: pick a list (Required, For labs...), then add its items
+// one at a time or tap a suggestion. Each list shows separately below.
 function renderTpItems() {
-  const list = document.getElementById('tp-items');
+  const pick = document.getElementById('tp-list-pick');
+  const box = document.getElementById('tp-items');
   const sug = document.getElementById('tp-item-suggest');
-  if (!list || !sug) return;
-  const items = tpDraft.items || [];
-  list.innerHTML = items.length ? items.map((it, i) => `
-    <span class="tp-item">${escapeHtml(it)}
-      <button type="button" onclick="removeTpItem(${i})" aria-label="Remove ${escapeAttr(it)}"><i class="fa-solid fa-xmark"></i></button>
-    </span>`).join('') : '<span class="tp-items-empty">Nothing added yet.</span>';
-  const taken = new Set(items.map(supplyKey));
-  const fromOthers = teacherPosts.filter(p => p.kind === 'supplies').flatMap(p => p.items || []);
-  const ideas = [...new Map([...fromOthers, ...COMMON_SUPPLIES].map(x => [supplyKey(x), String(x).trim()])).values()]
-    .filter(x => !taken.has(supplyKey(x))).slice(0, 12);
+  if (!pick || !box || !sug) return;
+  const entries = tpDraft.supplies || [];
+  const active = SUPPLY_LIST_BY_KEY[tpDraft.supplyList] || SUPPLY_LISTS[0];
+  pick.innerHTML = SUPPLY_LISTS.map(l => {
+    const n = entries.filter(e => e.list === l.key).length;
+    return `<button type="button" class="tp-tag tp-list-btn ${l.key === active.key ? 'on' : ''}" aria-pressed="${l.key === active.key}"
+              onclick="setTpSupplyList('${l.key}')"><i class="fa-solid fa-${l.icon}"></i> ${escapeHtml(l.label)}${n ? ` <b>${n}</b>` : ''}</button>`;
+  }).join('');
+  const label = document.getElementById('tp-item-label');
+  if (label) label.innerHTML = `Add to <b>${escapeHtml(active.label)}</b> <small>(one at a time)</small>`;
+
+  const groups = groupSupplies(entries);
+  box.innerHTML = groups.length ? groups.map(g => `
+    <div class="tp-list-group ${g.key === active.key ? 'active' : ''}">
+      <button type="button" class="tp-list-group-head" onclick="setTpSupplyList('${g.key}')" title="Add more to this list">
+        <i class="fa-solid fa-${g.icon}"></i> ${escapeHtml(g.label)} <span>${g.items.length}</span></button>
+      <div class="tp-items">${g.items.map(e => `
+        <span class="tp-item">${escapeHtml(e.name)}
+          <button type="button" onclick="removeTpItem(${entries.indexOf(e)})" aria-label="Remove ${escapeAttr(e.name)}"><i class="fa-solid fa-xmark"></i></button>
+        </span>`).join('')}</div>
+    </div>`).join('') : '<span class="tp-items-empty">Nothing added yet. Pick a list, then add what goes on it.</span>';
+
+  // Suggestions: what others put on this list first, then anything else.
+  const taken = new Set(entries.map(e => supplyKey(e.name)));
+  const others = teacherPosts.filter(p => p.kind === 'supplies' && p.id !== editingPostId).flatMap(supplyEntries);
+  const pool = [...others.filter(e => e.list === active.key).map(e => e.name), ...others.map(e => e.name), ...COMMON_SUPPLIES];
+  const seen = new Set();
+  const ideas = pool.map(x => String(x).trim()).filter(x => {
+    const k = supplyKey(x);
+    if (!k || taken.has(k) || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 12);
   sug.innerHTML = ideas.length ? `<small>Quick add:</small> ${ideas.map(x =>
     `<button type="button" class="tp-tag" onclick="addTpItem('${escapeAttr(x)}')">+ ${escapeHtml(x)}</button>`).join('')}` : '';
 }
+function setTpSupplyList(key) {
+  if (!SUPPLY_LIST_BY_KEY[key]) return;
+  tpDraft.supplyList = key;
+  renderTpItems();
+}
 function addTpItem(value) {
   const input = document.getElementById('tp-item-input');
-  const item = String(value ?? input?.value ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
-  if (!item) return;
-  tpDraft.items = tpDraft.items || [];
-  if (tpDraft.items.some(x => supplyKey(x) === supplyKey(item))) { if (input && value == null) input.value = ''; return; }
-  if (tpDraft.items.length >= 30) return showToast('That\'s the most one list can hold (30).', 'info', 2500);
-  tpDraft.items.push(item);
-  if (input && value == null) { input.value = ''; input.focus(); }
+  const name = String(value ?? input?.value ?? '').replace(/\|/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (!name) return;
+  const list = SUPPLY_LIST_BY_KEY[tpDraft.supplyList] ? tpDraft.supplyList : SUPPLY_LISTS[0].key;
+  const entries = tpDraft.supplies = tpDraft.supplies || [];
+  const cleared = () => { if (input && value == null) { input.value = ''; input.focus(); } };
+  // Each item sits on one list; adding it to another list moves it there.
+  const existing = entries.find(e => supplyKey(e.name) === supplyKey(name));
+  if (existing) {
+    if (existing.list !== list) {
+      existing.list = list;
+      showToast(`Moved ${existing.name} to ${SUPPLY_LIST_BY_KEY[list].label}.`, 'info', 2200);
+    }
+    cleared();
+    return renderTpItems();
+  }
+  if (entries.length >= 30) return showToast('That\'s the most one post can hold (30).', 'info', 2500);
+  entries.push({ list, name });
+  cleared();
   renderTpItems();
 }
 function removeTpItem(i) {
-  (tpDraft.items || []).splice(i, 1);
+  (tpDraft.supplies || []).splice(i, 1);
   renderTpItems();
 }
 
@@ -4892,10 +4978,13 @@ function renderTeacherPosts() {
           ${p.kind === 'review' ? `<div class="rating-badge sm ${ratingClass(p.rating)}">${p.rating}</div>` : ''}
         </div>
         ${reviewBits}
-        ${(p.tags || []).length ? `<div class="tpost-tags">${p.tags.map(tag => `<span class="tag-chip">${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
-        ${p.kind === 'supplies' && (p.items || []).length ? `<ul class="tpost-items">${p.items.map(it =>
-          `<li><i class="fa-solid fa-check"></i> ${escapeHtml(it)}</li>`).join('')}</ul>` : ''}
-        ${p.kind === 'supplies' && p.body === (p.items || []).join(', ') ? '' : `<p class="tpost-body">${renderSafeMessage(p.body || '')}</p>`}
+        ${p.kind !== 'supplies' && (p.tags || []).length ? `<div class="tpost-tags">${p.tags.map(tag => `<span class="tag-chip">${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
+        ${p.kind === 'supplies' ? `<div class="tpost-supplies">${groupSupplies(supplyEntries(p)).map(g => `
+          <div class="tpost-supply-group">
+            <div class="supply-group-head"><i class="fa-solid fa-${g.icon}"></i> ${escapeHtml(g.label)}</div>
+            <ul class="tpost-items">${g.items.map(e => `<li><i class="fa-solid fa-check"></i> ${escapeHtml(e.name)}</li>`).join('')}</ul>
+          </div>`).join('')}</div>` : ''}
+        ${p.kind === 'supplies' && isAutoSupplyBody(p) ? '' : `<p class="tpost-body">${renderSafeMessage(p.body || '')}</p>`}
         <div class="tpost-actions">
           <button class="vote-btn up ${votes.my === 1 ? 'active' : ''}" onclick="voteTeacherPost('${pid}', 1)"
                   ${mine ? 'disabled title="You can\'t vote on your own post"' : busy} aria-label="Like" aria-pressed="${votes.my === 1}">
@@ -5086,8 +5175,9 @@ function openTeacherPostModal(editId) {
     difficulty: post?.difficulty || 0,
     again: post?.would_take_again == null ? null : (post.would_take_again ? 'yes' : 'no'),
     tags: [...(post?.tags || [])],
-    items: [...(post?.items || [])]
+    supplies: post?.kind === 'supplies' ? supplyEntries(post) : []
   };
+  tpDraft.supplyList = tpDraft.supplies[0]?.list || SUPPLY_LISTS[0].key;
 
   document.getElementById('tp-modal-title').textContent = editingPostId ? meta.editTitle : meta.title;
   document.getElementById('tp-modal-sub').textContent = `About ${currentTeacher.name}`;
@@ -5096,6 +5186,8 @@ function openTeacherPostModal(editId) {
   const itemInput = document.getElementById('tp-item-input');
   if (itemInput) itemInput.value = '';
   document.getElementById('tp-tags-label').textContent = meta.tagLabel;
+  document.getElementById('tp-tags-label').style.display = meta.tags.length ? '' : 'none';
+  document.getElementById('tp-tags').style.display = meta.tags.length ? '' : 'none';
   document.getElementById('tp-body-label').textContent = meta.bodyLabel;
 
   const courseInput = document.getElementById('tp-course');
@@ -5105,8 +5197,8 @@ function openTeacherPostModal(editId) {
   document.getElementById('tp-course-list').innerHTML = courses.map(c => `<option value="${escapeAttr(c)}"></option>`).join('');
 
   const body = document.getElementById('tp-body');
-  // (A supply list with no note stores its items as the text; don't show that twice.)
-  body.value = post?.kind === 'supplies' && post.body === (post.items || []).join(', ') ? '' : (post?.body || '');
+  // (A supply list with no note stores its lists as the text; don't show that twice.)
+  body.value = post?.kind === 'supplies' && isAutoSupplyBody(post) ? '' : (post?.body || '');
   body.placeholder = meta.placeholder;
   document.getElementById('tp-anon').checked = post ? post.author_name === ANON_AUTHOR : !!appSettings.anonymous;
   document.getElementById('tp-submit-btn').textContent = editingPostId ? 'Save changes' : 'Post';
@@ -5174,18 +5266,20 @@ async function submitTeacherPost(event) {
   if (kind === 'requirement' && !course) return showToast('Which course are these requirements for?', 'warn');
   // Something still typed in the item box counts too.
   if (kind === 'supplies' && document.getElementById('tp-item-input')?.value.trim()) addTpItem();
-  const items = kind === 'supplies' ? (tpDraft.items || []).slice(0, 30) : [];
-  if (kind === 'supplies' && !items.length) return showToast('Add at least one supply.', 'warn');
-  const text = kind === 'supplies' ? (body || items.join(', ')).slice(0, 2000) : body;
+  const entries = kind === 'supplies' ? (tpDraft.supplies || []).slice(0, 30) : [];
+  if (kind === 'supplies' && !entries.length) return showToast('Add at least one supply.', 'warn');
+  const text = kind === 'supplies' ? (body || supplyBodyText(entries)).slice(0, 2000) : body;
   if (!text) return showToast('Write something first.', 'warn');
 
   const anon = document.getElementById('tp-anon').checked;
   const row = {
     kind, course, body: text,
-    tags: tpDraft.tags.slice(0, 8),
+    tags: kind === 'supplies'
+      ? groupSupplies(entries).map(g => g.label).filter(l => l !== 'Other')
+      : tpDraft.tags.slice(0, 8),
     author_name: anon ? ANON_AUTHOR : sanitizeName(currentHandle || currentUser.split('@')[0])
   };
-  if (kind === 'supplies') row.items = items;
+  if (kind === 'supplies') row.items = groupSupplies(entries).flatMap(g => g.items.map(e => `${g.key}|${e.name}`));
   if (kind === 'review') {
     row.rating = tpDraft.rating;
     row.difficulty = tpDraft.difficulty || null;
