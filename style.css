@@ -4065,3 +4065,11 @@ html.layout-desktop #teacher-directory { grid-template-columns: repeat(auto-fill
 .tpost-supplies { display: flex; flex-direction: column; gap: 10px; }
 .tpost-supplies:empty { display: none; }
 .tpost-supply-group .supply-group-head { margin-bottom: 6px; }
+
+/* ---------- Sidebar: items spread evenly down the full height ---------- */
+/* The spare height is shared out between the items (auto margins), and each
+   section heading stays with its first item. Short windows just scroll. */
+html.layout-desktop .bottom-nav > .nav-btn,
+html.layout-desktop .bottom-nav > .nav-section-label,
+html.layout-desktop .bottom-nav > .sidebar-user { margin-top: auto; }
+html.layout-desktop .bottom-nav > .nav-section-label + .nav-btn { margin-top: 0; }
