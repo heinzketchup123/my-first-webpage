@@ -356,6 +356,7 @@ function initSupabaseRealtime() {
   listen('teachers', () => onTeacherDataChanged());
   listen('teacher_posts', () => onTeacherDataChanged());
   listen('teacher_post_votes', () => onTeacherDataChanged());
+  listen('teacher_post_comments', () => onTeacherDataChanged());
   listen('campus_events', () => onEventsChanged());
   listen('event_rsvps', () => onEventsChanged());
   listen('school_join_requests', p => onJoinRequestChanged(p));
@@ -1119,7 +1120,8 @@ function describeNotif(n) {
       ? { icon: 'fa-circle-check', html: `You were approved to join <strong>${escapeHtml(n.body || 'your school')}</strong>` }
       : { icon: 'fa-circle-xmark', html: `Your request to join <strong>${escapeHtml(n.body || 'the school')}</strong> was declined` };
     case 'group_join':     return { icon: 'fa-user-group',     html: `${who} joined your study group <strong>${escapeHtml(n.body || '')}</strong>` };
-    case 'helpful':        return { icon: 'fa-thumbs-up',      html: `${times > 1 ? `<strong>${times} people</strong>` : 'Someone'} found your teacher post helpful`, sub: n.body };
+    case 'helpful':        return { icon: 'fa-thumbs-up',      html: `${times > 1 ? `<strong>${times} people</strong>` : 'Someone'} liked your teacher post`, sub: n.body };
+    case 'review_comment': return { icon: 'fa-comment-dots',   html: `${who} ${times > 1 ? `left ${times} comments on` : 'commented on'} your teacher post`, sub: n.body };
     case 'event_rsvp':     return { icon: 'fa-calendar-check', html: `<strong>${times} ${times === 1 ? 'person is' : 'people are'}</strong> going to <strong>${escapeHtml(n.body || 'your event')}</strong>` };
     case 'promoted':       return { icon: 'fa-shield-halved',  html: `${who} made you an admin`, sub: 'Admin tools are in Me → Admin' };
     case 'removed_from_school': return { icon: 'fa-user-slash', html: `An admin removed you from <strong>${escapeHtml(n.body || 'your school')}</strong>`, sub: 'Tap to pick a school' };
@@ -1164,6 +1166,7 @@ async function openNotification(id) {
     case 'group_join':  switchTab('groups-view'); openGroupDetailModal(n.ref_id); break;
     case 'event_rsvp':  switchTab('events-view'); break;
     case 'helpful':     if (n.meta) openTeacherPage(n.meta); break;
+    case 'review_comment': if (n.meta) openTeacherPostComments(n.meta, n.ref_id); break;
     case 'promoted':    showAdminCard(); break;
     case 'removed_from_school': openSchoolPicker(!currentSchoolId); break;
   }
@@ -3930,7 +3933,12 @@ let teacherDirSchoolId = 'mine';  // 'mine' | <school_id>
 let teacherSort = 'top';
 let currentTeacher = null;        // teacher_stats row for the open page
 let teacherPosts = [];
-let teacherVotes = {};            // post_id -> { count, mine }
+let teacherVotes = {};            // post_id -> { up, down, my }  (my: 1 like, -1 dislike, 0 none)
+let teacherComments = {};         // post_id -> [comment rows], oldest first
+let tpCommentsReady = null;       // false until SCHEMA.sql section 6k has been run
+let tpVotesHaveValue = true;      // false until the database knows about dislikes
+const openTpComments = new Set(); // posts whose comments are showing
+const tpBusy = new Set();         // posts with a vote on its way
 let teacherTab = 'review';
 let composerKind = 'review';
 let editingPostId = null;
@@ -4106,6 +4114,7 @@ async function submitAddTeacher(event) {
 async function openTeacherPage(id) {
   lastTeacherId = id;
   teacherTab = 'review';
+  if (String(id) !== String(currentTeacher?.id)) openTpComments.clear();
   currentTeacher = null;
   teacherPosts = [];
   document.getElementById('teacher-hero').innerHTML = '<div class="teacher-loading"><i class="fa-solid fa-spinner fa-spin"></i></div>';
@@ -4128,16 +4137,29 @@ async function loadTeacherPage(id) {
   teacherPosts = postsRes.data || [];
 
   teacherVotes = {};
+  teacherComments = {};
   const ids = teacherPosts.map(p => p.id);
   if (ids.length) {
-    const { data: votes } = await supabaseClient
-      .from('teacher_post_votes').select('post_id, user_id').in('post_id', ids);
-    (votes || []).forEach(v => {
-      const cur = teacherVotes[v.post_id] || { count: 0, mine: false };
-      cur.count += 1;
-      if (v.user_id === currentUserId) cur.mine = true;
+    let [votesRes, commentsRes] = await Promise.all([
+      supabaseClient.from('teacher_post_votes').select('post_id, user_id, value').in('post_id', ids),
+      supabaseClient.from('teacher_post_comments').select('*').in('post_id', ids).order('created_at', { ascending: true })
+    ]);
+    // Database not updated yet: votes have no like/dislike value (all count as likes).
+    if (votesRes.error && /value/.test(votesRes.error.message || '')) {
+      tpVotesHaveValue = false;
+      votesRes = await supabaseClient.from('teacher_post_votes').select('post_id, user_id').in('post_id', ids);
+    } else if (!votesRes.error) {
+      tpVotesHaveValue = true;
+    }
+    (votesRes.data || []).forEach(v => {
+      const cur = teacherVotes[v.post_id] || { up: 0, down: 0, my: 0 };
+      const val = v.value === -1 ? -1 : 1;
+      if (val === 1) cur.up += 1; else cur.down += 1;
+      if (v.user_id === currentUserId) cur.my = val;
       teacherVotes[v.post_id] = cur;
     });
+    tpCommentsReady = !commentsRes.error;
+    (commentsRes.data || []).forEach(c => { (teacherComments[c.post_id] = teacherComments[c.post_id] || []).push(c); });
   }
   renderTeacherPage();
 }
@@ -4241,7 +4263,7 @@ function renderTeacherPosts() {
     .filter(p => p.kind === teacherTab && (course === 'all' || (p.course || '').trim() === course))
     .sort((a, b) =>
       (b.author_id === currentUserId) - (a.author_id === currentUserId)
-      || (teacherVotes[b.id]?.count || 0) - (teacherVotes[a.id]?.count || 0)
+      || tpScore(b.id) - tpScore(a.id)
       || new Date(b.created_at) - new Date(a.created_at));
 
   if (!list.length) {
@@ -4253,9 +4275,18 @@ function renderTeacherPosts() {
     return;
   }
 
+  // Keep what you were typing (and where) when the page redraws.
+  const drafts = {};
+  container.querySelectorAll('.tpc-input').forEach(i => { if (i.value) drafts[i.dataset.post] = i.value; });
+  const focused = document.activeElement?.classList?.contains('tpc-input') ? document.activeElement.dataset.post : null;
+
   container.innerHTML = list.map(p => {
     const mine = p.author_id && p.author_id === currentUserId;
-    const votes = teacherVotes[p.id] || { count: 0, mine: false };
+    const votes = teacherVotes[p.id] || { up: 0, down: 0, my: 0 };
+    const pid = escapeAttr(p.id);
+    const comments = teacherComments[p.id] || [];
+    const open = openTpComments.has(String(p.id));
+    const busy = tpBusy.has(String(p.id)) ? ' disabled' : '';
     const author = p.author_name || ANON_AUTHOR;
     const sub = [p.course ? escapeHtml(p.course) : null, timeAgo(p.created_at), p.updated_at ? 'edited' : null]
       .filter(Boolean).join(' · ');
@@ -4279,29 +4310,163 @@ function renderTeacherPosts() {
         ${(p.tags || []).length ? `<div class="tpost-tags">${p.tags.map(tag => `<span class="tag-chip">${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
         <p class="tpost-body">${renderSafeMessage(p.body || '')}</p>
         <div class="tpost-actions">
-          <button class="helpful-btn ${votes.mine ? 'active' : ''}" onclick="toggleHelpful('${escapeAttr(p.id)}')" ${mine ? 'disabled' : ''}>
-            <i class="fa-solid fa-thumbs-up"></i> Helpful${votes.count ? ' · ' + votes.count : ''}
+          <button class="vote-btn up ${votes.my === 1 ? 'active' : ''}" onclick="voteTeacherPost('${pid}', 1)"
+                  ${mine ? 'disabled title="You can\'t vote on your own post"' : busy} aria-label="Like" aria-pressed="${votes.my === 1}">
+            <i class="fa-${votes.my === 1 ? 'solid' : 'regular'} fa-thumbs-up"></i><span>${votes.up || ''}</span>
           </button>
+          <button class="vote-btn down ${votes.my === -1 ? 'active' : ''}" onclick="voteTeacherPost('${pid}', -1)"
+                  ${mine ? 'disabled title="You can\'t vote on your own post"' : busy} aria-label="Dislike" aria-pressed="${votes.my === -1}">
+            <i class="fa-${votes.my === -1 ? 'solid' : 'regular'} fa-thumbs-down"></i><span>${votes.down || ''}</span>
+          </button>
+          <button class="tpost-comment-btn ${open ? 'active' : ''}" onclick="toggleTpComments('${pid}')" aria-expanded="${open}">
+            <i class="fa-regular fa-comment"></i> ${comments.length ? `${comments.length} comment${comments.length === 1 ? '' : 's'}` : 'Comment'}
+          </button>
+          <span class="tpost-actions-gap"></span>
           ${mine ? `
             <button class="text-btn" onclick="openTeacherPostModal('${escapeAttr(p.id)}')">Edit</button>` : ''}
           ${mine || isAdmin ? `
             <button class="text-btn danger-text" onclick="deleteTeacherPost('${escapeAttr(p.id)}')">Delete</button>` : ''}
         </div>
+        ${open ? tpCommentsHtml(p, comments) : ''}
       </div>`;
   }).join('');
+
+  container.querySelectorAll('.tpc-input').forEach(i => { if (drafts[i.dataset.post]) i.value = drafts[i.dataset.post]; });
+  if (focused) {
+    const again = container.querySelector(`.tpc-input[data-post="${CSS.escape(focused)}"]`);
+    if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+  }
+  renderAnonymous();
 }
 
-async function toggleHelpful(postId) {
-  if (!currentUserId) return showToast('Sign in to vote.', 'warn');
-  const cur = teacherVotes[postId] || { count: 0, mine: false };
-  const req = cur.mine
-    ? supabaseClient.from('teacher_post_votes').delete().eq('post_id', postId).eq('user_id', currentUserId)
-    : supabaseClient.from('teacher_post_votes').insert([{ post_id: postId, user_id: currentUserId }]);
-  const { error } = await req;
-  if (error) return showToast('Vote failed: ' + error.message, 'error');
-  teacherVotes[postId] = { count: Math.max(0, cur.count + (cur.mine ? -1 : 1)), mine: !cur.mine };
+function tpScore(postId) {
+  const v = teacherVotes[postId];
+  return v ? v.up - v.down : 0;
+}
+
+function tpCommentsHtml(p, comments) {
+  const pid = escapeAttr(p.id);
+  if (tpCommentsReady === false) {
+    return `<div class="tpost-comments"><p class="tpc-note">Comments need a quick database update: an admin needs to run the updated SCHEMA.sql in Supabase (section 6k).</p></div>`;
+  }
+  const rows = comments.map(c => {
+    const name = c.author_name || 'Student';
+    const me = c.author_id === currentUserId;
+    const anon = /^anonymous/i.test(name);
+    return `
+      <div class="tpc">
+        <span class="friend-avatar xs">${anon ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(name[0].toUpperCase())}</span>
+        <div class="tpc-main">
+          <div class="tpc-head">
+            <strong>${escapeHtml(name)}${me ? ' <em>(you)</em>' : ''}</strong>
+            <small>${timeAgo(c.created_at)}</small>
+            ${me || isAdmin ? `<button class="tpc-del" onclick="deleteTeacherComment('${escapeAttr(c.id)}', '${pid}')" aria-label="Delete comment"><i class="fa-solid fa-xmark"></i></button>` : ''}
+          </div>
+          <p class="tpc-text">${renderSafeMessage(c.body || '')}</p>
+        </div>
+      </div>`;
+  }).join('');
+  const form = canPostOnTeacher()
+    ? `<button type="button" class="posting-as compact" data-posting-as onclick="setAnonymous(!appSettings.anonymous)"></button>
+       <form class="tpc-form" onsubmit="event.preventDefault(); addTeacherComment('${pid}');">
+         <input class="auth-input tpc-input" data-post="${pid}" maxlength="500" placeholder="Add a comment…" aria-label="Add a comment" />
+         <button type="submit" class="chat-send-btn" aria-label="Post comment"><i class="fa-solid fa-paper-plane"></i></button>
+       </form>`
+    : `<p class="tpc-note">${currentUserId ? "Only students at this teacher's school can comment." : 'Sign in to comment.'}</p>`;
+  return `<div class="tpost-comments">${rows || '<p class="tpc-note">No comments yet.</p>'}${form}</div>`;
+}
+
+function toggleTpComments(postId) {
+  const key = String(postId);
+  if (openTpComments.has(key)) openTpComments.delete(key); else openTpComments.add(key);
+  renderTeacherPosts();
+  if (openTpComments.has(key)) document.querySelector(`.tpc-input[data-post="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+}
+
+async function addTeacherComment(postId) {
+  if (!currentUserId) return showToast('Sign in to comment.', 'warn');
+  const input = document.querySelector(`.tpc-input[data-post="${CSS.escape(String(postId))}"]`);
+  const body = String(input?.value || '').trim().slice(0, 500);
+  if (!body || input.disabled) return;
+  input.disabled = true;
+  const { data, error } = await supabaseClient.from('teacher_post_comments')
+    .insert([{ post_id: postId, author_id: currentUserId, body, anonymous: !!appSettings.anonymous }])
+    .select().single();
+  input.disabled = false;
+  if (error) {
+    if (/teacher_post_comments/.test(error.message || '') && /(does not exist|schema cache)/i.test(error.message || '')) {
+      tpCommentsReady = false; renderTeacherPosts(); return;
+    }
+    return showToast("Couldn't post your comment: " + error.message, 'error');
+  }
+  input.value = '';
+  const list = teacherComments[postId] = teacherComments[postId] || [];
+  if (data && !list.some(c => c.id === data.id)) list.push(data);
+  renderTeacherPosts();
+  document.querySelector(`.tpc-input[data-post="${CSS.escape(String(postId))}"]`)?.focus({ preventScroll: true });
+}
+
+async function deleteTeacherComment(commentId, postId) {
+  if (!confirm('Delete this comment?')) return;
+  const { data, error } = await supabaseClient.from('teacher_post_comments').delete().eq('id', commentId).select('id');
+  if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
+  teacherComments[postId] = (teacherComments[postId] || []).filter(c => c.id !== commentId);
   renderTeacherPosts();
 }
+
+// Opened from a notification: go to the post and show its comments.
+async function openTeacherPostComments(teacherId, postId) {
+  await openTeacherPage(teacherId);
+  const post = teacherPosts.find(p => String(p.id) === String(postId));
+  if (!post) return;
+  teacherTab = post.kind;
+  openTpComments.add(String(post.id));
+  renderTeacherPage();
+  document.querySelector(`.tpc-input[data-post="${CSS.escape(String(post.id))}"]`)
+    ?.closest('.tpost')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+// Like (1) or dislike (-1). Tapping the one you already picked takes it back;
+// tapping the other one switches.
+async function voteTeacherPost(postId, value) {
+  if (!currentUserId) return showToast('Sign in to vote.', 'warn');
+  const key = String(postId);
+  if (tpBusy.has(key)) return;
+  if (value === -1 && !tpVotesHaveValue) {
+    return showToast('Dislikes need a quick database update: run the updated SCHEMA.sql in Supabase.', 'warn', 5000);
+  }
+  const before = { ...(teacherVotes[postId] || { up: 0, down: 0, my: 0 }) };
+  const next = { ...before };
+  const table = supabaseClient.from('teacher_post_votes');
+  let req;
+  if (before.my === value) {                    // take it back
+    next.my = 0;
+    req = table.delete().eq('post_id', postId).eq('user_id', currentUserId);
+  } else if (before.my === 0) {                 // new vote
+    next.my = value;
+    req = table.insert([tpVotesHaveValue ? { post_id: postId, user_id: currentUserId, value } : { post_id: postId, user_id: currentUserId }]);
+  } else {                                      // switch like <-> dislike
+    next.my = value;
+    req = table.update({ value }).eq('post_id', postId).eq('user_id', currentUserId);
+  }
+  if (before.my === 1) next.up -= 1;
+  if (before.my === -1) next.down -= 1;
+  if (next.my === 1) next.up += 1;
+  if (next.my === -1) next.down += 1;
+
+  // Show it straight away; put it back if the database says no.
+  teacherVotes[postId] = next;
+  tpBusy.add(key);
+  renderTeacherPosts();
+  const { error } = await req;
+  tpBusy.delete(key);
+  if (error) {
+    teacherVotes[postId] = before;
+    showToast('Vote failed: ' + error.message, 'error');
+  }
+  renderTeacherPosts();
+}
+function toggleHelpful(postId) { return voteTeacherPost(postId, 1); }   // older name
 
 async function deleteTeacherPost(postId) {
   if (!confirm('Delete this post? This can\'t be undone.')) return;

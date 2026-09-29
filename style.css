@@ -3653,3 +3653,64 @@ html.layout-phone .app-header .review-trigger-btn { white-space: nowrap; padding
 .auth-legal a:hover, .legal-links a:hover { text-decoration: underline; }
 .legal-links { display: flex; justify-content: center; gap: 8px; width: 100%; margin: 14px 0 4px; font-size: 0.78rem; color: var(--sub-text-color); }
 html.layout-desktop #settings-view > .legal-links { grid-column: 1 / -1; }
+
+/* ---------- Teacher posts: like / dislike + comments ---------- */
+.tpost-actions { flex-wrap: wrap; gap: 8px; }
+.tpost-actions-gap { flex: 1; }
+.vote-btn, .tpost-comment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: transparent;
+  color: var(--sub-text-color);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.vote-btn span:empty { display: none; }
+.vote-btn:hover:not(:disabled), .tpost-comment-btn:hover { color: var(--main-text-color); border-color: var(--accent-soft-border); }
+.vote-btn:active:not(:disabled) { transform: scale(0.94); }
+.vote-btn:disabled { opacity: 0.45; cursor: default; }
+.vote-btn.up.active { color: var(--success); border-color: var(--success); background: rgba(52, 211, 153, 0.12); }
+.vote-btn.down.active { color: var(--danger); border-color: var(--danger); background: rgba(255, 107, 107, 0.12); }
+.tpost-comment-btn.active { color: var(--accent-color); border-color: var(--accent-soft-border); background: var(--accent-muted); }
+
+.tpost-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
+}
+.tpc { display: flex; gap: 9px; align-items: flex-start; }
+.friend-avatar.xs { width: 26px; height: 26px; font-size: 0.7rem; }
+.friend-avatar.xs i { font-size: 0.72rem; }
+.tpc-main { flex: 1; min-width: 0; }
+.tpc-head { display: flex; align-items: baseline; gap: 8px; }
+.tpc-head strong { font-size: 0.8rem; }
+.tpc-head em { font-style: normal; font-weight: 600; color: var(--sub-text-color); }
+.tpc-head small { font-size: 0.7rem; color: var(--sub-text-color); }
+.tpc-del {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sub-text-color);
+  cursor: pointer;
+}
+.tpc-del:hover { background: var(--input-bg); color: var(--danger); }
+.tpc-text { margin: 2px 0 0; font-size: 0.84rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+.tpc-text a { color: var(--accent-color); }
+.tpc-note { margin: 0; font-size: 0.78rem; color: var(--sub-text-color); }
+.tpc-form { display: flex; gap: 8px; align-items: center; }
+.tpc-form .tpc-input { flex: 1; min-width: 0; margin: 0; padding: 9px 12px; font-size: 0.84rem; }
+.tpost-comments .posting-as.compact { margin: 0; }

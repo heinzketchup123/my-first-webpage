@@ -612,13 +612,19 @@ create policy "teacher_posts: author edits own"
 create policy "teacher_posts: author deletes own"
   on public.teacher_posts for delete using (auth.uid() = author_id);
 
--- "Helpful" votes on posts.
+-- Like / dislike votes on posts: one per person per post, value 1 = like,
+-- -1 = dislike. (Older "helpful" votes had no value and count as likes.)
 create table if not exists public.teacher_post_votes (
   post_id    uuid not null references public.teacher_posts(id) on delete cascade,
   user_id    uuid not null references auth.users(id) on delete cascade,
   created_at timestamptz not null default now(),
   primary key (post_id, user_id)
 );
+alter table public.teacher_post_votes add column if not exists value smallint not null default 1;
+do $$ begin
+  alter table public.teacher_post_votes add constraint teacher_post_votes_value_check check (value in (1, -1));
+exception when duplicate_object then null;
+end $$;
 alter table public.teacher_post_votes enable row level security;
 do $$ declare p record; begin
   for p in select policyname from pg_policies where schemaname='public' and tablename='teacher_post_votes' loop
@@ -631,6 +637,9 @@ create policy "votes: user casts own"
   on public.teacher_post_votes for insert with check (auth.uid() = user_id);
 create policy "votes: user removes own"
   on public.teacher_post_votes for delete using (auth.uid() = user_id);
+create policy "votes: user switches own"
+  on public.teacher_post_votes for update
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Aggregated numbers for the directory and the page header.
 drop view if exists public.teacher_stats;
@@ -1308,24 +1317,28 @@ drop trigger if exists notify_group_join on public.study_group_members;
 create trigger notify_group_join after insert or delete on public.study_group_members
   for each row execute function public.notify_group_join();
 
--- Your teacher review / note was marked helpful (voters stay unnamed)
+-- Someone liked your teacher review / note (voters stay unnamed). Dislikes
+-- don't notify, and switching a like to a dislike takes the notification back.
 create or replace function public.notify_helpful()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare r record; owner uuid; teacher uuid; pbody text;
+declare r record; owner uuid; teacher uuid; pbody text; was_like boolean; is_like boolean;
 begin
-  if tg_op = 'INSERT' then r := new; else r := old; end if;
+  if tg_op = 'DELETE' then r := old; else r := new; end if;
   select author_id, teacher_id, body into owner, teacher, pbody from public.teacher_posts where id = r.post_id;
   if owner is null or owner = r.user_id then return null; end if;
-  if tg_op = 'INSERT' then
+  was_like := false; is_like := false;
+  if tg_op in ('UPDATE', 'DELETE') then was_like := (old.value = 1); end if;
+  if tg_op in ('INSERT', 'UPDATE') then is_like := (new.value = 1); end if;
+  if is_like and not was_like then
     perform public.push_notification(owner, null, 'Someone', 'helpful', r.post_id::text,
       left(coalesce(pbody, ''), 90), teacher::text);
-  else
+  elsif was_like and not is_like then
     perform public.retract_notification(owner, null, 'helpful', r.post_id::text);
   end if;
   return null;
 end $$;
 drop trigger if exists notify_helpful on public.teacher_post_votes;
-create trigger notify_helpful after insert or delete on public.teacher_post_votes
+create trigger notify_helpful after insert or update or delete on public.teacher_post_votes
   for each row execute function public.notify_helpful();
 
 -- People RSVP'd to an event you created
@@ -1506,6 +1519,76 @@ create trigger notify_group_message after insert on public.group_messages
   for each row execute function public.notify_group_message();
 
 -- ============================================================
+-- 6k. COMMENTS ON TEACHER REVIEWS AND NOTES
+-- ============================================================
+-- Everyone can read them (like the posts). Students at the teacher's school
+-- can comment. The name shown is set here, not by the app: your name, or
+-- "Anonymous student" when you comment anonymously.
+create table if not exists public.teacher_post_comments (
+  id          uuid primary key default gen_random_uuid(),
+  post_id     uuid not null references public.teacher_posts(id) on delete cascade,
+  author_id   uuid not null references auth.users(id) on delete cascade,
+  author_name text,
+  anonymous   boolean not null default false,
+  body        text not null check (char_length(trim(body)) between 1 and 500),
+  created_at  timestamptz not null default now()
+);
+create index if not exists teacher_post_comments_post_idx
+  on public.teacher_post_comments (post_id, created_at);
+
+create or replace function public.teacher_comment_defaults()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  new.author_name := case when new.anonymous then 'Anonymous student'
+                          else coalesce(public.notif_name(new.author_id), 'Student') end;
+  new.created_at := now();
+  return new;
+end $$;
+drop trigger if exists teacher_comment_defaults on public.teacher_post_comments;
+create trigger teacher_comment_defaults before insert on public.teacher_post_comments
+  for each row execute function public.teacher_comment_defaults();
+
+alter table public.teacher_post_comments enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='teacher_post_comments' loop
+    execute format('drop policy if exists %I on public.teacher_post_comments', p.policyname);
+  end loop;
+end $$;
+create policy "teacher comments: everyone reads"
+  on public.teacher_post_comments for select using (true);
+create policy "teacher comments: same-school students write"
+  on public.teacher_post_comments for insert
+  with check (
+    auth.uid() = author_id
+    and exists (select 1 from public.teacher_posts p
+                join public.teachers t on t.id = p.teacher_id
+                where p.id = post_id and t.school_id = public.my_school_id())
+  );
+create policy "teacher comments: author or admin deletes"
+  on public.teacher_post_comments for delete
+  using (auth.uid() = author_id or public.is_admin());
+
+-- Tell the review's author (an anonymous commenter stays anonymous).
+create or replace function public.notify_teacher_comment()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare owner uuid; teacher uuid;
+begin
+  select author_id, teacher_id into owner, teacher from public.teacher_posts where id = new.post_id;
+  if owner is null or owner = new.author_id then return null; end if;
+  if new.anonymous then
+    perform public.push_notification(owner, null, 'Someone', 'review_comment', new.post_id::text,
+      left(new.body, 90), teacher::text);
+  else
+    perform public.push_notification(owner, new.author_id, coalesce(new.author_name, 'Someone'),
+      'review_comment', new.post_id::text, left(new.body, 90), teacher::text);
+  end if;
+  return null;
+end $$;
+drop trigger if exists notify_teacher_comment on public.teacher_post_comments;
+create trigger notify_teacher_comment after insert on public.teacher_post_comments
+  for each row execute function public.notify_teacher_comment();
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -1520,7 +1603,7 @@ begin
                            'teachers','teacher_posts','teacher_post_votes',
                            'campus_events','event_rsvps','school_join_requests','schools',
                            'feed_reactions','feed_comments','notifications','admins','school_bans',
-                           'group_messages'] loop
+                           'group_messages','teacher_post_comments'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'
