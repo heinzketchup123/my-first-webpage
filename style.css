@@ -3714,3 +3714,19 @@ html.layout-desktop #settings-view > .legal-links { grid-column: 1 / -1; }
 .tpc-form { display: flex; gap: 8px; align-items: center; }
 .tpc-form .tpc-input { flex: 1; min-width: 0; margin: 0; padding: 9px 12px; font-size: 0.84rem; }
 .tpost-comments .posting-as.compact { margin: 0; }
+
+/* ---------- Teachers: subjects ---------- */
+.subject-chips[hidden] { display: none; }
+.subject-chips { margin-bottom: 8px; }
+.subject-chips .chip i { font-size: 0.72rem; margin-right: 2px; }
+.teacher-meta .teacher-classes {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sub-text-color);
+}
+.teacher-meta .teacher-classes i { font-size: 0.66rem; margin-right: 3px; color: var(--accent-color); }
+.teacher-edit-btn { padding: 2px 0; margin-top: 2px; font-size: 0.78rem; }
+.teacher-edit-btn i { font-size: 0.7rem; margin-right: 3px; }

@@ -120,7 +120,7 @@
       <!-- Computer layout: search teachers from any page -->
       <label class="topbar-search desktop-only">
         <i class="fa-solid fa-magnifying-glass"></i>
-        <input type="search" id="global-search" placeholder="Search teachers or subjects…" autocomplete="off"
+        <input type="search" id="global-search" placeholder="Search teachers, subjects or classes…" autocomplete="off"
                oninput="globalTeacherSearch(this.value)" onkeydown="if (event.key === 'Escape') { this.value = ''; globalTeacherSearch(''); this.blur(); }" />
       </label>
       <div class="header-actions">
@@ -257,12 +257,14 @@
 
         <div class="search-input-wrapper">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
-          <input type="text" id="teacher-search-input" class="search-bar" placeholder="Search teachers or subjects..." oninput="renderTeacherDirectory()" autocomplete="off" />
+          <input type="text" id="teacher-search-input" class="search-bar" placeholder="Search by name, subject or class…" oninput="renderTeacherDirectory()" autocomplete="off" />
         </div>
 
         <div class="teacher-dir-controls">
           <select id="teacher-school-filter" class="mini-select flex-1" onchange="setTeacherDirSchool(this.value)"></select>
         </div>
+
+        <div class="filter-chips subject-chips" id="teacher-subject-chips" hidden></div>
 
         <div class="filter-chips" id="teacher-sort-chips">
           <button class="chip active" data-sort="top" onclick="setTeacherSort('top', this)">Top Rated</button>
@@ -830,16 +832,16 @@
   <div id="addTeacherModal" class="modal-overlay">
     <div class="modal-content text-left">
       <div class="friends-modal-head">
-        <h2 class="modal-title" style="margin:0;">Add a teacher</h2>
+        <h2 class="modal-title" style="margin:0;" id="add-teacher-title">Add a teacher</h2>
         <i class="fa-solid fa-xmark friends-close" onclick="closeAddTeacherModal()"></i>
       </div>
       <p class="friends-hint" id="add-teacher-sub">Adds a page for them at your school.</p>
       <form onsubmit="submitAddTeacher(event)">
         <input type="text" id="new-teacher-name" class="auth-input modal-input" placeholder="Name (e.g. Ms. Rivera)" maxlength="80" required autocomplete="off" />
-        <input type="text" id="new-teacher-subject" class="auth-input modal-input" placeholder="Subject (e.g. Chemistry)" maxlength="60" autocomplete="off" />
+        <input type="text" id="new-teacher-subject" class="auth-input modal-input" placeholder="Subjects (e.g. Chemistry, Physics)" maxlength="60" autocomplete="off" />
         <div class="modal-actions">
           <button type="button" class="secondary-btn" onclick="closeAddTeacherModal()">Cancel</button>
-          <button type="submit" class="primary-btn">Create page</button>
+          <button type="submit" class="primary-btn" id="add-teacher-submit">Create page</button>
         </div>
       </form>
     </div>

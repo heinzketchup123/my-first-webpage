@@ -3928,6 +3928,58 @@ const POST_KIND_META = {
 const RATING_WORDS = ['', 'Awful', 'Poor', 'OK', 'Good', 'Awesome'];
 const DIFFICULTY_WORDS = ['', 'Very easy', 'Easy', 'Medium', 'Hard', 'Very hard'];
 
+// Subjects, so "cs", "comp sci" and "Computer Science" all find the same
+// teachers. Each group is a set of word clusters that mean the same thing.
+const SUBJECT_GROUPS = [
+  { key: 'math', label: 'Math', icon: 'fa-square-root-variable', clusters: [
+    ['math', 'maths', 'mathematics'], ['algebra', 'alg'], ['geometry'], ['calculus', 'calc', 'precalculus', 'precalc', 'pre calc', 'pre calculus'],
+    ['statistics', 'stats', 'stat'], ['trigonometry', 'trig'], ['integrated math']] },
+  { key: 'science', label: 'Science', icon: 'fa-flask', clusters: [
+    ['science', 'sci'], ['biology', 'bio'], ['chemistry', 'chem'], ['physics', 'phys'], ['earth science', 'geology'],
+    ['environmental science', 'environmental', 'enviro', 'apes'], ['anatomy', 'physiology'], ['astronomy'],
+    ['forensics', 'forensic science'], ['marine biology', 'marine science']] },
+  { key: 'cs', label: 'Computer Science', icon: 'fa-laptop-code', clusters: [
+    ['computer science', 'comp sci', 'compsci', 'cs', 'csa', 'csp', 'computer', 'computers', 'computing'],
+    ['programming', 'coding', 'code', 'software'], ['robotics'], ['engineering', 'pltw'], ['web design', 'web development']] },
+  { key: 'english', label: 'English', icon: 'fa-book-open', clusters: [
+    ['english', 'ela', 'language arts'], ['literature', 'lit'], ['writing', 'composition', 'creative writing', 'rhetoric'],
+    ['journalism', 'yearbook'], ['reading'], ['ap lang', 'ap language']] },
+  { key: 'history', label: 'History & Social Studies', icon: 'fa-landmark', clusters: [
+    ['history', 'hist'], ['social studies'], ['government', 'gov', 'civics', 'politics'], ['economics', 'econ'],
+    ['psychology', 'psych'], ['sociology'], ['geography', 'human geography', 'aphug'],
+    ['us history', 'u s history', 'american history', 'apush'], ['world history', 'whap', 'ap world']] },
+  { key: 'languages', label: 'Languages', icon: 'fa-language', clusters: [
+    ['spanish', 'espanol'], ['french'], ['german'], ['chinese', 'mandarin'], ['japanese'], ['latin'], ['italian'],
+    ['korean'], ['arabic'], ['asl', 'sign language'], ['world language', 'world languages', 'foreign language'], ['esl', 'ell']] },
+  { key: 'arts', label: 'Arts & Music', icon: 'fa-palette', clusters: [
+    ['art', 'arts', 'visual art', 'studio art', 'drawing', 'painting'], ['music', 'band', 'choir', 'chorus', 'orchestra', 'jazz'],
+    ['theater', 'theatre', 'drama'], ['dance'], ['photography', 'photo'], ['ceramics', 'pottery'],
+    ['film', 'video production'], ['graphic design', 'design']] },
+  { key: 'pe', label: 'PE & Health', icon: 'fa-person-running', clusters: [
+    ['pe', 'p e', 'physical education', 'gym', 'fitness', 'weights', 'sports', 'athletics'], ['health', 'wellness']] },
+  { key: 'business', label: 'Business', icon: 'fa-briefcase', clusters: [
+    ['business'], ['marketing'], ['accounting'], ['finance', 'personal finance'], ['entrepreneurship']] }
+];
+// Lower-case, punctuation to spaces, padded: " comp sci " so whole words can be found.
+function normText(v) { return ' ' + String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' '; }
+SUBJECT_GROUPS.forEach(g => { g.clusters = g.clusters.map(c => c.map(w => normText(w).trim())); });
+const hasWord = (text, word) => text.includes(' ' + word + ' ');
+// Phrases that belong to another subject are ignored when checking a subject,
+// so "Computer Science" doesn't count as Science, or "Language Arts" as Languages.
+SUBJECT_GROUPS.forEach(g => {
+  g.foreign = SUBJECT_GROUPS.filter(o => o !== g).flatMap(o => o.clusters.flat()).filter(w => w.includes(' '))
+    .filter(w => !g.clusters.flat().includes(w)).sort((a, b) => b.length - a.length);
+});
+function textForGroup(text, g) {
+  let t = text;
+  g.foreign.forEach(w => { if (t.includes(' ' + w + ' ')) t = t.split(' ' + w + ' ').join(' | '); });
+  return t;
+}
+const inGroup = (text, g) => { const t = textForGroup(text, g); return g.clusters.some(c => c.some(w => hasWord(t, w))); };
+
+let teacherCourses = {};          // teacher id -> classes students have listed for them
+let teacherSubjectFilter = 'all'; // a SUBJECT_GROUPS key, or 'all'
+let teacherEditing = null;        // teacher being edited in the add-teacher form
 let teacherDir = [];              // teacher_stats rows for the selected school
 let teacherDirSchoolId = 'mine';  // 'mine' | <school_id>
 let teacherSort = 'top';
@@ -3982,7 +4034,70 @@ async function fetchTeacherDirectory() {
     .from('teacher_stats').select('*').eq('school_id', school).limit(500);
   if (error) return showToast('Could not load teachers: ' + error.message, 'error');
   teacherDir = data || [];
+  // The classes students listed on their reviews / notes, so those are searchable too.
+  const ids = teacherDir.map(t => t.id);
+  const courses = {};
+  if (ids.length) {
+    const { data: rows } = await supabaseClient.from('teacher_posts')
+      .select('teacher_id, course').in('teacher_id', ids).not('course', 'is', null).limit(3000);
+    (rows || []).forEach(r => {
+      const c = String(r.course || '').replace(/\s+/g, ' ').trim();
+      if (!c) return;
+      const list = courses[r.teacher_id] = courses[r.teacher_id] || [];
+      if (!list.some(x => x.toLowerCase() === c.toLowerCase())) list.push(c);
+    });
+  }
+  teacherCourses = courses;
   renderTeacherDirectory();
+}
+
+// Which subject groups a teacher belongs to, from their subject and classes.
+function teacherSubjectGroups(t) {
+  const text = normText([t.subject, ...(teacherCourses[t.id] || [])].join(' | '));
+  return new Set(SUBJECT_GROUPS.filter(g => inGroup(text, g)).map(g => g.key));
+}
+
+// Search by name, subject or class. Subject words also match their other
+// names: "cs" finds "Comp-Sci", "bio" finds "AP Biology", "science" finds all science.
+function teacherMatchesSearch(t, query) {
+  const q = normText(query).trim();
+  if (!q) return true;
+  const text = normText([t.name, t.subject, ...(teacherCourses[t.id] || [])].join(' | '));
+  if (text.includes(' ' + q) || text.replace(/ /g, '').includes(q.replace(/ /g, ''))) return true;
+  const qp = ' ' + q + ' ';
+  for (const g of SUBJECT_GROUPS) {
+    // The subject's own name ("math", "computer science", or one half of
+    // "History & Social Studies") means the whole subject.
+    const whole = g.key === q || g.label.split('&').some(part => normText(part).trim() === q);
+    if (whole && inGroup(text, g)) return true;
+    const own = textForGroup(text, g);
+    for (const c of g.clusters) {
+      const meant = c.some(w => w === q || (q.length >= 3 && w.startsWith(q)) || hasWord(qp, w));
+      if (meant && c.some(w => hasWord(own, w))) return true;
+    }
+  }
+  return false;
+}
+
+function setTeacherSubject(key) {
+  teacherSubjectFilter = teacherSubjectFilter === key ? 'all' : key;
+  renderTeacherDirectory();
+}
+
+function renderTeacherSubjectChips() {
+  const bar = document.getElementById('teacher-subject-chips');
+  if (!bar) return;
+  const counts = {};
+  teacherDir.forEach(t => teacherSubjectGroups(t).forEach(k => { counts[k] = (counts[k] || 0) + 1; }));
+  const groups = SUBJECT_GROUPS.filter(g => counts[g.key]);
+  if (teacherSubjectFilter !== 'all' && !counts[teacherSubjectFilter]) teacherSubjectFilter = 'all';
+  bar.hidden = !groups.length;
+  bar.innerHTML = groups.length ? `
+    <button class="chip ${teacherSubjectFilter === 'all' ? 'active' : ''}" onclick="setTeacherSubject('all')">All subjects</button>
+    ${groups.map(g => `
+      <button class="chip ${teacherSubjectFilter === g.key ? 'active' : ''}" onclick="setTeacherSubject('${g.key}')">
+        <i class="fa-solid ${g.icon}"></i> ${escapeHtml(g.label)} <span class="chip-count">${counts[g.key]}</span>
+      </button>`).join('')}` : '';
 }
 
 function setTeacherDirSchool(value) {
@@ -4023,10 +4138,10 @@ function renderTeacherDirectory() {
     return;
   }
 
-  const q = (document.getElementById('teacher-search-input')?.value || '').trim().toLowerCase();
-  const list = teacherDir.filter(t => !q
-    || t.name.toLowerCase().includes(q)
-    || (t.subject || '').toLowerCase().includes(q));
+  renderTeacherSubjectChips();
+  const q = (document.getElementById('teacher-search-input')?.value || '').trim();
+  const list = teacherDir.filter(t => teacherMatchesSearch(t, q)
+    && (teacherSubjectFilter === 'all' || teacherSubjectGroups(t).has(teacherSubjectFilter)));
 
   const byRating = (a, b) => (toNum(b.avg_rating) ?? -1) - (toNum(a.avg_rating) ?? -1) || b.review_count - a.review_count;
   const sorters = {
@@ -4041,7 +4156,8 @@ function renderTeacherDirectory() {
     const ownSchool = dirSchoolId() === currentSchoolId;
     container.innerHTML = `<div class="empty-state">
       <i class="fa-solid fa-chalkboard-user"></i>
-      <p>${q ? `No teachers match "${escapeHtml(q)}".` : 'No teacher pages here yet.'}</p>
+      <p>${q ? `No teachers match "${escapeHtml(q)}"${teacherSubjectFilter !== 'all' ? ' in ' + escapeHtml(SUBJECT_GROUPS.find(g => g.key === teacherSubjectFilter)?.label || 'this subject') : ''}.`
+            : teacherSubjectFilter !== 'all' ? 'No teachers in this subject yet.' : 'No teacher pages here yet.'}</p>
       ${ownSchool ? '<button class="primary-btn" onclick="openAddTeacherModal()">+ Add a teacher</button>' : ''}
     </div>`;
     return;
@@ -4050,17 +4166,21 @@ function renderTeacherDirectory() {
   container.innerHTML = list.map(t => {
     const avg = toNum(t.avg_rating);
     const diff = toNum(t.avg_difficulty);
+    const classes = teacherCourses[t.id] || [];
     const meta = [
       t.subject ? escapeHtml(t.subject) : null,
       `${t.review_count} review${t.review_count === 1 ? '' : 's'}`,
       diff != null ? `Difficulty ${diff.toFixed(1)}` : null
     ].filter(Boolean).join(' · ');
+    const teaches = classes.length
+      ? `<small class="teacher-classes"><i class="fa-solid fa-book"></i> ${classes.slice(0, 3).map(escapeHtml).join(', ')}${classes.length > 3 ? ` +${classes.length - 3}` : ''}</small>` : '';
     return `
       <button class="teacher-card" onclick="openTeacherPage('${escapeAttr(t.id)}')">
         <div class="teacher-avatar">${escapeHtml(teacherInitials(t.name))}</div>
         <div class="teacher-meta">
           <strong>${escapeHtml(t.name)}</strong>
           <small>${meta}</small>
+          ${teaches}
         </div>
         <div class="rating-badge ${ratingClass(avg)}">${avg != null ? avg.toFixed(1) : '–'}</div>
       </button>`;
@@ -4069,20 +4189,51 @@ function renderTeacherDirectory() {
 
 // ---------- Add teacher ----------
 
-function openAddTeacherModal() {
-  if (!currentUserId) return showToast('Sign in to add a teacher.', 'warn');
-  if (!currentSchoolId) return openSchoolPicker(true);
-  document.getElementById('add-teacher-sub').textContent = `Creates a page for them at ${currentSchool?.name || 'your school'}.`;
-  document.getElementById('addTeacherModal').style.display = 'flex';
-  setTimeout(() => document.getElementById('new-teacher-name')?.focus(), 50);
+function canEditTeacher() {
+  return !!(currentUserId && currentTeacher && (isAdmin || currentTeacher.created_by === currentUserId));
 }
-function closeAddTeacherModal() { document.getElementById('addTeacherModal').style.display = 'none'; }
+
+function openAddTeacherModal(edit) {
+  if (!currentUserId) return showToast('Sign in to add a teacher.', 'warn');
+  teacherEditing = edit === true && currentTeacher ? currentTeacher : null;
+  if (!teacherEditing && !currentSchoolId) return openSchoolPicker(true);
+  const t = teacherEditing;
+  document.getElementById('add-teacher-title').textContent = t ? 'Edit teacher' : 'Add a teacher';
+  document.getElementById('add-teacher-submit').textContent = t ? 'Save' : 'Create page';
+  document.getElementById('add-teacher-sub').textContent = t
+    ? 'Add every subject they teach, separated by commas, so students can find them.'
+    : `Creates a page for them at ${currentSchool?.name || 'your school'}.`;
+  document.getElementById('new-teacher-name').value = t ? t.name : '';
+  document.getElementById('new-teacher-subject').value = t ? (t.subject || '') : '';
+  document.getElementById('addTeacherModal').style.display = 'flex';
+  setTimeout(() => document.getElementById(t ? 'new-teacher-subject' : 'new-teacher-name')?.focus(), 50);
+}
+function closeAddTeacherModal() {
+  document.getElementById('addTeacherModal').style.display = 'none';
+  teacherEditing = null;
+}
 
 async function submitAddTeacher(event) {
   event.preventDefault();
   const name = document.getElementById('new-teacher-name').value.replace(/\s+/g, ' ').trim();
-  const subject = document.getElementById('new-teacher-subject').value.trim() || null;
+  const subject = document.getElementById('new-teacher-subject').value.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ')
+    .replace(/^,\s*|,\s*$/g, '').trim().slice(0, 60) || null;
   if (name.length < 2) return showToast('Enter the teacher\'s name.', 'warn');
+
+  if (teacherEditing) {
+    const id = teacherEditing.id;
+    const { data: saved, error: saveErr } = await supabaseClient.from('teachers')
+      .update({ name, subject }).eq('id', id).select('id');
+    if (saveErr || !saved?.length) {
+      return showToast(saveErr?.code === '23505' ? 'Another teacher at this school already has that name.'
+        : 'Only the person who added this teacher, or an admin, can edit it.', 'error', 4500);
+    }
+    showToast('Saved.', 'success');
+    closeAddTeacherModal();
+    await loadTeacherPage(id);
+    fetchTeacherDirectory();
+    return;
+  }
 
   const { data, error } = await supabaseClient
     .from('teachers')
@@ -4135,6 +4286,9 @@ async function loadTeacherPage(id) {
   }
   currentTeacher = statsRes.data;
   teacherPosts = postsRes.data || [];
+  // Who added this teacher (they, or an admin, can edit the name and subjects).
+  const { data: owner } = await supabaseClient.from('teachers').select('created_by').eq('id', id).maybeSingle();
+  currentTeacher.created_by = owner?.created_by || null;
 
   teacherVotes = {};
   teacherComments = {};
@@ -4208,7 +4362,9 @@ function renderTeacherHero() {
       <div class="teacher-avatar lg">${escapeHtml(teacherInitials(t.name))}</div>
       <div class="teacher-hero-text">
         <h1>${escapeHtml(t.name)}</h1>
-        <p>${[t.subject, schoolName(t.school_id)].filter(Boolean).map(escapeHtml).join(' · ')}</p>
+        <p>${[t.subject || 'No subject yet', schoolName(t.school_id)].filter(Boolean).map(escapeHtml).join(' · ')}</p>
+        ${canEditTeacher() ? `<button class="text-btn teacher-edit-btn" onclick="openAddTeacherModal(true)">
+          <i class="fa-solid fa-pen"></i> ${t.subject ? 'Edit name & subjects' : 'Add subjects'}</button>` : ''}
       </div>
     </div>
     <div class="teacher-stat-grid">

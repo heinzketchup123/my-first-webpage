@@ -765,6 +765,10 @@ drop policy if exists "admin: delete old reviews" on public.instructor_reviews;
 create policy "admin: delete old reviews" on public.instructor_reviews for delete using (public.is_admin());
 drop policy if exists "admin: delete teachers" on public.teachers;
 create policy "admin: delete teachers" on public.teachers for delete using (public.is_admin());
+-- Admins can also fix a teacher's name or subjects.
+drop policy if exists "admin: edit teachers" on public.teachers;
+create policy "admin: edit teachers" on public.teachers for update
+  using (public.is_admin()) with check (public.is_admin());
 drop policy if exists "admin: delete teacher posts" on public.teacher_posts;
 create policy "admin: delete teacher posts" on public.teacher_posts for delete using (public.is_admin());
 drop policy if exists "admin: delete events" on public.campus_events;
