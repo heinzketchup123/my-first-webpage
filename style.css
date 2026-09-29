@@ -3799,3 +3799,97 @@ html.layout-phone .star-chips .chip-count { display: none; }   /* the chart abov
 #blocked-card .admin-hint { margin: 10px 0 0; }
 .profile-actions .profile-block { margin-top: 4px; font-size: 0.8rem; }
 .profile-actions .danger-text { color: var(--danger); }
+
+/* =====================================================
+   POLISH PASS — same layout, a little more depth and life
+   ===================================================== */
+
+/* Cards: a faint light edge along the top in dark mode, and a softly deeper
+   shadow when the mouse is over one (no movement, as before). */
+body:not(.light-mode) :is(.info-card, .pref-card, .teacher-card, .side-panel, .cal-card, .gpa-dashboard-card, .chat-container) {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 38%);
+}
+@media (hover: hover) and (pointer: fine) {
+  :is(.feed-post, .group-card, .teacher-card, .event-card, .tpost) {
+    transition: border-color 0.2s ease, box-shadow 0.25s ease;
+  }
+  :is(.feed-post, .group-card, .teacher-card, .event-card, .tpost):hover {
+    box-shadow: var(--shadow-card), 0 16px 34px -22px var(--accent-color);
+  }
+}
+
+/* Buttons: a soft sheen on filled buttons and a gentle press. */
+.primary-btn, .chip.active, .seg-btn.active {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 60%);
+}
+.primary-btn { transition: filter 0.15s ease, transform 0.1s ease, box-shadow 0.2s ease; }
+.primary-btn:not(:disabled):active { transform: translateY(1px) scale(0.99); }
+.secondary-btn { transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease; }
+
+/* Avatars: a little shine and a thin ring instead of flat circles. */
+.friend-avatar {
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0) 55%);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+.post-avatar, .teacher-avatar {
+  background-image: linear-gradient(145deg, var(--accent-muted), rgba(255, 255, 255, 0) 80%);
+  box-shadow: inset 0 0 0 1px var(--accent-soft-border);
+}
+.group-face { box-shadow: none; }
+
+/* Headline numbers get a subtle shine (dark mode). */
+body:not(.light-mode) :is(.stat-number, .gpa-score) {
+  background: linear-gradient(180deg, var(--accent-light), var(--accent-color));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Page titles fade into the theme colour at the end. */
+.page-title {
+  width: fit-content;             /* so the fade spans the words, not the whole row */
+  max-width: 100%;
+  background: linear-gradient(90deg, var(--main-text-color) 45%, var(--accent-color));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Empty screens: the icon sits in a soft glowing circle. */
+.empty-state > i:first-child, .chat-empty > i:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  font-size: 1.45rem;
+  opacity: 1;
+  background: radial-gradient(circle at 32% 28%, var(--accent-muted), transparent 72%), var(--input-bg);
+  box-shadow: inset 0 0 0 1px var(--accent-soft-border), 0 10px 26px -16px var(--accent-color);
+}
+
+/* Quick-tool tiles: icon in a tinted square, like an app icon. */
+.tool-btn i {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: var(--accent-muted);
+}
+
+/* Scrollbars: thin and quiet; the sidebar's only shows while you point at it. */
+* { scrollbar-color: color-mix(in srgb, var(--sub-text-color) 30%, transparent) transparent; }
+html.layout-desktop .bottom-nav { scrollbar-color: transparent transparent; }
+html.layout-desktop .bottom-nav:hover { scrollbar-color: color-mix(in srgb, var(--sub-text-color) 30%, transparent) transparent; }
+
+/* Selected text and keyboard focus in the theme colour. */
+::selection { background: var(--accent-muted); color: var(--main-text-color); }
+:is(button, a, [role="button"]):focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .primary-btn:not(:disabled):active { transform: none; }
+}
