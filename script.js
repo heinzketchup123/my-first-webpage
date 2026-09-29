@@ -374,12 +374,28 @@ async function loadAllSupabaseData() {
   updateNotifBadge();
 }
 
+// Posts, comments, reactions and votes are read through the "_public" views
+// (SCHEMA.sql section 6l): they hide who wrote anonymous rows and who voted,
+// but still show you your own. Until the database has them, read the tables
+// directly as before. build(query, viaView) adds the filters.
+let privateViews = null;         // null = not checked yet, false = older database
+async function readSafe(table, build) {
+  if (privateViews !== false) {
+    const res = await build(supabaseClient.from(table + '_public'), true);
+    if (!res.error || !missingTable(res.error)) {
+      if (!res.error) privateViews = true;
+      return res;
+    }
+    privateViews = false;
+  }
+  return build(supabaseClient.from(table), false);
+}
+
 async function fetchFeed() {
-  const { data, error } = await supabaseClient
-    .from('campus_feed')
+  const { data, error } = await readSafe('campus_feed', q => q
     .select('*')
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(50));
   if (error) { showToast('Feed load failed: ' + error.message, 'error'); return; }
   campusFeed = data || [];
   await fetchFeedExtras();
@@ -2277,9 +2293,9 @@ async function fetchFeedExtras() {
     return;
   }
   const [rx, cm] = await Promise.all([
-    supabaseClient.from('feed_reactions').select('post_id, user_id, emoji').in('post_id', ids),
-    supabaseClient.from('feed_comments').select('id, post_id, author_id, author, body, created_at')
-      .in('post_id', ids).order('created_at', { ascending: true })
+    readSafe('feed_reactions', q => q.select('post_id, user_id, emoji').in('post_id', ids)),
+    readSafe('feed_comments', q => q.select('id, post_id, author_id, author, body, created_at')
+      .in('post_id', ids).order('created_at', { ascending: true }))
   ]);
   if (rx.error || cm.error) { feedExtrasReady = false; return; }
   feedExtrasReady = true;
@@ -2520,7 +2536,7 @@ async function toggleFeedReaction(id, key) {
 
   const { error } = had
     ? await supabaseClient.from('feed_reactions').delete()
-        .match({ post_id: post.id, user_id: currentUserId, emoji: key })
+        .match({ post_id: post.id, emoji: key })          // only ever matches your own
     : await supabaseClient.from('feed_reactions')
         .insert([{ post_id: post.id, user_id: currentUserId, emoji: key, anonymous: !!appSettings.anonymous }]);
   reactInFlight.delete(tag);
@@ -2589,8 +2605,9 @@ async function addCommentToPost() {
   input.value = '';
   const { data, error } = await supabaseClient.from('feed_comments')
     .insert([{ post_id: currentPostCommentId, author_id: currentUserId, body: text.slice(0, 500), anonymous: !!appSettings.anonymous }])
-    .select('id, post_id, author_id, author, body, created_at').single();
+    .select('id, post_id, author, body, created_at').single();   // (the author column can't be read back)
   if (error) { input.value = text; return showToast('Comment failed: ' + error.message, 'error'); }
+  if (data) data.author_id = currentUserId;
 
   const pid = String(data.post_id);
   const list = (feedComments[pid] ||= []);
@@ -4279,8 +4296,8 @@ async function openTeacherPage(id) {
 async function loadTeacherPage(id) {
   const [statsRes, postsRes] = await Promise.all([
     supabaseClient.from('teacher_stats').select('*').eq('id', id).maybeSingle(),
-    supabaseClient.from('teacher_posts').select('*').eq('teacher_id', id)
-      .order('created_at', { ascending: false }).limit(200)
+    readSafe('teacher_posts', q => q.select('*').eq('teacher_id', id)
+      .order('created_at', { ascending: false }).limit(200))
   ]);
   if (statsRes.error || !statsRes.data) {
     showToast('That teacher page could not be found.', 'error');
@@ -4297,8 +4314,8 @@ async function loadTeacherPage(id) {
   const ids = teacherPosts.map(p => p.id);
   if (ids.length) {
     let [votesRes, commentsRes] = await Promise.all([
-      supabaseClient.from('teacher_post_votes').select('post_id, user_id, value').in('post_id', ids),
-      supabaseClient.from('teacher_post_comments').select('*').in('post_id', ids).order('created_at', { ascending: true })
+      readSafe('teacher_post_votes', q => q.select('post_id, user_id, value').in('post_id', ids)),
+      readSafe('teacher_post_comments', q => q.select('*').in('post_id', ids).order('created_at', { ascending: true }))
     ]);
     // Database not updated yet: votes have no like/dislike value (all count as likes).
     if (votesRes.error && /value/.test(votesRes.error.message || '')) {
@@ -4604,7 +4621,8 @@ async function addTeacherComment(postId) {
   input.disabled = true;
   const { data, error } = await supabaseClient.from('teacher_post_comments')
     .insert([{ post_id: postId, author_id: currentUserId, body, anonymous: !!appSettings.anonymous }])
-    .select().single();
+    .select('id, post_id, author_name, anonymous, body, created_at').single();   // (not the author column)
+  if (data) data.author_id = currentUserId;
   input.disabled = false;
   if (error) {
     if (/teacher_post_comments/.test(error.message || '') && /(does not exist|schema cache)/i.test(error.message || '')) {
@@ -4654,13 +4672,13 @@ async function voteTeacherPost(postId, value) {
   let req;
   if (before.my === value) {                    // take it back
     next.my = 0;
-    req = table.delete().eq('post_id', postId).eq('user_id', currentUserId);
+    req = table.delete().eq('post_id', postId);                  // only ever matches your own vote
   } else if (before.my === 0) {                 // new vote
     next.my = value;
     req = table.insert([tpVotesHaveValue ? { post_id: postId, user_id: currentUserId, value } : { post_id: postId, user_id: currentUserId }]);
   } else {                                      // switch like <-> dislike
     next.my = value;
-    req = table.update({ value }).eq('post_id', postId).eq('user_id', currentUserId);
+    req = table.update({ value }).eq('post_id', postId);         // only ever matches your own vote
   }
   if (before.my === 1) next.up -= 1;
   if (before.my === -1) next.down -= 1;
@@ -4827,9 +4845,10 @@ async function submitTeacherPost(event) {
 
 async function fetchMyReviewCount() {
   if (!currentUserId || !isSupabaseConnected) { myReviewCount = 0; return updateAnalytics(); }
-  const { count } = await supabaseClient
-    .from('teacher_posts').select('id', { count: 'exact', head: true })
-    .eq('author_id', currentUserId).eq('kind', 'review');
+  const { count } = await readSafe('teacher_posts', (q, viaView) => {
+    q = q.select('id', { count: 'exact', head: true }).eq('kind', 'review');
+    return viaView ? q.eq('mine', true) : q.eq('author_id', currentUserId);
+  });
   myReviewCount = count || 0;
   updateAnalytics();
 }

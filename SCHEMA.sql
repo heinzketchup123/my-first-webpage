@@ -1593,6 +1593,246 @@ create trigger notify_teacher_comment after insert on public.teacher_post_commen
   for each row execute function public.notify_teacher_comment();
 
 -- ============================================================
+-- 6l. KEEP ANONYMOUS AUTHORS PRIVATE
+-- ============================================================
+-- Posts, comments, reactions and votes record who made them (so people can
+-- delete their own, and admins can deal with abuse). That column used to be
+-- readable by anyone with the app's public key, which gave away who wrote
+-- "anonymous" posts and who voted. Now:
+--   * nobody can read that column from the tables directly;
+--   * the app reads through the *_public views below, which show it only when
+--     the row isn't anonymous, it's your own, or you're an admin
+--     (votes never show who voted);
+--   * the rules for adding / editing / deleting never read that column:
+--     triggers fill it in from the signed-in user, and public.i_wrote()
+--     answers "did I make this row?".
+-- Live updates follow the column rights too, so they don't include it either.
+
+-- Likes/reactions and teacher-post votes get their own id: live updates need a
+-- readable primary key, and "one per person" becomes a unique index instead.
+alter table public.feed_reactions     add column if not exists id uuid not null default gen_random_uuid();
+alter table public.teacher_post_votes add column if not exists id uuid not null default gen_random_uuid();
+do $$
+declare t text; pk text; pkcols text[];
+begin
+  foreach t in array array['feed_reactions', 'teacher_post_votes'] loop
+    select c.conname, array_agg(a.attname::text order by a.attnum)
+      into pk, pkcols
+      from pg_constraint c
+      join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any (c.conkey)
+     where c.conrelid = ('public.' || t)::regclass and c.contype = 'p'
+     group by c.conname;
+    if pkcols is distinct from array['id'] then
+      if pk is not null then execute format('alter table public.%I drop constraint %I', t, pk); end if;
+      execute format('alter table public.%I add primary key (id)', t);
+    end if;
+  end loop;
+end $$;
+create unique index if not exists feed_reactions_one_per_person
+  on public.feed_reactions (post_id, user_id, emoji);
+create unique index if not exists teacher_post_votes_one_per_person
+  on public.teacher_post_votes (post_id, user_id);
+
+-- "Did the signed-in user make this row?" Security definer, so it can look at
+-- the hidden column; it only ever answers about your own rows.
+create or replace function public.i_wrote(tbl text, row_id text)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null or row_id is null then return false; end if;
+  -- (campus_feed ids can be uuid or bigint depending on the project, so that
+  -- one is compared as text; the rest are uuids and use their index.)
+  return case tbl
+    when 'campus_feed'           then exists (select 1 from public.campus_feed           where id::text = row_id        and author_id = me)
+    when 'feed_comments'         then exists (select 1 from public.feed_comments         where id = row_id::uuid        and author_id = me)
+    when 'feed_reactions'        then exists (select 1 from public.feed_reactions        where id = row_id::uuid        and user_id   = me)
+    when 'teacher_posts'         then exists (select 1 from public.teacher_posts         where id = row_id::uuid        and author_id = me)
+    when 'teacher_post_comments' then exists (select 1 from public.teacher_post_comments where id = row_id::uuid        and author_id = me)
+    when 'teacher_post_votes'    then exists (select 1 from public.teacher_post_votes    where id = row_id::uuid        and user_id   = me)
+    else false
+  end;
+end $$;
+revoke all on function public.i_wrote(text, text) from public;
+grant execute on function public.i_wrote(text, text) to anon, authenticated;
+
+-- The author is always the signed-in user, and can't be changed later.
+-- The name shown is set here too, so nobody can post as someone else.
+create or replace function public.feed_post_owner()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then return new; end if;          -- server jobs keep what they set
+  if tg_op = 'INSERT' then new.author_id := auth.uid(); else new.author_id := old.author_id; end if;
+  new.author := case when coalesce(new.author, '') ~* '^anonymous' then 'Anonymous Student'
+                     else coalesce((select handle from public.profiles where user_id = new.author_id), 'Student') end;
+  return new;
+end $$;
+drop trigger if exists feed_post_owner on public.campus_feed;
+create trigger feed_post_owner before insert or update on public.campus_feed
+  for each row execute function public.feed_post_owner();
+
+create or replace function public.teacher_post_owner()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then return new; end if;
+  if tg_op = 'INSERT' then new.author_id := auth.uid(); else new.author_id := old.author_id; end if;
+  new.author_name := case when coalesce(new.author_name, '') ~* '^anonymous' then 'Anonymous student'
+                          else left(coalesce((select handle from public.profiles where user_id = new.author_id), 'Student'), 40) end;
+  return new;
+end $$;
+drop trigger if exists teacher_post_owner on public.teacher_posts;
+create trigger teacher_post_owner before insert or update on public.teacher_posts
+  for each row execute function public.teacher_post_owner();
+
+create or replace function public.vote_owner()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then return new; end if;
+  if tg_op = 'INSERT' then new.user_id := auth.uid();
+  else new.user_id := old.user_id; new.post_id := old.post_id; end if;
+  return new;
+end $$;
+drop trigger if exists vote_owner on public.feed_reactions;
+create trigger vote_owner before insert or update on public.feed_reactions
+  for each row execute function public.vote_owner();
+drop trigger if exists vote_owner on public.teacher_post_votes;
+create trigger vote_owner before insert or update on public.teacher_post_votes
+  for each row execute function public.vote_owner();
+
+-- Teacher-post comments: also take the author from the signed-in user.
+create or replace function public.teacher_comment_defaults()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is not null then new.author_id := auth.uid(); end if;
+  new.author_name := case when new.anonymous then 'Anonymous student'
+                          else coalesce(public.notif_name(new.author_id), 'Student') end;
+  new.created_at := now();
+  return new;
+end $$;
+
+-- The same rules as before, rewritten so they never read the hidden column.
+drop policy if exists "feed: signed-in creates own" on public.campus_feed;
+create policy "feed: signed-in creates own"
+  on public.campus_feed for insert
+  with check (
+    auth.uid() is not null
+    and school_id = public.my_school_id()
+    and char_length(title) between 1 and 120
+    and char_length(text)  between 1 and 2000
+  );
+drop policy if exists "feed: author edits own" on public.campus_feed;
+create policy "feed: author edits own"
+  on public.campus_feed for update
+  using (public.i_wrote('campus_feed', id::text)) with check (public.i_wrote('campus_feed', id::text));
+drop policy if exists "feed: author deletes own" on public.campus_feed;
+create policy "feed: author deletes own"
+  on public.campus_feed for delete using (public.i_wrote('campus_feed', id::text));
+
+drop policy if exists "reactions: add own" on public.feed_reactions;
+create policy "reactions: add own"
+  on public.feed_reactions for insert
+  with check (auth.uid() is not null
+              and exists (select 1 from public.campus_feed f where f.id = post_id));
+drop policy if exists "reactions: remove own" on public.feed_reactions;
+create policy "reactions: remove own"
+  on public.feed_reactions for delete using (public.i_wrote('feed_reactions', id::text));
+
+drop policy if exists "comments: add own" on public.feed_comments;
+create policy "comments: add own"
+  on public.feed_comments for insert
+  with check (auth.uid() is not null
+              and exists (select 1 from public.campus_feed f where f.id = post_id));
+drop policy if exists "comments: author, post owner or admin deletes" on public.feed_comments;
+create policy "comments: author, post owner or admin deletes"
+  on public.feed_comments for delete
+  using (public.i_wrote('feed_comments', id::text) or public.is_admin()
+         or public.i_wrote('campus_feed', post_id::text));
+
+drop policy if exists "teacher_posts: same-school students write" on public.teacher_posts;
+create policy "teacher_posts: same-school students write"
+  on public.teacher_posts for insert
+  with check (
+    auth.uid() is not null
+    and exists (select 1 from public.teachers t
+                where t.id = teacher_id and t.school_id = public.my_school_id())
+  );
+drop policy if exists "teacher_posts: author edits own" on public.teacher_posts;
+create policy "teacher_posts: author edits own"
+  on public.teacher_posts for update
+  using (public.i_wrote('teacher_posts', id::text)) with check (public.i_wrote('teacher_posts', id::text));
+drop policy if exists "teacher_posts: author deletes own" on public.teacher_posts;
+create policy "teacher_posts: author deletes own"
+  on public.teacher_posts for delete using (public.i_wrote('teacher_posts', id::text));
+
+drop policy if exists "teacher comments: same-school students write" on public.teacher_post_comments;
+create policy "teacher comments: same-school students write"
+  on public.teacher_post_comments for insert
+  with check (
+    auth.uid() is not null
+    and exists (select 1 from public.teacher_posts p
+                join public.teachers t on t.id = p.teacher_id
+                where p.id = post_id and t.school_id = public.my_school_id())
+  );
+drop policy if exists "teacher comments: author or admin deletes" on public.teacher_post_comments;
+create policy "teacher comments: author or admin deletes"
+  on public.teacher_post_comments for delete
+  using (public.i_wrote('teacher_post_comments', id::text) or public.is_admin());
+
+drop policy if exists "votes: user casts own" on public.teacher_post_votes;
+create policy "votes: user casts own"
+  on public.teacher_post_votes for insert with check (auth.uid() is not null);
+drop policy if exists "votes: user removes own" on public.teacher_post_votes;
+create policy "votes: user removes own"
+  on public.teacher_post_votes for delete using (public.i_wrote('teacher_post_votes', id::text));
+drop policy if exists "votes: user switches own" on public.teacher_post_votes;
+create policy "votes: user switches own"
+  on public.teacher_post_votes for update
+  using (public.i_wrote('teacher_post_votes', id::text)) with check (public.i_wrote('teacher_post_votes', id::text));
+
+-- Hide the column, and create the views the app reads. Each view repeats the
+-- table's own "who can see this row" rule (views run with the owner's rights,
+-- which skip row security) and shows the author only when allowed.
+do $$
+declare
+  t record; cols text; plain text;
+begin
+  for t in select * from (values
+      ('campus_feed', 'author_id',
+         $a$coalesce(x.author, '') ~* '^anonymous'$a$,
+         $w$x.school_id is null or x.school_id = public.my_school_id()$w$),
+      ('feed_comments', 'author_id', $a$x.anonymous$a$,
+         $w$exists (select 1 from public.campus_feed f where f.id = x.post_id
+                     and (f.school_id is null or f.school_id = public.my_school_id()))$w$),
+      ('feed_reactions', 'user_id', $a$x.anonymous$a$,
+         $w$exists (select 1 from public.campus_feed f where f.id = x.post_id
+                     and (f.school_id is null or f.school_id = public.my_school_id()))$w$),
+      ('teacher_posts', 'author_id', $a$coalesce(x.author_name, '') ~* '^anonymous'$a$, $w$true$w$),
+      ('teacher_post_comments', 'author_id', $a$x.anonymous$a$, $w$true$w$),
+      ('teacher_post_votes', 'user_id', $a$true$a$, $w$true$w$)      -- voters are never named
+    ) as v(tbl, secret, anon_sql, visible_sql)
+  loop
+    select string_agg('x.' || quote_ident(column_name::text), ', ' order by ordinal_position),
+           string_agg(quote_ident(column_name::text), ', ' order by ordinal_position)
+      into cols, plain
+      from information_schema.columns
+     where table_schema = 'public' and table_name = t.tbl and column_name <> t.secret;
+
+    execute format('revoke select on public.%I from anon, authenticated', t.tbl);
+    execute format('grant select (%s) on public.%I to anon, authenticated', plain, t.tbl);
+
+    execute format('drop view if exists public.%I', t.tbl || '_public');
+    execute format(
+      $v$create view public.%I with (security_barrier = true, security_invoker = false) as
+         select %s,
+                case when not (%s) or x.%I = auth.uid() or public.is_admin() then x.%I end as %I,
+                coalesce(x.%I = auth.uid(), false) as mine
+           from public.%I x
+          where %s$v$,
+      t.tbl || '_public', cols, t.anon_sql, t.secret, t.secret, t.secret, t.secret, t.tbl, t.visible_sql);
+    execute format('grant select on public.%I to anon, authenticated', t.tbl || '_public');
+  end loop;
+end $$;
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
