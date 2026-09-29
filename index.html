@@ -102,6 +102,11 @@
         <button class="icon-header-btn layout-quick-btn wide-only phone-only" onclick="toggleLayoutQuick()" aria-label="Switch to computer layout" title="Switch to computer layout">
           <i class="fa-solid fa-desktop"></i>
         </button>
+        <!-- Only shown while anonymous mode is on, so you always know -->
+        <button class="anon-indicator" id="anon-indicator" hidden onclick="showAnonSetting()"
+                aria-label="Anonymous mode is on. Open the setting." title="Anonymous mode is on">
+          <i class="fa-solid fa-user-secret"></i><span>Anonymous</span>
+        </button>
         <button class="review-trigger-btn phone-only" onclick="switchTab('search-view')"><i class="fa-solid fa-chalkboard-user"></i> Teachers</button>
         <button class="icon-header-btn" onclick="toggleNotifications()" aria-label="Notifications">
           <i class="fa-solid fa-bell"></i>
@@ -448,6 +453,20 @@
           </button>
         </div>
 
+        <!-- Anonymous mode (off unless you turn it on) -->
+        <div class="pref-card anon-card" id="anon-card">
+          <div class="pref-header">
+            <i class="fa-solid fa-user-secret"></i>
+            <h3>Anonymous Mode</h3>
+            <span class="anon-state" id="anon-state">Off</span>
+          </div>
+          <div class="segmented" id="anon-seg" role="group" aria-label="How your posts are signed">
+            <button class="seg-btn active" data-anon="off" onclick="setAnonymous(false)"><i class="fa-solid fa-user"></i><span>Show my name</span></button>
+            <button class="seg-btn" data-anon="on" onclick="setAnonymous(true)"><i class="fa-solid fa-user-secret"></i><span>Anonymous</span></button>
+          </div>
+          <p class="admin-hint anon-hint" id="anon-hint">New posts, comments and reviews show your name.</p>
+        </div>
+
         <!-- Admin tools (only shown to admins) -->
         <!-- Tap the header to fold the whole card; each section folds too. -->
         <div class="pref-card admin-card" id="admin-card" style="display:none;">
@@ -605,13 +624,6 @@
 
         <!-- Privacy / misc toggles -->
         <ul class="settings-list">
-          <li onclick="toggleSettingSwitch(this, 'anonymous')">
-            <div class="setting-text">
-              <span>Anonymous Mode</span>
-              <small>Hide public identity on posts and reviews</small>
-            </div>
-            <div id="anon-toggle" class="toggle-btn active"></div>
-          </li>
           <li onclick="toggleDeviceAlerts()">
             <div class="setting-text">
               <span>Device Alerts</span>
@@ -742,7 +754,7 @@
         <label class="tp-label" for="tp-body" id="tp-body-label">Your review</label>
         <textarea id="tp-body" class="auth-input textarea-input modal-input" maxlength="2000" oninput="updateTpCounter()"></textarea>
         <div class="tp-body-foot">
-          <label class="tp-anon"><input type="checkbox" id="tp-anon" /> Post anonymously</label>
+          <label class="tp-anon"><input type="checkbox" id="tp-anon" /> <i class="fa-solid fa-user-secret"></i> Post anonymously</label>
           <span id="tp-counter" class="chat-char-counter">0/2000</span>
         </div>
 
@@ -805,6 +817,7 @@
       <form onsubmit="submitPost(event)">
         <input type="text" id="post-title" class="auth-input modal-input" placeholder="Headline / Subject" required />
         <textarea id="post-text" class="auth-input textarea-input modal-input" placeholder="What's happening on campus?" required></textarea>
+        <button type="button" class="posting-as" data-posting-as onclick="setAnonymous(!appSettings.anonymous)"></button>
         <div class="modal-actions">
           <button type="button" class="secondary-btn" onclick="closePostModal()">Cancel</button>
           <button type="submit" class="primary-btn">Post</button>

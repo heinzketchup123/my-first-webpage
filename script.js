@@ -121,7 +121,7 @@ function applyPalette(palette) {
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', palette['--bg-color']);
 }
 
-const defaultSettings = { lightMode: false, anonymous: true, autoSystemTheme: false };
+const defaultSettings = { lightMode: false, anonymous: false, autoSystemTheme: false };
 const defaultAppearance = { themeName: 'cyber', mode: 'dark', fontSize: 1, density: 'normal', customColors: null, layout: 'auto' };
 const DESKTOP_MIN_WIDTH = 960;   // Auto layout switches to the computer version at this width
 const WIDE_MIN_WIDTH = 700;      // below this (phones) only the phone layout is available
@@ -203,6 +203,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (session) {
       currentUser = session.user.email;
       currentUserId = session.user.id;
+      loadAnonymous();
       document.getElementById('auth-screen').style.display = 'none';
       const nameDisplay = currentUser.split('@')[0];
       document.getElementById('user-welcome-title').textContent = `Welcome, ${nameDisplay}`;
@@ -223,6 +224,7 @@ document.addEventListener("DOMContentLoaded", () => {
       adminJoinRequests = []; adminJoinCodes = {}; myJoinRequests = {};
       resetFeedAndNotifState();
       updateSchoolChrome();
+      appSettings.anonymous = false; renderAnonymous();
       document.getElementById('auth-screen').style.display = 'flex';
       renderEmptyStates();
     }
@@ -323,6 +325,7 @@ async function loadAllSupabaseData() {
   await Promise.all([fetchFeed(), fetchGroups(), fetchFriendships(), fetchTeacherDirectory(),
                      fetchMyReviewCount(), fetchEvents(), fetchNotifications()]);
   loadGpa();
+  renderAnonymous();
   updateNotifBadge();
 }
 
@@ -514,6 +517,7 @@ async function logout() {
   currentSchool = null; currentSchoolId = null;
   friends = []; pendingIncoming = []; pendingOutgoing = [];
   campusFeed = []; studyGroups = []; gpaCourses = [];
+  appSettings.anonymous = false; renderAnonymous();
   gpaState = { mode: 'unweighted', input: 'letter', prevGpa: '', prevCredits: '', target: '' };
   ['gpa-prev', 'gpa-prev-credits', 'gpa-target'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   groupFilter = 'all'; groupMembers = {};
@@ -750,6 +754,62 @@ function toggleSettingSwitch(listItem, key) {
   const toggle = listItem.querySelector('.toggle-btn');
   toggle.classList.toggle('active');
   appSettings[key] = toggle.classList.contains('active');
+}
+
+// -------------------- Anonymous mode --------------------
+// Off unless you turn it on; the choice is saved per account on this device.
+// While it's on, a badge in the top bar says so, and every place you post
+// shows who you're posting as (tap it to switch).
+function anonKey() { return currentUserId ? `anonMode_${currentUserId}` : null; }
+
+function loadAnonymous() {
+  let on = false;
+  try { on = !!anonKey() && localStorage.getItem(anonKey()) === '1'; } catch (_) {}
+  appSettings.anonymous = on;
+  renderAnonymous();
+}
+
+function setAnonymous(on) {
+  on = !!on;
+  if (on === !!appSettings.anonymous) return renderAnonymous();
+  appSettings.anonymous = on;
+  try { if (anonKey()) localStorage.setItem(anonKey(), on ? '1' : '0'); } catch (_) {}
+  renderAnonymous();
+  showToast(on ? 'Anonymous mode on: new posts show as Anonymous Student.'
+               : `Anonymous mode off: new posts show as ${myPublicName()}.`, 'info', 3000);
+}
+
+function myPublicName() {
+  if (currentHandle) return '@' + currentHandle;
+  return currentUser ? currentUser.split('@')[0] : 'you';
+}
+
+function renderAnonymous() {
+  const on = !!appSettings.anonymous;
+  document.querySelectorAll('#anon-seg .seg-btn').forEach(b => b.classList.toggle('active', (b.dataset.anon === 'on') === on));
+  const state = document.getElementById('anon-state');
+  if (state) { state.textContent = on ? 'On' : 'Off'; state.classList.toggle('on', on); }
+  document.getElementById('anon-card')?.classList.toggle('on', on);
+  const hint = document.getElementById('anon-hint');
+  if (hint) hint.textContent = on
+    ? 'New posts, comments and reviews show as “Anonymous Student”. Chats with friends and groups still show your name.'
+    : `New posts, comments and reviews show as ${myPublicName()}.`;
+  const badge = document.getElementById('anon-indicator');
+  if (badge) badge.hidden = !(on && currentUserId);
+  document.querySelectorAll('[data-posting-as]').forEach(el => {
+    el.classList.toggle('on', on);
+    el.innerHTML = on
+      ? '<i class="fa-solid fa-user-secret"></i><span>Posting as <strong>Anonymous Student</strong></span><small>Tap to show your name</small>'
+      : `<i class="fa-solid fa-user"></i><span>Posting as <strong>${escapeHtml(myPublicName())}</strong></span><small>Tap to go anonymous</small>`;
+  });
+}
+
+function showAnonSetting() {
+  switchTab('settings-view');
+  const card = document.getElementById('anon-card');
+  if (!card) return;
+  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
 }
 
 // Tab Navigation
@@ -2390,12 +2450,14 @@ function openCommentsModal(postId) {
   document.getElementById('modalTitle').textContent = post.title || 'Discussion';
   document.getElementById('modalBody').innerHTML = `
     <div id="comments-list" class="comments-list"></div>
+    ${currentUserId ? '<button type="button" class="posting-as compact" data-posting-as onclick="setAnonymous(!appSettings.anonymous)"></button>' : ''}
     <form class="comment-compose" onsubmit="event.preventDefault(); addCommentToPost();">
       <input type="text" id="new-comment-input" class="chat-input" maxlength="500"
              placeholder="${currentUserId ? 'Write a comment…' : 'Sign in to comment'}" ${currentUserId ? '' : 'disabled'} />
       <button type="submit" class="chat-send-btn" aria-label="Send comment"><i class="fa-solid fa-paper-plane"></i></button>
     </form>`;
   renderCommentsList();
+  renderAnonymous();
   document.getElementById('detailModal').style.display = 'flex';
 }
 
@@ -2453,7 +2515,7 @@ async function deleteComment(id) {
   renderCommentsList();
 }
 
-function openNewPostModal() { document.getElementById('postModal').style.display = 'flex'; }
+function openNewPostModal() { renderAnonymous(); document.getElementById('postModal').style.display = 'flex'; }
 function closePostModal() { document.getElementById('postModal').style.display = 'none'; }
 
 async function submitPost(event) {
