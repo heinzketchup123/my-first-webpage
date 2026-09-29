@@ -1881,11 +1881,42 @@ function centerActiveChip(force) {
   const chip = strip.querySelector('.friend-chip.active');
   if (!chip || !strip.clientWidth) return;   // not on screen yet
   stripCenteredFor = key;
-  const box = strip.getBoundingClientRect();
-  const c = chip.getBoundingClientRect();
-  const left = strip.scrollLeft + (c.left - box.left) - (strip.clientWidth - c.width) / 2;
-  strip.scrollTo({ left: Math.max(0, left), behavior: force ? 'auto' : 'smooth' });
+  centerInRow(strip, chip, !force);
 }
+
+// -------------------- Sideways rows --------------------
+// Rows that slide sideways (filter chips, the chat row): the one you pick
+// slides to the middle so the options on either side are easy to reach, and
+// a mouse wheel scrolls them sideways (their scroll bars are hidden).
+const HSCROLL_ROWS = '.filter-chips, .friends-strip';
+function centerInRow(row, item, smooth) {
+  if (!row || !item || row.scrollWidth <= row.clientWidth + 1) return;
+  const box = row.getBoundingClientRect();
+  const c = item.getBoundingClientRect();
+  const left = row.scrollLeft + (c.left - box.left) - (row.clientWidth - c.width) / 2;
+  row.scrollTo({ left: Math.max(0, left), behavior: smooth ? 'smooth' : 'auto' });
+}
+// Capture phase: runs before the chip's own onclick, which may redraw the row.
+document.addEventListener('click', e => {
+  const row = e.target.closest?.(HSCROLL_ROWS);
+  if (!row || row.id === 'friends-strip') return;   // the chat row centres itself (centerActiveChip)
+  const index = [...row.children].findIndex(c => c.contains(e.target));
+  requestAnimationFrame(() => {
+    if (!row.isConnected) return;
+    centerInRow(row, row.querySelector(':scope > .active') || row.children[index], true);
+  });
+}, true);
+document.addEventListener('wheel', e => {
+  const row = e.target.closest?.(HSCROLL_ROWS);
+  if (!row || e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+  const max = row.scrollWidth - row.clientWidth;
+  if (max <= 1) return;   // nothing to slide (e.g. the chat list on a computer scrolls up and down)
+  const dy = e.deltaY * (e.deltaMode === 1 ? 16 : 1);
+  // At either end, let the page scroll as normal.
+  if ((dy < 0 && row.scrollLeft <= 0) || (dy > 0 && row.scrollLeft >= max - 1)) return;
+  e.preventDefault();
+  row.scrollLeft = Math.max(0, Math.min(max, row.scrollLeft + dy));
+}, { passive: false });
 
 function escapeAttr(v) { return String(v).replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
 

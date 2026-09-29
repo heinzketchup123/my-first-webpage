@@ -4203,3 +4203,10 @@ html:not(.layout-desktop) .chat-head-btn-text { display: none; }
 
 /* Phones: chats in the row snap to the middle (the open one is scrolled there) */
 html:not(.layout-desktop) .friend-chip { scroll-snap-align: center; }
+
+/* ---------- No sideways scroll bars ---------- */
+/* Chip rows still slide (swipe, trackpad or mouse wheel), just without a bar. */
+.filter-chips, .friends-strip { scrollbar-width: none; overscroll-behavior-x: contain; }
+.filter-chips::-webkit-scrollbar, .friends-strip::-webkit-scrollbar { display: none; }
+/* Panels that scroll up and down never scroll sideways. */
+.content-container, .modal-content, .notif-body, .chat-messages-box, .friends-tab-body { overflow-x: hidden; }
