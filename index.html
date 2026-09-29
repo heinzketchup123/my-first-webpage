@@ -83,6 +83,8 @@
           <input type="password" id="login-password" class="auth-input" placeholder="Password" required />
           <button type="submit" class="primary-btn">Sign In</button>
           <p class="auth-toggle-text">Need an account? <span onclick="toggleAuthMode()">Sign Up</span></p>
+          <p class="auth-legal">By continuing you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms</a>
+            and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</p>
         </form>
 
         <form id="signup-form" class="auth-form hidden" onsubmit="handleAuth(event)">
@@ -103,6 +105,8 @@
           <input type="password" id="signup-password" class="auth-input" placeholder="Password" required />
           <button type="submit" class="primary-btn">Create Account</button>
           <p class="auth-toggle-text">Already have an account? <span onclick="toggleAuthMode()">Sign In</span></p>
+          <p class="auth-legal">By continuing you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms</a>
+            and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</p>
         </form>
       </div>
     </div>
@@ -667,6 +671,11 @@
             <i class="fa-solid fa-right-from-bracket"></i> Sign Out
           </button>
         </div>
+        <p class="legal-links">
+          <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
+          <span aria-hidden="true">·</span>
+          <a href="terms.html" target="_blank" rel="noopener">Terms of Service</a>
+        </p>
       </section>
 
     </main>

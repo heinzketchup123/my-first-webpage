@@ -3643,3 +3643,10 @@ html.layout-phone .app-header .brand-group { gap: 7px; min-width: 0; flex-shrink
 html.layout-phone .app-header .brand-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html.layout-phone .app-header .header-actions { gap: 6px; flex-shrink: 0; }
 html.layout-phone .app-header .review-trigger-btn { white-space: nowrap; padding: 8px 12px; }
+
+/* ---------- Privacy policy / terms links ---------- */
+.auth-legal { color: var(--sub-text-color); font-size: 0.74rem; line-height: 1.5; margin-top: 2px; }
+.auth-legal a, .legal-links a { color: var(--accent-color); font-weight: 700; text-decoration: none; }
+.auth-legal a:hover, .legal-links a:hover { text-decoration: underline; }
+.legal-links { display: flex; justify-content: center; gap: 8px; width: 100%; margin: 14px 0 4px; font-size: 0.78rem; color: var(--sub-text-color); }
+html.layout-desktop #settings-view > .legal-links { grid-column: 1 / -1; }
