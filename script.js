@@ -4161,8 +4161,23 @@ const POST_KIND_META = {
     placeholder: 'Tips, heads-ups, useful resources, how to do well...',
     tags: ['Tip', 'Heads up', 'Resource', 'Office hours', 'Study guide'],
     tagLabel: 'Type', maxTags: 2, empty: 'No notes yet.', cta: '+ Add a note'
+  },
+  supplies: {
+    title: 'Add a supply list', editTitle: 'Edit supply list', bodyLabel: 'Anything else? (optional)',
+    placeholder: 'Where to get them, which kind, what you actually ended up using...',
+    tags: ['Required', 'Recommended', 'Bring every day', 'For labs', 'For projects'],
+    tagLabel: 'How needed?', maxTags: 2, empty: 'No supply lists yet. Know what this class needs?', cta: '+ Add supplies'
   }
 };
+// Quick picks in the supply-list form (plus whatever others listed for this teacher).
+const COMMON_SUPPLIES = ['Notebook', 'Binder', 'Folder', 'Pencils', 'Pens', 'Highlighters', 'Graphing calculator',
+                         'Laptop / Chromebook', 'Headphones', 'Textbook', 'Lab goggles', 'Colored pencils', 'Index cards'];
+// Same item however it's written: "Pencils", "pencil ", "PENCILS" → "pencil".
+function supplyKey(item) {
+  let k = String(item || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (k.length > 3 && k.endsWith('s') && !k.endsWith('ss')) k = k.slice(0, -1);
+  return k;
+}
 const RATING_WORDS = ['', 'Awful', 'Poor', 'OK', 'Good', 'Awesome'];
 const DIFFICULTY_WORDS = ['', 'Very easy', 'Easy', 'Medium', 'Hard', 'Very hard'];
 
@@ -4590,7 +4605,7 @@ function myReviewOnTeacher() {
 function renderTeacherPage() {
   if (!currentTeacher) return;
   renderTeacherHero();
-  ['review', 'requirement', 'note'].forEach(k => {
+  ['review', 'requirement', 'note', 'supplies'].forEach(k => {
     const el = document.getElementById(`tt-count-${k}`);
     if (el) el.textContent = teacherPosts.filter(p => p.kind === k).length;
   });
@@ -4648,6 +4663,100 @@ function renderTeacherHero() {
     ${isAdmin ? `<button class="secondary-btn admin-inline-btn" onclick="adminDeleteTeacher()">
       <i class="fa-solid fa-shield-halved"></i> Delete teacher page</button>` : ''}
   `;
+}
+
+// Everyone's supply lists combined: each item once, with how many students
+// listed it, most-mentioned first. Ticks ("I've got this") stay on this device.
+function supplySummaryHtml(posts) {
+  const items = {};
+  posts.forEach(p => {
+    const seen = new Set();
+    (p.items || []).forEach(raw => {
+      const key = supplyKey(raw);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      const it = items[key] = items[key] || { key, n: 0, names: {} };
+      it.n += 1;
+      const label = String(raw).trim();
+      it.names[label] = (it.names[label] || 0) + 1;
+    });
+  });
+  const rows = Object.values(items)
+    // Show the spelling most people used (capitalised when there's a tie).
+    .map(it => {
+      const best = Object.entries(it.names).sort((a, b) =>
+        b[1] - a[1] || (/^[A-Z]/.test(b[0]) - /^[A-Z]/.test(a[0])) || a[0].localeCompare(b[0]))[0][0];
+      return { ...it, label: best.charAt(0).toUpperCase() + best.slice(1) };
+    })
+    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+  if (!rows.length) return '';
+  const have = supplyChecks();
+  const got = rows.filter(r => have.has(r.key)).length;
+  const lists = posts.filter(p => (p.items || []).length).length;
+  return `
+    <div class="info-card supply-summary">
+      <div class="supply-summary-head">
+        <div>
+          <strong><i class="fa-solid fa-clipboard-list"></i> Supply list</strong>
+          <small>From ${lists} student${lists === 1 ? "'s list" : "s' lists"} · tick what you've got</small>
+        </div>
+        <span class="supply-progress ${got === rows.length ? 'done' : ''}">${got}/${rows.length}</span>
+      </div>
+      <ul class="supply-rows">
+        ${rows.map(r => `
+          <li>
+            <label class="${have.has(r.key) ? 'got' : ''}">
+              <input type="checkbox" ${have.has(r.key) ? 'checked' : ''} onchange="toggleSupplyCheck('${escapeAttr(r.key)}', this.checked)" />
+              <span class="supply-name">${escapeHtml(r.label)}</span>
+              <span class="supply-count" title="${r.n} student${r.n === 1 ? '' : 's'} listed this">${r.n} ${r.n === 1 ? 'student' : 'students'}</span>
+            </label>
+          </li>`).join('')}
+      </ul>
+    </div>`;
+}
+
+function supplyChecksKey() { return `supplies_${currentUserId || 'guest'}_${currentTeacher?.id}`; }
+function supplyChecks() {
+  try { return new Set(JSON.parse(localStorage.getItem(supplyChecksKey()) || '[]')); } catch (_) { return new Set(); }
+}
+function toggleSupplyCheck(key, on) {
+  const set = supplyChecks();
+  if (on) set.add(key); else set.delete(key);
+  try { localStorage.setItem(supplyChecksKey(), JSON.stringify([...set])); } catch (_) {}
+  renderTeacherPosts();
+}
+
+// Supply-list form: add items one at a time, or tap a suggestion.
+function renderTpItems() {
+  const list = document.getElementById('tp-items');
+  const sug = document.getElementById('tp-item-suggest');
+  if (!list || !sug) return;
+  const items = tpDraft.items || [];
+  list.innerHTML = items.length ? items.map((it, i) => `
+    <span class="tp-item">${escapeHtml(it)}
+      <button type="button" onclick="removeTpItem(${i})" aria-label="Remove ${escapeAttr(it)}"><i class="fa-solid fa-xmark"></i></button>
+    </span>`).join('') : '<span class="tp-items-empty">Nothing added yet.</span>';
+  const taken = new Set(items.map(supplyKey));
+  const fromOthers = teacherPosts.filter(p => p.kind === 'supplies').flatMap(p => p.items || []);
+  const ideas = [...new Map([...fromOthers, ...COMMON_SUPPLIES].map(x => [supplyKey(x), String(x).trim()])).values()]
+    .filter(x => !taken.has(supplyKey(x))).slice(0, 12);
+  sug.innerHTML = ideas.length ? `<small>Quick add:</small> ${ideas.map(x =>
+    `<button type="button" class="tp-tag" onclick="addTpItem('${escapeAttr(x)}')">+ ${escapeHtml(x)}</button>`).join('')}` : '';
+}
+function addTpItem(value) {
+  const input = document.getElementById('tp-item-input');
+  const item = String(value ?? input?.value ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (!item) return;
+  tpDraft.items = tpDraft.items || [];
+  if (tpDraft.items.some(x => supplyKey(x) === supplyKey(item))) { if (input && value == null) input.value = ''; return; }
+  if (tpDraft.items.length >= 30) return showToast('That\'s the most one list can hold (30).', 'info', 2500);
+  tpDraft.items.push(item);
+  if (input && value == null) { input.value = ''; input.focus(); }
+  renderTpItems();
+}
+function removeTpItem(i) {
+  (tpDraft.items || []).splice(i, 1);
+  renderTpItems();
 }
 
 function setTeacherTab(kind) {
@@ -4741,19 +4850,21 @@ function renderTeacherPosts() {
   }
   if (!list.length) {
     container.innerHTML = `<div class="empty-state">
-      <i class="fa-solid fa-${teacherTab === 'review' ? 'star' : teacherTab === 'requirement' ? 'list-check' : 'note-sticky'}"></i>
+      <i class="fa-solid fa-${({ review: 'star', requirement: 'list-check', note: 'note-sticky', supplies: 'pencil' })[teacherTab] || 'note-sticky'}"></i>
       <p>${meta.empty}</p>
       ${canPostOnTeacher() ? `<button class="primary-btn" onclick="openTeacherPostModal()">${meta.cta}</button>` : ''}
     </div>`;
     return;
   }
 
+  const summary = teacherTab === 'supplies' ? supplySummaryHtml(list) : '';
+
   // Keep what you were typing (and where) when the page redraws.
   const drafts = {};
   container.querySelectorAll('.tpc-input').forEach(i => { if (i.value) drafts[i.dataset.post] = i.value; });
   const focused = document.activeElement?.classList?.contains('tpc-input') ? document.activeElement.dataset.post : null;
 
-  container.innerHTML = list.map(p => {
+  container.innerHTML = summary + list.map(p => {
     const mine = p.author_id && p.author_id === currentUserId;
     const votes = teacherVotes[p.id] || { up: 0, down: 0, my: 0 };
     const pid = escapeAttr(p.id);
@@ -4782,7 +4893,9 @@ function renderTeacherPosts() {
         </div>
         ${reviewBits}
         ${(p.tags || []).length ? `<div class="tpost-tags">${p.tags.map(tag => `<span class="tag-chip">${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
-        <p class="tpost-body">${renderSafeMessage(p.body || '')}</p>
+        ${p.kind === 'supplies' && (p.items || []).length ? `<ul class="tpost-items">${p.items.map(it =>
+          `<li><i class="fa-solid fa-check"></i> ${escapeHtml(it)}</li>`).join('')}</ul>` : ''}
+        ${p.kind === 'supplies' && p.body === (p.items || []).join(', ') ? '' : `<p class="tpost-body">${renderSafeMessage(p.body || '')}</p>`}
         <div class="tpost-actions">
           <button class="vote-btn up ${votes.my === 1 ? 'active' : ''}" onclick="voteTeacherPost('${pid}', 1)"
                   ${mine ? 'disabled title="You can\'t vote on your own post"' : busy} aria-label="Like" aria-pressed="${votes.my === 1}">
@@ -4972,12 +5085,16 @@ function openTeacherPostModal(editId) {
     rating: post?.rating || 0,
     difficulty: post?.difficulty || 0,
     again: post?.would_take_again == null ? null : (post.would_take_again ? 'yes' : 'no'),
-    tags: [...(post?.tags || [])]
+    tags: [...(post?.tags || [])],
+    items: [...(post?.items || [])]
   };
 
   document.getElementById('tp-modal-title').textContent = editingPostId ? meta.editTitle : meta.title;
   document.getElementById('tp-modal-sub').textContent = `About ${currentTeacher.name}`;
   document.getElementById('tp-review-fields').style.display = composerKind === 'review' ? 'block' : 'none';
+  document.getElementById('tp-items-fields').style.display = composerKind === 'supplies' ? 'block' : 'none';
+  const itemInput = document.getElementById('tp-item-input');
+  if (itemInput) itemInput.value = '';
   document.getElementById('tp-tags-label').textContent = meta.tagLabel;
   document.getElementById('tp-body-label').textContent = meta.bodyLabel;
 
@@ -4988,7 +5105,8 @@ function openTeacherPostModal(editId) {
   document.getElementById('tp-course-list').innerHTML = courses.map(c => `<option value="${escapeAttr(c)}"></option>`).join('');
 
   const body = document.getElementById('tp-body');
-  body.value = post?.body || '';
+  // (A supply list with no note stores its items as the text; don't show that twice.)
+  body.value = post?.kind === 'supplies' && post.body === (post.items || []).join(', ') ? '' : (post?.body || '');
   body.placeholder = meta.placeholder;
   document.getElementById('tp-anon').checked = post ? post.author_name === ANON_AUTHOR : !!appSettings.anonymous;
   document.getElementById('tp-submit-btn').textContent = editingPostId ? 'Save changes' : 'Post';
@@ -4997,6 +5115,7 @@ function openTeacherPostModal(editId) {
   renderTpScale('tp-difficulty', 'difficulty', DIFFICULTY_WORDS);
   syncTpAgain();
   renderTpTags();
+  renderTpItems();
   updateTpCounter();
   document.getElementById('teacherPostModal').style.display = 'flex';
 }
@@ -5053,14 +5172,20 @@ async function submitTeacherPost(event) {
 
   if (kind === 'review' && !tpDraft.rating) return showToast('Pick an overall rating.', 'warn');
   if (kind === 'requirement' && !course) return showToast('Which course are these requirements for?', 'warn');
-  if (!body) return showToast('Write something first.', 'warn');
+  // Something still typed in the item box counts too.
+  if (kind === 'supplies' && document.getElementById('tp-item-input')?.value.trim()) addTpItem();
+  const items = kind === 'supplies' ? (tpDraft.items || []).slice(0, 30) : [];
+  if (kind === 'supplies' && !items.length) return showToast('Add at least one supply.', 'warn');
+  const text = kind === 'supplies' ? (body || items.join(', ')).slice(0, 2000) : body;
+  if (!text) return showToast('Write something first.', 'warn');
 
   const anon = document.getElementById('tp-anon').checked;
   const row = {
-    kind, course, body,
+    kind, course, body: text,
     tags: tpDraft.tags.slice(0, 8),
     author_name: anon ? ANON_AUTHOR : sanitizeName(currentHandle || currentUser.split('@')[0])
   };
+  if (kind === 'supplies') row.items = items;
   if (kind === 'review') {
     row.rating = tpDraft.rating;
     row.difficulty = tpDraft.difficulty || null;
@@ -5076,6 +5201,9 @@ async function submitTeacherPost(event) {
 
   if (error) {
     if (error.code === '23505') return showToast('You already reviewed this teacher — edit that review instead.', 'warn', 4500);
+    if (kind === 'supplies' && /items|teacher_posts_kind_check|violates check/i.test(error.message || '')) {
+      return showToast('Supply lists need a quick database update: run the updated SCHEMA.sql in Supabase.', 'warn', 5000);
+    }
     return showToast('Could not post: ' + error.message, 'error');
   }
   showToast(editingPostId ? 'Saved.' : 'Posted — thanks for helping other students!', 'success');

@@ -3928,3 +3928,78 @@ html.layout-desktop .bottom-nav:hover { scrollbar-color: color-mix(in srgb, var(
 }
 .teacher-card .teacher-classes i { font-size: 0.7rem; margin-right: 4px; color: var(--accent-color); }
 html.layout-desktop #teacher-directory { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+
+/* ---------- Teacher page: supply lists ---------- */
+.tpost-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.tpost-items li { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; font-weight: 600; }
+.tpost-items i { font-size: 0.72rem; color: var(--success); width: 14px; text-align: center; }
+
+.supply-summary { text-align: left; display: flex; flex-direction: column; gap: 10px; border-color: var(--accent-soft-border); }
+.supply-summary-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.supply-summary-head strong { display: block; font-size: 1rem; }
+.supply-summary-head strong i { color: var(--accent-color); margin-right: 4px; }
+.supply-summary-head small { font-size: 0.74rem; color: var(--sub-text-color); }
+.supply-progress {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--input-bg);
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--sub-text-color);
+}
+.supply-progress.done { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+.supply-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.supply-rows label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.supply-rows label:hover { background: var(--input-bg); }
+.supply-rows input { width: 18px; height: 18px; accent-color: var(--accent-color); flex-shrink: 0; margin: 0; }
+.supply-name { flex: 1; min-width: 0; font-size: 0.88rem; font-weight: 600; }
+.supply-rows label.got .supply-name { color: var(--sub-text-color); text-decoration: line-through; }
+.supply-count { flex-shrink: 0; font-size: 0.72rem; font-weight: 700; color: var(--sub-text-color); }
+
+/* Supply-list form */
+.tp-items-add { display: flex; gap: 8px; }
+.tp-items-add .auth-input { flex: 1; min-width: 0; margin: 0; }
+.tp-items-add .secondary-btn { flex-shrink: 0; margin: 0; padding: 10px 14px; }
+.tp-items { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+.tp-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-muted);
+  border: 1px solid var(--accent-soft-border);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.tp-item button {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sub-text-color);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+.tp-item button:hover { color: var(--danger); background: var(--input-bg); }
+.tp-items-empty { font-size: 0.78rem; color: var(--sub-text-color); }
+.tp-item-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; }
+.tp-item-suggest small { font-size: 0.72rem; font-weight: 700; color: var(--sub-text-color); }
+.tp-label small { font-weight: 600; color: var(--sub-text-color); }
+/* Four tabs now (Reviews, Course Info, Notes, Supplies) — one row everywhere */
+.teacher-tabs { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 420px) {
+  .teacher-tabs { grid-template-columns: repeat(4, auto); justify-content: space-between; gap: 2px; }
+  .teacher-tab { padding: 9px 5px; font-size: 0.72rem; gap: 3px; }
+  .teacher-tab .tt-count { min-width: 16px; }
+}

@@ -587,6 +587,20 @@ create table if not exists public.teacher_posts (
 );
 create index if not exists teacher_posts_teacher_idx
   on public.teacher_posts (teacher_id, created_at desc);
+
+-- Supply lists: posts of kind 'supplies' carry the items students say you
+-- need for the class (up to 30, each up to 60 characters).
+alter table public.teacher_posts add column if not exists items text[] not null default '{}';
+do $$ begin
+  alter table public.teacher_posts drop constraint if exists teacher_posts_kind_check;
+  alter table public.teacher_posts add constraint teacher_posts_kind_check
+    check (kind in ('review', 'requirement', 'note', 'supplies'));
+end $$;
+do $$ begin
+  alter table public.teacher_posts add constraint teacher_posts_items_check
+    check (coalesce(array_length(items, 1), 0) <= 30);
+exception when duplicate_object then null;
+end $$;
 -- One review per student per teacher (they can edit it instead).
 create unique index if not exists teacher_posts_one_review_per_user
   on public.teacher_posts (teacher_id, author_id) where kind = 'review';

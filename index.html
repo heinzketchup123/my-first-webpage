@@ -296,6 +296,9 @@
           <button class="teacher-tab" data-kind="note" onclick="setTeacherTab('note')">
             <i class="fa-solid fa-note-sticky"></i> Notes <span class="tt-count" id="tt-count-note">0</span>
           </button>
+          <button class="teacher-tab" data-kind="supplies" onclick="setTeacherTab('supplies')">
+            <i class="fa-solid fa-pencil"></i> Supplies <span class="tt-count" id="tt-count-supplies">0</span>
+          </button>
         </div>
 
         <div class="filter-chips star-chips" id="teacher-star-chips" hidden></div>
@@ -816,6 +819,17 @@
             <button type="button" class="seg-btn" data-val="yes" onclick="setTpAgain('yes')">Yes</button>
             <button type="button" class="seg-btn" data-val="no" onclick="setTpAgain('no')">No</button>
           </div>
+        </div>
+
+        <div id="tp-items-fields" style="display:none;">
+          <label class="tp-label" for="tp-item-input">What do you need? <small>(add one at a time)</small></label>
+          <div class="tp-items-add">
+            <input type="text" id="tp-item-input" class="auth-input" maxlength="60" autocomplete="off"
+                   placeholder="e.g. Graphing calculator" onkeydown="if (event.key === 'Enter') { event.preventDefault(); addTpItem(); }" />
+            <button type="button" class="secondary-btn" onclick="addTpItem()"><i class="fa-solid fa-plus"></i> Add</button>
+          </div>
+          <div class="tp-items" id="tp-items"></div>
+          <div class="tp-item-suggest" id="tp-item-suggest"></div>
         </div>
 
         <label class="tp-label" id="tp-tags-label">Tags</label>
