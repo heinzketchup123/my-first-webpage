@@ -119,6 +119,49 @@ function applyPalette(palette) {
   Object.entries(palette).forEach(([k, v]) => root.style.setProperty(k, v));
   // Phone status bar / browser chrome color follows the theme.
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', palette['--bg-color']);
+  renderAppLogo(palette);
+}
+
+// -------------------- App logo in the theme's colours --------------------
+// The logo in the top bar, sidebar, sign-in screen and browser tab is drawn
+// from the current theme and light/dark mode, so it always matches. (The Home
+// Screen icon is a fixed picture; phones can't recolour those.)
+let logoSeq = 0;
+function appLogoSvg(p) {
+  const id = 'applogo' + (++logoSeq);            // gradient ids must be unique on the page
+  const light = !!appSettings.lightMode;
+  const accent = p['--accent-color'], bg = p['--bg-color'];
+  const tileA = light ? mixHex('#ffffff', accent, 0.12) : mixHex(bg, accent, 0.2);
+  const tileB = light ? mixHex(bg, accent, 0.2) : mixHex(bg, '#000000', 0.35);
+  const capA = mixHex(accent, '#ffffff', light ? 0.2 : 0.4);
+  const bandA = mixHex(accent, '#000000', light ? 0.3 : 0.55);
+  const bandB = mixHex(accent, '#000000', light ? 0.45 : 0.68);
+  const ink = light ? p['--main-text-color'] : '#f8fafc';   // pulse + tassel
+  const edge = light ? `<rect x="6" y="6" width="500" height="500" rx="106" fill="none" stroke="${mixHex(bg, accent, 0.35)}" stroke-width="12"/>` : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" aria-hidden="true">
+    <defs>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${tileA}"/><stop offset="1" stop-color="${tileB}"/></linearGradient>
+      <radialGradient id="${id}gl" cx="0.28" cy="0.2" r="0.8"><stop offset="0" stop-color="${accent}" stop-opacity="${light ? 0.22 : 0.45}"/><stop offset="0.5" stop-color="${accent}" stop-opacity="${light ? 0.05 : 0.08}"/><stop offset="1" stop-color="${accent}" stop-opacity="0"/></radialGradient>
+      <linearGradient id="${id}cap" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${capA}"/><stop offset="1" stop-color="${accent}"/></linearGradient>
+      <linearGradient id="${id}band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${bandA}"/><stop offset="1" stop-color="${bandB}"/></linearGradient>
+    </defs>
+    <rect width="512" height="512" rx="112" fill="url(#${id}bg)"/>
+    <rect width="512" height="512" rx="112" fill="url(#${id}gl)"/>${edge}
+    <g transform="translate(256 262) scale(1.14) translate(-256 -262)">
+      <path d="M162 214 L162 268 C162 296 206 316 256 316 C306 316 350 296 350 268 L350 214 L256 256 Z" fill="url(#${id}band)"/>
+      <path d="M256 112 L432 188 L256 264 L80 188 Z" fill="url(#${id}cap)"/>
+      <path d="M256 188 L392 206 L392 276" fill="none" stroke="${ink}" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="392" cy="285" r="14" fill="${ink}"/>
+      <path d="M92 384 H186 L214 346 L246 424 L284 322 L314 384 H420" fill="none" stroke="${ink}" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </svg>`;
+}
+
+function renderAppLogo(palette) {
+  document.querySelectorAll('[data-app-logo]').forEach(el => { el.innerHTML = appLogoSvg(palette); });
+  // Browser tab icon too.
+  const tab = document.querySelector('link[rel="icon"][type="image/svg+xml"]');
+  if (tab) tab.href = 'data:image/svg+xml,' + encodeURIComponent(appLogoSvg(palette).replace(' aria-hidden="true"', ''));
 }
 
 const defaultSettings = { lightMode: false, anonymous: false, autoSystemTheme: false };

@@ -65,7 +65,7 @@
     <!-- Auth Overlay -->
     <div id="auth-screen" class="auth-overlay">
       <div class="auth-box">
-        <img class="auth-logo" src="icons/favicon.svg" alt="Campus Pulse" width="72" height="72" />
+        <span class="auth-logo" data-app-logo role="img" aria-label="Campus Pulse"><img src="icons/favicon.svg" alt="" /></span>
         <form id="login-form" class="auth-form" onsubmit="handleAuth(event)">
           <h2>Welcome Back</h2>
           <p class="auth-sub">Sign in to your school's Campus Pulse</p>
@@ -114,7 +114,7 @@
     <!-- App Header -->
     <header class="app-header">
       <div class="brand-group">
-        <img class="brand-logo" src="icons/favicon.svg" alt="" width="28" height="28" />
+        <span class="brand-logo" data-app-logo><img src="icons/favicon.svg" alt="" /></span>
         <span class="brand-title">Campus Pulse</span>
       </div>
       <!-- Computer layout: search teachers from any page -->
@@ -684,7 +684,7 @@
     <!-- Phones: bottom tab bar. Computers: left sidebar (extra items shown there). -->
     <nav class="bottom-nav">
       <div class="sidebar-brand desktop-only">
-        <img class="brand-logo" src="icons/favicon.svg" alt="" width="32" height="32" />
+        <span class="brand-logo" data-app-logo><img src="icons/favicon.svg" alt="" /></span>
         <span class="brand-title">Campus Pulse</span>
       </div>
       <button class="primary-btn sidebar-post-btn desktop-only" onclick="openNewPostModal()">

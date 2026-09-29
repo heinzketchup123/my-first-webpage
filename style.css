@@ -3636,8 +3636,11 @@ html.layout-desktop .sidebar-brand .brand-logo { width: 32px; height: 32px; bord
   height: 72px;
   margin: 0 auto 6px;
   border-radius: 18px;
-  box-shadow: 0 10px 30px rgba(34, 211, 238, 0.18);
+  box-shadow: 0 10px 30px var(--accent-muted);
 }
+/* The logo is drawn in the theme's colours (see renderAppLogo in script.js) */
+.brand-logo > svg, .brand-logo > img,
+.auth-logo > svg, .auth-logo > img { display: block; width: 100%; height: 100%; }
 /* Phone top bar: logo + name on one line, even with the Anonymous badge showing */
 html.layout-phone .app-header .brand-group { gap: 7px; min-width: 0; flex-shrink: 1; }
 html.layout-phone .app-header .brand-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
