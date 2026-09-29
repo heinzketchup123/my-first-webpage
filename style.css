@@ -3788,3 +3788,14 @@ html.layout-phone .star-chips .chip-count { display: none; }   /* the chart abov
 .profile-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; margin-top: 12px; }
 .profile-actions .primary-btn, .profile-actions .secondary-btn { width: 100%; max-width: 260px; margin: 0; }
 .profile-note { margin: 0; font-size: 0.8rem; color: var(--sub-text-color); }
+
+/* ---------- Settings: your name + blocked people ---------- */
+.display-name-form { display: flex; gap: 8px; align-items: flex-end; }
+.display-name-form .gpa-field { flex: 1; }
+.display-name-form .primary-btn { flex-shrink: 0; margin: 0; padding: 11px 18px; }
+#profile-settings-card .admin-hint { margin: 10px 0 0; }
+.blocked-row { gap: 10px; }
+.blocked-row .school-row-text { flex: 1; min-width: 0; }
+#blocked-card .admin-hint { margin: 10px 0 0; }
+.profile-actions .profile-block { margin-top: 4px; font-size: 0.8rem; }
+.profile-actions .danger-text { color: var(--danger); }

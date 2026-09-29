@@ -476,6 +476,23 @@
           </div>
         </div>
 
+        <!-- Your profile: the name people see -->
+        <div class="pref-card profile-settings-card" id="profile-settings-card">
+          <div class="pref-header">
+            <i class="fa-solid fa-id-card"></i>
+            <h3>Your Profile</h3>
+            <span class="pref-value" id="profile-handle-label"></span>
+          </div>
+          <form class="display-name-form" onsubmit="event.preventDefault(); saveDisplayName();">
+            <label class="gpa-field">
+              <span>Display name</span>
+              <input id="display-name-input" class="auth-input" maxlength="40" autocomplete="name" placeholder="Your name" />
+            </label>
+            <button type="submit" class="primary-btn" id="display-name-save">Save</button>
+          </form>
+          <p class="admin-hint" id="display-name-hint">Shown on your posts, comments and reviews (not anonymous ones). People can tap it to see your @username.</p>
+        </div>
+
         <!-- School -->
         <div class="pref-card">
           <div class="pref-header">
@@ -500,6 +517,17 @@
             <button class="seg-btn" data-anon="on" onclick="setAnonymous(true)"><i class="fa-solid fa-user-secret"></i><span>Anonymous</span></button>
           </div>
           <p class="admin-hint anon-hint" id="anon-hint">New posts, comments and reviews show your name.</p>
+        </div>
+
+        <!-- People you've blocked -->
+        <div class="pref-card" id="blocked-card">
+          <div class="pref-header">
+            <i class="fa-solid fa-ban"></i>
+            <h3>Blocked People</h3>
+            <span class="pref-value" id="blocked-count"></span>
+          </div>
+          <div id="blocked-list"></div>
+          <p class="admin-hint">Blocked people can't message you or send you friend requests, and you won't see their posts, comments or group-chat messages. They aren't told. Block someone from their profile (tap their name).</p>
         </div>
 
         <!-- Admin tools (only shown to admins) -->

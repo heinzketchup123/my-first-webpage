@@ -367,6 +367,7 @@ function initSupabaseRealtime() {
 }
 
 async function loadAllSupabaseData() {
+  await fetchBlocks();   // first, so nothing from people you've blocked flashes up
   await Promise.all([fetchFeed(), fetchGroups(), fetchFriendships(), fetchTeacherDirectory(),
                      fetchMyReviewCount(), fetchEvents(), fetchNotifications()]);
   loadGpa();
@@ -625,6 +626,7 @@ async function logout() {
   friends = []; pendingIncoming = []; pendingOutgoing = [];
   campusFeed = []; studyGroups = []; gpaCourses = [];
   appSettings.anonymous = false; renderAnonymous();
+  blockedIds = new Set(); blocksReady = null;
   gpaState = { mode: 'unweighted', input: 'letter', prevGpa: '', prevCredits: '', target: '' };
   ['gpa-prev', 'gpa-prev-credits', 'gpa-target'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   groupFilter = 'all'; groupMembers = {};
@@ -887,8 +889,9 @@ function setAnonymous(on) {
 }
 
 function myPublicName() {
-  if (currentHandle) return '@' + currentHandle;
-  return currentUser ? currentUser.split('@')[0] : 'you';
+  const handle = currentHandle ? '@' + currentHandle : (currentUser ? currentUser.split('@')[0] : 'you');
+  const name = profileMap[currentUserId]?.display_name;
+  return name && name !== currentHandle ? `${name} (${handle})` : handle;
 }
 
 function renderAnonymous() {
@@ -1382,6 +1385,7 @@ async function ensureProfile() {
     currentSchoolId = data.school_id || null;
     profileMap[currentUserId] = { handle: data.handle, display_name: data.display_name };
   }
+  renderProfileSettings();
   await refreshSchoolsCache();
   // (Reset when there's no school, e.g. after an admin removed me from it.)
   currentSchool = currentSchoolId ? (schoolsCache.find(s => s.id === currentSchoolId) || null) : null;
@@ -1439,7 +1443,7 @@ function joinRuleLabel(s) {
 function updateSchoolChrome() {
   const welcome = document.getElementById('user-welcome-title');
   if (welcome && currentUser) {
-    const name = currentUser.split('@')[0];
+    const name = personName(currentUserId, currentHandle || currentUser.split('@')[0]);
     welcome.textContent = currentSchool
       ? `${name} · ${currentSchool.name}`
       : `Welcome Back, ${name}`;
@@ -1451,7 +1455,7 @@ function updateSchoolChrome() {
   const schoolName = currentSchool ? currentSchool.name : (currentUserId ? 'Pick a school' : 'No school');
   const chip = document.getElementById('topbar-school');
   if (chip) chip.textContent = schoolName;
-  const who = currentUserId ? (currentHandle || (currentUser || '').split('@')[0] || 'Student') : 'Not signed in';
+  const who = currentUserId ? personName(currentUserId, currentHandle || (currentUser || '').split('@')[0] || 'Student') : 'Not signed in';
   const nameEl = document.getElementById('sidebar-user-name');
   if (nameEl) nameEl.textContent = who;
   const schoolEl = document.getElementById('sidebar-user-school');
@@ -1869,17 +1873,28 @@ function profileCardHtml(uid) {
   const me = uid === currentUserId;
   const uidA = escapeAttr(uid);
   const incoming = pendingIncoming.find(r => r.requester_id === uid);
+  const outgoing = pendingOutgoing.find(r => r.addressee_id === uid);
+  const blockBtn = `<button class="text-btn danger-text profile-block" onclick="blockUser('${uidA}')"><i class="fa-solid fa-ban"></i> Block</button>`;
   let action;
-  if (me) action = '<p class="profile-note">This is you.</p>';
-  else if (friends.some(f => f.friend_id === uid)) {
+  if (me) {
+    action = `<p class="profile-note">This is you.</p>
+              <button class="secondary-btn" onclick="closeModalForce(); switchTab('settings-view'); document.getElementById('display-name-input')?.focus()"><i class="fa-solid fa-pen"></i> Change your name</button>`;
+  } else if (isBlocked(uid)) {
+    action = `<p class="profile-note"><i class="fa-solid fa-ban"></i> You've blocked them</p>
+              <button class="secondary-btn" onclick="unblockUser('${uidA}')">Unblock</button>`;
+  } else if (friends.some(f => f.friend_id === uid)) {
     action = `<button class="primary-btn" onclick="closeModalForce(); switchTab('chat-view'); selectFriend('${uidA}')"><i class="fa-solid fa-comment"></i> Message</button>
-              <p class="profile-note"><i class="fa-solid fa-user-check"></i> You're friends</p>`;
+              <button class="secondary-btn" onclick="unfriend('${uidA}')"><i class="fa-solid fa-user-minus"></i> Unfriend</button>
+              ${blockBtn}`;
   } else if (incoming) {
-    action = `<button class="primary-btn" onclick="respondFriendRequest('${escapeAttr(incoming.id)}', true).then(refreshProfileCard)"><i class="fa-solid fa-user-check"></i> Accept friend request</button>`;
-  } else if (pendingOutgoing.some(r => r.addressee_id === uid)) {
-    action = '<button class="secondary-btn" disabled><i class="fa-solid fa-clock"></i> Friend request sent</button>';
+    action = `<button class="primary-btn" onclick="respondFriendRequest('${escapeAttr(incoming.id)}', true).then(refreshProfileCard)"><i class="fa-solid fa-user-check"></i> Accept friend request</button>
+              ${blockBtn}`;
+  } else if (outgoing) {
+    action = `<button class="secondary-btn" onclick="cancelFriendRequest('${escapeAttr(outgoing.id)}')"><i class="fa-solid fa-clock"></i> Request sent · Cancel</button>
+              ${blockBtn}`;
   } else if (currentUserId) {
-    action = `<button class="primary-btn" onclick="sendFriendRequestTo('${uidA}')"><i class="fa-solid fa-user-plus"></i> Add friend</button>`;
+    action = `<button class="primary-btn" onclick="sendFriendRequestTo('${uidA}')"><i class="fa-solid fa-user-plus"></i> Add friend</button>
+              ${blockBtn}`;
   } else action = '';
   return `
     <div class="profile-card">
@@ -1901,6 +1916,115 @@ async function sendFriendRequestTo(uid) {
   }
   showToast(`Friend request sent to ${personName(uid, 'them')}.`, 'success');
   await fetchFriendships();
+  refreshProfileCard();
+}
+
+// -------------------- Your display name (Settings) --------------------
+function renderProfileSettings() {
+  const input = document.getElementById('display-name-input');
+  const handleEl = document.getElementById('profile-handle-label');
+  if (handleEl) handleEl.textContent = currentHandle ? '@' + currentHandle : '';
+  if (input) {
+    if (document.activeElement !== input) input.value = profileMap[currentUserId]?.display_name || '';
+    input.placeholder = currentHandle || 'Your name';
+    input.disabled = !currentUserId;
+  }
+}
+
+async function saveDisplayName() {
+  if (!currentUserId || !isSupabaseConnected) return showToast('Sign in to set your name.', 'warn');
+  const input = document.getElementById('display-name-input');
+  const name = String(input?.value || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (/^anonymous/i.test(name)) return showToast("Pick a name that doesn't start with “Anonymous”, so your named posts don't look anonymous.", 'warn', 4500);
+  const btn = document.getElementById('display-name-save');
+  if (btn) btn.disabled = true;
+  const { data, error } = await supabaseClient.from('profiles')
+    .update({ display_name: name || null }).eq('user_id', currentUserId).select('display_name');
+  if (btn) btn.disabled = false;
+  if (error || !data?.length) return showToast("Couldn't save your name: " + (error?.message || 'try again'), 'error');
+  profileMap[currentUserId] = { ...(profileMap[currentUserId] || {}), handle: currentHandle, display_name: data[0].display_name };
+  input.value = data[0].display_name || '';
+  showToast(name ? `Your name is now ${name}.` : 'Name cleared: people will see your @username.', 'success');
+  renderProfileSettings();
+  updateSchoolChrome();
+  renderAnonymous();
+  renderFeed();
+  if (isViewActive('teacher-view')) renderTeacherPosts();
+}
+
+// -------------------- Blocking --------------------
+// Only you know who you've blocked. The database stops friend requests,
+// messages and notifications between you; the app also hides their posts,
+// comments and group-chat messages from you.
+let blockedIds = new Set();
+let blocksReady = null;           // false until SCHEMA.sql section 6m has been run
+function isBlocked(uid) { return !!uid && blockedIds.has(uid); }
+
+async function fetchBlocks() {
+  if (!currentUserId || !isSupabaseConnected) { blockedIds = new Set(); return; }
+  const { data, error } = await supabaseClient.from('blocks').select('blocked_id, created_at');
+  if (error) { blocksReady = false; blockedIds = new Set(); renderBlockedList(); return; }
+  blocksReady = true;
+  blockedIds = new Set((data || []).map(b => b.blocked_id));
+  await fetchProfilesByIds([...blockedIds]);
+  renderBlockedList();
+}
+
+function renderBlockedList() {
+  const list = document.getElementById('blocked-list');
+  const count = document.getElementById('blocked-count');
+  if (count) count.textContent = blockedIds.size ? String(blockedIds.size) : '';
+  if (!list) return;
+  if (blocksReady === false) {
+    list.innerHTML = '<p class="friends-empty-inner">Blocking needs a quick database update: run the updated SCHEMA.sql in Supabase.</p>';
+    return;
+  }
+  list.innerHTML = blockedIds.size ? [...blockedIds].map(uid => {
+    const name = personName(uid, 'Someone');
+    const handle = profileMap[uid]?.handle;
+    return `
+      <div class="admin-row blocked-row">
+        <span class="friend-avatar sm">${escapeHtml(name[0].toUpperCase())}</span>
+        <div class="school-row-text"><strong>${escapeHtml(name)}</strong>${handle ? `<small>@${escapeHtml(handle)}</small>` : ''}</div>
+        <button class="secondary-btn friend-btn-sm" onclick="unblockUser('${escapeAttr(uid)}')">Unblock</button>
+      </div>`;
+  }).join('') : '<p class="friends-empty-inner">You haven\'t blocked anyone.</p>';
+}
+
+async function blockUser(uid) {
+  if (!currentUserId || !uid || uid === currentUserId) return;
+  const name = personName(uid, 'this person');
+  if (!confirm(`Block ${name}?\n\nThey won't be able to message you or send you friend requests, you'll stop being friends, and you won't see their posts, comments or group-chat messages. They won't be told.`)) return;
+  const { error } = await supabaseClient.from('blocks').insert([{ blocker_id: currentUserId, blocked_id: uid }]);
+  if (error && error.code !== '23505') {
+    if (missingTable(error)) return showToast('Blocking needs a quick database update: run the updated SCHEMA.sql in Supabase.', 'warn', 5000);
+    return showToast('Could not block: ' + error.message, 'error');
+  }
+  blockedIds.add(uid);
+  if (selectedFriendId === uid) { selectedFriendId = null; dmMessages = []; }
+  showToast(`${name} is blocked.`, 'success');
+  await Promise.all([fetchFriendships(), fetchBlocks()]);
+  redrawAfterBlockChange();
+}
+
+async function unblockUser(uid) {
+  const name = personName(uid, 'this person');
+  if (!confirm(`Unblock ${name}? You'll see their posts again, and you can become friends again (you'd need to send a new friend request).`)) return;
+  const { error } = await supabaseClient.from('blocks').delete().eq('blocker_id', currentUserId).eq('blocked_id', uid);
+  if (error) return showToast('Could not unblock: ' + error.message, 'error');
+  blockedIds.delete(uid);
+  showToast(`${name} is unblocked.`, 'success');
+  await fetchBlocks();
+  redrawAfterBlockChange();
+}
+
+function redrawAfterBlockChange() {
+  renderFeed();
+  if (document.getElementById('comments-list')) renderCommentsList();
+  if (isViewActive('teacher-view')) renderTeacherPosts();
+  renderFriendsStrip();
+  renderDMThread();
+  renderBlockedList();
   refreshProfileCard();
 }
 
@@ -2162,14 +2286,17 @@ function renderChatThreadHead() {
   }
   const f = friends.find(x => x.friend_id === selectedFriendId);
   if (!f) { head.style.display = 'none'; head.innerHTML = ''; return; }
-  const name = f.display_name || f.handle || 'Friend';
+  const name = personName(f.friend_id, f.display_name || f.handle || 'Friend');
+  const fid = escapeAttr(f.friend_id);
   head.style.display = 'flex';
   head.innerHTML = `
     <span class="friend-avatar">${escapeHtml(name[0].toUpperCase())}</span>
     <div class="chat-thread-who">
-      <strong>${escapeHtml(name)}</strong>
+      <strong>${nameLink(f.friend_id, name, false)}</strong>
       <small>${f.handle ? '@' + escapeHtml(f.handle) : 'Friend'}</small>
-    </div>`;
+    </div>
+    <button class="secondary-btn chat-head-btn" onclick="showProfileCard('${fid}')" aria-label="Profile, unfriend or block">
+      <i class="fa-solid fa-user"></i> Profile</button>`;
 }
 
 function chatDayLabel(d) {
@@ -2226,7 +2353,8 @@ function renderDMThread(opts = {}) {
     return empty('fa-solid fa-screwdriver-wrench',
       'Group chats need a quick database update. An admin needs to run the updated SCHEMA.sql in Supabase (section 6j).');
   }
-  if (!dmMessages.length) {
+  const thread = group ? dmMessages.filter(m => !isBlocked(m.sender_id)) : dmMessages;   // hide people you've blocked
+  if (!thread.length) {
     if (group) return empty('fa-regular fa-hand', `No messages yet. Say hi to ${escapeHtml(group.name || 'the group')}!`);
     const f = friends.find(x => x.friend_id === selectedFriendId);
     return empty('fa-regular fa-hand', `Say hi to ${escapeHtml(f?.display_name || f?.handle || 'your friend')}!`);
@@ -2234,15 +2362,15 @@ function renderDMThread(opts = {}) {
 
   let html = '';
   let lastDay = '';
-  dmMessages.forEach((msg, i) => {
+  thread.forEach((msg, i) => {
     const when = msg.created_at ? new Date(msg.created_at) : null;
     if (when && when.toDateString() !== lastDay) {
       lastDay = when.toDateString();
       html += `<div class="chat-day"><span>${chatDayLabel(when)}</span></div>`;
     }
     const mine = msg.sender_id === currentUserId;
-    const withPrev = sameRun(dmMessages[i - 1], msg);
-    const withNext = sameRun(msg, dmMessages[i + 1]);
+    const withPrev = sameRun(thread[i - 1], msg);
+    const withNext = sameRun(msg, thread[i + 1]);
     const time = msg.pending ? 'Sending…'
       : escapeHtml(when ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : String(msg.time || ''));
     // In a group, say who wrote each run of messages.
@@ -2369,7 +2497,7 @@ function postReactionCount(post, key) {
 function iReacted(post, key) { return myFeedReactions.has(`${post.id}|${key}`); }
 function postComments(post) {
   if (feedExtrasReady === false) return Array.isArray(post.comments) ? post.comments : [];
-  return feedComments[String(post.id)] || [];
+  return (feedComments[String(post.id)] || []).filter(c => !isBlocked(c.author_id));   // hide people you've blocked
 }
 
 async function fetchFeedExtras() {
@@ -2417,7 +2545,7 @@ function onFeedExtrasChanged() {
 }
 
 function sortedFeed() {
-  const list = [...campusFeed];
+  const list = campusFeed.filter(p => !isBlocked(p.author_id));   // hide people you've blocked
   if (feedSort === 'top') {
     list.sort((a,b) => postReactionCount(b, 'like') - postReactionCount(a, 'like'));
   } else if (feedSort === 'comments') {
@@ -4581,7 +4709,7 @@ function renderTeacherPosts() {
   };
   const list = teacherPosts
     .filter(p => p.kind === teacherTab && (course === 'all' || (p.course || '').trim() === course)
-      && (!stars || p.rating === stars))
+      && (!stars || p.rating === stars) && !isBlocked(p.author_id))
     .sort(sorters[teacherPostSort] || sorters.liked);
 
   if (!list.length && stars) {
@@ -4610,7 +4738,7 @@ function renderTeacherPosts() {
     const mine = p.author_id && p.author_id === currentUserId;
     const votes = teacherVotes[p.id] || { up: 0, down: 0, my: 0 };
     const pid = escapeAttr(p.id);
-    const comments = teacherComments[p.id] || [];
+    const comments = (teacherComments[p.id] || []).filter(c => !isBlocked(c.author_id));
     const open = openTpComments.has(String(p.id));
     const busy = tpBusy.has(String(p.id)) ? ' disabled' : '';
     const anonPost = /^anonymous/i.test(p.author_name || ANON_AUTHOR);

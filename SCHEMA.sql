@@ -61,10 +61,10 @@ begin
   -- Name from the sign-up form, or from Google (full_name / name).
   insert into public.profiles (user_id, handle, display_name)
   values (new.id, final_handle,
-          coalesce(nullif(trim(new.raw_user_meta_data->>'display_name'), ''),
-                   nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
-                   nullif(trim(new.raw_user_meta_data->>'name'), ''),
-                   final_handle));
+          left(coalesce(nullif(regexp_replace(trim(new.raw_user_meta_data->>'display_name'), '^anonymous.*', '', 'i'), ''),
+                        nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
+                        nullif(trim(new.raw_user_meta_data->>'name'), ''),
+                        final_handle), 40));
   return new;
 end $$;
 
@@ -100,10 +100,10 @@ begin
     end loop;
     insert into public.profiles (user_id, handle, display_name)
     values (u.id, final_handle,
-            coalesce(nullif(trim(u.raw_user_meta_data->>'display_name'), ''),
-                     nullif(trim(u.raw_user_meta_data->>'full_name'), ''),
-                     nullif(trim(u.raw_user_meta_data->>'name'), ''),
-                     final_handle));
+            left(coalesce(nullif(trim(u.raw_user_meta_data->>'display_name'), ''),
+                          nullif(trim(u.raw_user_meta_data->>'full_name'), ''),
+                          nullif(trim(u.raw_user_meta_data->>'name'), ''),
+                          final_handle), 40));
   end loop;
 end $$;
 
@@ -1148,6 +1148,11 @@ returns void language plpgsql security definer set search_path = public as $$
 declare existing uuid;
 begin
   if recipient is null or recipient = actor then return; end if;
+  -- Nothing from someone you've blocked. (Nested so this still works on the
+  -- first run, before the blocks table below exists.)
+  if actor is not null and to_regclass('public.blocks') is not null then
+    if exists (select 1 from public.blocks where blocker_id = recipient and blocked_id = actor) then return; end if;
+  end if;
   select id into existing from public.notifications
    where user_id = recipient and kind = nkind and ref_id is not distinct from ref
      and actor_id is not distinct from actor and read_at is null
@@ -1830,6 +1835,80 @@ begin
       t.tbl || '_public', cols, t.anon_sql, t.secret, t.secret, t.secret, t.secret, t.tbl, t.visible_sql);
     execute format('grant select on public.%I to anon, authenticated', t.tbl || '_public');
   end loop;
+end $$;
+
+-- ============================================================
+-- 6m. BLOCKING + DISPLAY NAMES
+-- ============================================================
+-- Block someone: you stop being friends (and any friend request between
+-- you goes), neither of you can send the other a friend request, so there's
+-- no messaging, and you get no notifications from them. The app also hides
+-- their posts, comments and group-chat messages from you. They aren't told:
+-- only you can see who you've blocked.
+create table if not exists public.blocks (
+  blocker_id uuid not null references auth.users(id) on delete cascade,
+  blocked_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (blocker_id, blocked_id),
+  check (blocker_id <> blocked_id)
+);
+alter table public.blocks enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='blocks' loop
+    execute format('drop policy if exists %I on public.blocks', p.policyname);
+  end loop;
+end $$;
+create policy "blocks: see your own"  on public.blocks for select using (blocker_id = auth.uid());
+create policy "blocks: block someone" on public.blocks for insert with check (blocker_id = auth.uid());
+create policy "blocks: unblock"       on public.blocks for delete using (blocker_id = auth.uid());
+
+-- Is there a block either way between these two? Security definer so it can
+-- see blocks the asker didn't make; it only ever answers yes or no.
+create or replace function public.is_blocked_between(a uuid, b uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.blocks
+                 where (blocker_id = a and blocked_id = b) or (blocker_id = b and blocked_id = a));
+$$;
+revoke all on function public.is_blocked_between(uuid, uuid) from public;
+grant execute on function public.is_blocked_between(uuid, uuid) to authenticated;
+
+create or replace function public.on_block()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.friendships
+   where (requester_id = new.blocker_id and addressee_id = new.blocked_id)
+      or (requester_id = new.blocked_id and addressee_id = new.blocker_id);
+  delete from public.notifications where user_id = new.blocker_id and actor_id = new.blocked_id;
+  return null;
+end $$;
+drop trigger if exists on_block on public.blocks;
+create trigger on_block after insert on public.blocks
+  for each row execute function public.on_block();
+
+-- Friend requests: same school as before, and never between blocked people.
+drop policy if exists "friendships: send request" on public.friendships;
+create policy "friendships: send request"
+  on public.friendships for insert
+  with check (
+    auth.uid() = requester_id
+    and status = 'pending'
+    and public.my_school_id() is not null
+    and public.my_school_id() = (select school_id from public.profiles where user_id = addressee_id)
+    and not public.is_blocked_between(requester_id, addressee_id)
+  );
+
+-- Display names (set in Settings): up to 40 characters, and not "Anonymous…"
+-- so nobody's named posts look anonymous. Existing names are tidied first so
+-- every profile passes (otherwise changing school could fail for someone).
+update public.profiles set display_name = null
+ where display_name is not null and (trim(display_name) = '' or display_name ~* '^\s*anonymous');
+update public.profiles set display_name = left(trim(display_name), 40)
+ where display_name is not null and (char_length(display_name) > 40 or display_name <> trim(display_name));
+do $$ begin
+  alter table public.profiles add constraint profiles_display_name_ok
+    check (display_name is null or (char_length(display_name) between 1 and 40
+                                    and display_name !~* '^\s*anonymous')) not valid;
+exception when duplicate_object then null;
 end $$;
 
 -- ============================================================
