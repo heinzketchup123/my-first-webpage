@@ -4072,8 +4072,84 @@ html.layout-desktop #teacher-directory { grid-template-columns: repeat(auto-fill
 .tpost-supplies:empty { display: none; }
 .tpost-supply-group .supply-group-head { margin-bottom: 6px; }
 
-/* ---------- Sidebar: sections spread evenly down the full height ---------- */
-/* Items inside a section stay close together; the spare height is shared out
-   equally between the sections (auto margins). Short windows just scroll. */
-html.layout-desktop .bottom-nav > .nav-section-label,
+/* ---------- Sidebar: comfortable spacing that suits the window ---------- */
+/* On taller windows the buttons get a little roomier and the sections a little
+   further apart (both up to a limit), so there's no big empty space and
+   nothing looks stretched. Your profile sits at the bottom. Short windows
+   keep the compact sizes and scroll. */
+html.layout-desktop .bottom-nav { gap: clamp(2px, 0.5vh, 6px); }
+html.layout-desktop .bottom-nav > .nav-btn { min-height: clamp(42px, 5.1vh, 52px); }
+html.layout-desktop .bottom-nav > .nav-section-label {
+  display: flex !important;
+  align-items: flex-end;
+  flex: 1 0 auto;
+  max-height: 56px;
+}
 html.layout-desktop .bottom-nav > .sidebar-user { margin-top: auto; }
+
+/* ---------- Sidebar: your study groups (computer layout) ---------- */
+html.layout-desktop .sidebar-groups-head { justify-content: space-between; gap: 8px; }
+.sidebar-see-all {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-color);
+  font: inherit;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.sidebar-see-all:hover { text-decoration: underline; }
+html.layout-desktop .sidebar-groups { display: flex !important; flex-direction: column; gap: 2px; }
+.sidebar-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--sub-text-color);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.sidebar-group:hover { background: var(--input-bg); color: var(--main-text-color); }
+.sidebar-group-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--accent-muted);
+  color: var(--accent-color);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.sidebar-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-group-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ff3b30;
+  color: #fff;
+  font-size: 0.64rem;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+.sidebar-group-find { border: 1px dashed var(--card-border); }
+.sidebar-group-find .sidebar-group-icon { background: var(--input-bg); color: var(--sub-text-color); }
+/* Hidden when signed out, or when there isn't room (see fitSidebarGroups) */
+html.layout-desktop .bottom-nav > .sb-off,
+html.layout-desktop .bottom-nav > .sb-nofit,
+html.layout-desktop .sidebar-groups > .sb-nofit,
+html.layout-desktop .sidebar-see-all.sb-off { display: none !important; }

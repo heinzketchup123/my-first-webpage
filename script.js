@@ -792,6 +792,7 @@ function applyLayout() {
   document.querySelectorAll('#layout-segmented .seg-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.layout === pref);
   });
+  fitSidebarGroups();
 }
 
 // Installed iPhone app: work out which kind of status bar iOS gave us.
@@ -1313,8 +1314,9 @@ function updateNotifBadgeFromState() {
     chatBadge.textContent = dms > 9 ? '9+' : String(dms);
     chatBadge.style.display = dms > 0 ? 'inline-flex' : 'none';
   }
-  // Unread counts on the group cards' Chat buttons.
+  // Unread counts on the group cards' Chat buttons (and the sidebar shortcuts).
   if (isViewActive('groups-view')) renderGroups();
+  renderSidebarGroups();
 }
 
 // Chat Engine — security-hardened
@@ -1462,6 +1464,7 @@ function updateSchoolChrome() {
   if (schoolEl) schoolEl.textContent = schoolName;
   const av = document.getElementById('sidebar-avatar');
   if (av) av.textContent = currentUserId ? who[0].toUpperCase() : '?';
+  renderSidebarGroups();
 }
 
 // Top-bar search (computer layout): searches teachers from any page.
@@ -1475,8 +1478,52 @@ function globalTeacherSearch(value) {
   renderTeacherDirectory();
 }
 
+// Computer layout: shortcuts to your study groups in the sidebar (tap one to
+// open its chat). Only as many as fit without the sidebar scrolling, so it
+// fills spare space on tall windows and disappears on short ones.
+function renderSidebarGroups() {
+  const head = document.getElementById('sidebar-groups-head');
+  const box = document.getElementById('sidebar-groups');
+  if (!head || !box) return;
+  const show = !!currentUserId;
+  head.classList.toggle('sb-off', !show);
+  box.classList.toggle('sb-off', !show);
+  if (!show) return;
+  const unread = g => (notifsReady ? unreadGroupCount(g.id) : 0);
+  const mine = studyGroups.filter(g => g.joined).sort((a, b) => unread(b) - unread(a));
+  box.innerHTML = mine.length ? mine.slice(0, 6).map(g => {
+    const n = unread(g);
+    const name = String(g.name || 'Group').trim() || 'Group';
+    return `
+      <button class="sidebar-group" onclick="openGroupChatFromGroups('${escapeAttr(g.id)}')" title="Open the ${escapeAttr(name)} chat">
+        <span class="sidebar-group-icon">${escapeHtml(name[0].toUpperCase())}</span>
+        <span class="sidebar-group-name">${escapeHtml(name)}</span>
+        ${n ? `<span class="sidebar-group-badge">${n > 9 ? '9+' : n}</span>` : ''}
+      </button>`;
+  }).join('') : `
+      <button class="sidebar-group sidebar-group-find" onclick="switchTab('groups-view')">
+        <span class="sidebar-group-icon"><i class="fa-solid fa-magnifying-glass"></i></span>
+        <span class="sidebar-group-name">Find a study group</span>
+      </button>`;
+  head.querySelector('.sidebar-see-all')?.classList.toggle('sb-off', !mine.length);
+  fitSidebarGroups();
+}
+function fitSidebarGroups() {
+  const nav = document.querySelector('.bottom-nav');
+  const head = document.getElementById('sidebar-groups-head');
+  const box = document.getElementById('sidebar-groups');
+  if (!nav || !head || !box) return;
+  const rows = [...box.children];
+  [head, box, ...rows].forEach(el => el.classList.remove('sb-nofit'));
+  if (!document.documentElement.classList.contains('layout-desktop') || box.classList.contains('sb-off')) return;
+  const tooTall = () => nav.scrollHeight > nav.clientHeight + 1;
+  for (let i = rows.length - 1; i >= 0 && tooTall(); i--) rows[i].classList.add('sb-nofit');
+  if (rows.every(r => r.classList.contains('sb-nofit'))) { head.classList.add('sb-nofit'); box.classList.add('sb-nofit'); }
+}
+
 // Home side panels (computer layout): next few events + my study groups.
 function renderHomeSide() {
+  renderSidebarGroups();
   const up = document.getElementById('home-upcoming');
   if (up) {
     const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
