@@ -1467,7 +1467,7 @@ function updateSchoolChrome() {
 // Top-bar search (computer layout): searches teachers from any page.
 function globalTeacherSearch(value) {
   const input = document.getElementById('teacher-search-input');
-  if (input) input.value = value;
+  if (input && input.value !== value) input.value = value;
   if (value.trim() && !isViewActive('search-view')) {
     switchTab('search-view');
     document.getElementById('global-search')?.focus();
@@ -4382,6 +4382,13 @@ function renderTeacherDirectory() {
   const q = (document.getElementById('teacher-search-input')?.value || '').trim();
   const list = teacherDir.filter(t => teacherMatchesSearch(t, q)
     && (teacherSubjectFilter === 'all' || teacherSubjectGroups(t).has(teacherSubjectFilter)));
+  const countEl = document.getElementById('teacher-result-count');
+  if (countEl) {
+    const total = teacherDir.length;
+    countEl.textContent = !total ? '' : list.length === total
+      ? `${total} teacher${total === 1 ? '' : 's'}`
+      : `Showing ${list.length} of ${total} teacher${total === 1 ? '' : 's'}`;
+  }
 
   const byRating = (a, b) => (toNum(b.avg_rating) ?? -1) - (toNum(a.avg_rating) ?? -1) || b.review_count - a.review_count;
   const sorters = {
@@ -4406,25 +4413,37 @@ function renderTeacherDirectory() {
   container.innerHTML = list.map(t => {
     const avg = toNum(t.avg_rating);
     const diff = toNum(t.avg_difficulty);
+    const again = toNum(t.take_again_pct);
     const classes = teacherCourses[t.id] || [];
-    const meta = [
-      t.subject ? escapeHtml(t.subject) : null,
-      `${t.review_count} review${t.review_count === 1 ? '' : 's'}`,
-      diff != null ? `Difficulty ${diff.toFixed(1)}` : null
-    ].filter(Boolean).join(' · ');
+    const n = t.review_count || 0;
+    const stats = [
+      `<span><i class="fa-solid fa-star"></i> ${n ? `${n} review${n === 1 ? '' : 's'}` : 'No reviews yet'}</span>`,
+      diff != null ? `<span><i class="fa-solid fa-gauge-high"></i> Difficulty ${diff.toFixed(1)}</span>` : '',
+      again != null ? `<span><i class="fa-solid fa-rotate-right"></i> ${Math.round(again)}% would retake</span>` : ''
+    ].join('');
     const teaches = classes.length
-      ? `<small class="teacher-classes"><i class="fa-solid fa-book"></i> ${classes.slice(0, 3).map(escapeHtml).join(', ')}${classes.length > 3 ? ` +${classes.length - 3}` : ''}</small>` : '';
+      ? `<div class="teacher-classes"><i class="fa-solid fa-book"></i> ${classes.slice(0, 3).map(escapeHtml).join(', ')}${classes.length > 3 ? ` +${classes.length - 3}` : ''}</div>` : '';
     return `
       <button class="teacher-card" onclick="openTeacherPage('${escapeAttr(t.id)}')">
-        <div class="teacher-avatar">${escapeHtml(teacherInitials(t.name))}</div>
-        <div class="teacher-meta">
-          <strong>${escapeHtml(t.name)}</strong>
-          <small>${meta}</small>
-          ${teaches}
+        <div class="teacher-card-top">
+          <div class="teacher-avatar">${escapeHtml(teacherInitials(t.name))}</div>
+          <div class="teacher-meta">
+            <strong>${escapeHtml(t.name)}</strong>
+            <small>${t.subject ? escapeHtml(t.subject) : 'No subject yet'}</small>
+          </div>
+          <div class="rating-badge ${ratingClass(avg)}" title="Average rating">${avg != null ? avg.toFixed(1) : '–'}</div>
         </div>
-        <div class="rating-badge ${ratingClass(avg)}">${avg != null ? avg.toFixed(1) : '–'}</div>
+        <div class="teacher-card-stats">${stats}</div>
+        ${teaches}
       </button>`;
   }).join('');
+}
+
+// The Teachers page's own search box and the top bar's (on a computer) stay in step.
+function onTeacherSearchInput(value) {
+  const g = document.getElementById('global-search');
+  if (g && g.value !== value) g.value = value;
+  renderTeacherDirectory();
 }
 
 // ---------- Add teacher ----------

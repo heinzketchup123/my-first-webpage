@@ -2771,8 +2771,7 @@ html.layout-desktop #groups-list {
 }
 html.layout-desktop #teacher-directory > .empty-state,
 html.layout-desktop #groups-list > .empty-state { grid-column: 1 / -1; }
-/* The top-bar search drives the Teachers page on computers */
-html.layout-desktop #search-view .search-input-wrapper { display: none; }
+/* The Teachers page has its own search box on computers too (kept in step with the top bar) */
 html.layout-desktop #search-view .teacher-dir-controls { max-width: 560px; align-self: flex-start; }
 
 /* Teacher page, GPA: comfortable reading width */
@@ -3893,3 +3892,39 @@ html.layout-desktop .bottom-nav:hover { scrollbar-color: color-mix(in srgb, var(
 @media (prefers-reduced-motion: reduce) {
   .primary-btn:not(:disabled):active { transform: none; }
 }
+
+/* ---------- Teachers list: search + roomier cards ---------- */
+#search-view .search-input-wrapper .search-bar { padding: 14px 14px 14px 44px; font-size: 0.95rem; border-radius: 16px; }
+#search-view .search-input-wrapper .search-icon { left: 16px; font-size: 0.95rem; }
+#search-view .search-input-wrapper { margin-bottom: 12px; }
+.teacher-result-count { width: 100%; margin: 0 0 8px; font-size: 0.76rem; font-weight: 700; color: var(--sub-text-color); text-align: left; }
+.teacher-result-count:empty { display: none; }
+
+.teacher-card { flex-direction: column; align-items: stretch; gap: 10px; padding: 16px; border-radius: 18px; }
+.teacher-card-top { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.teacher-card .teacher-avatar { width: 52px; height: 52px; font-size: 1.05rem; }
+.teacher-card .teacher-meta strong { font-size: 1.05rem; }
+.teacher-card .teacher-meta small { font-size: 0.8rem; margin-top: 1px; }
+.teacher-card .rating-badge { min-width: 48px; height: 48px; font-size: 1.1rem; border-radius: 14px; }
+.teacher-card-stats { display: flex; flex-wrap: wrap; gap: 6px; }
+.teacher-card-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--input-bg);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--sub-text-color);
+}
+.teacher-card-stats i { font-size: 0.66rem; color: var(--accent-color); }
+.teacher-card .teacher-classes {
+  font-size: 0.76rem;
+  color: var(--sub-text-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.teacher-card .teacher-classes i { font-size: 0.7rem; margin-right: 4px; color: var(--accent-color); }
+html.layout-desktop #teacher-directory { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }

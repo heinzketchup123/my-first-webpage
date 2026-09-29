@@ -257,7 +257,8 @@
 
         <div class="search-input-wrapper">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
-          <input type="text" id="teacher-search-input" class="search-bar" placeholder="Search by name, subject or class…" oninput="renderTeacherDirectory()" autocomplete="off" />
+          <input type="search" id="teacher-search-input" class="search-bar" placeholder="Search name, subject or class…"
+                 oninput="onTeacherSearchInput(this.value)" autocomplete="off" aria-label="Search teachers" />
         </div>
 
         <div class="teacher-dir-controls">
@@ -273,6 +274,7 @@
           <button class="chip" data-sort="az" onclick="setTeacherSort('az', this)">A–Z</button>
         </div>
 
+        <p class="teacher-result-count" id="teacher-result-count" aria-live="polite"></p>
         <div id="teacher-directory" class="stack-list"></div>
       </section>
 
