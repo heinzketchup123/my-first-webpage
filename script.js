@@ -4697,7 +4697,8 @@ function renderTeacherHero() {
 // Everyone's supply lists combined: each item once, with how many students
 // listed it, most-mentioned first. Ticks ("I've got this") stay on this device.
 function supplySummaryHtml(posts) {
-  const items = {};
+  const rowsByList = {};   // "labs|pencil" → how many students put pencils on For labs
+  const names = {};        // "pencil" → the spellings people used
   let lists = 0;
   posts.forEach(p => {
     const entries = supplyEntries(p);
@@ -4705,33 +4706,28 @@ function supplySummaryHtml(posts) {
     const seen = new Set();
     entries.forEach(({ list, name }) => {
       const key = supplyKey(name);
-      if (!key || seen.has(key)) return;
-      seen.add(key);
-      const it = items[key] = items[key] || { key, n: 0, names: {}, lists: {} };
-      it.n += 1;
-      it.names[name] = (it.names[name] || 0) + 1;
-      it.lists[list] = (it.lists[list] || 0) + 1;
+      if (!key || seen.has(`${list}|${key}`)) return;
+      seen.add(`${list}|${key}`);
+      const row = rowsByList[`${list}|${key}`] = rowsByList[`${list}|${key}`] || { key, list, n: 0 };
+      row.n += 1;
+      (names[key] = names[key] || {})[name] = (names[key][name] || 0) + 1;
     });
   });
-  const order = SUPPLY_LISTS.map(l => l.key);
-  const rows = Object.values(items)
-    // Show the spelling most people used (capitalised when there's a tie),
-    // on the list most people put it on (the stricter one when it's a tie).
-    .map(it => {
-      const best = Object.entries(it.names).sort((a, b) =>
-        b[1] - a[1] || (/^[A-Z]/.test(b[0]) - /^[A-Z]/.test(a[0])) || a[0].localeCompare(b[0]))[0][0];
-      const list = Object.entries(it.lists).sort((a, b) => b[1] - a[1] || order.indexOf(a[0]) - order.indexOf(b[0]))[0][0];
-      return { ...it, list, label: best.charAt(0).toUpperCase() + best.slice(1) };
-    })
+  // Show the spelling most people used (capitalised when there's a tie).
+  const labels = {};
+  Object.entries(names).forEach(([key, spellings]) => {
+    const best = Object.entries(spellings).sort((a, b) =>
+      b[1] - a[1] || (/^[A-Z]/.test(b[0]) - /^[A-Z]/.test(a[0])) || a[0].localeCompare(b[0]))[0][0];
+    labels[key] = best.charAt(0).toUpperCase() + best.slice(1);
+  });
+  const rows = Object.values(rowsByList).map(r => ({ ...r, label: labels[r.key] }))
     .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
   if (!rows.length) return '';
+  // Ticks go by item, so ticking pencils ticks them on every list.
   const have = supplyChecks();
-  const got = rows.filter(r => have.has(r.key)).length;
-  const countTitle = r => {
-    const also = Object.entries(r.lists).filter(([k]) => k !== r.list)
-      .map(([k, n]) => `${n} put it under ${SUPPLY_LIST_BY_KEY[k].label}`);
-    return `${r.n} student${r.n === 1 ? '' : 's'} listed this${also.length ? ` (${also.join(', ')})` : ''}`;
-  };
+  const allKeys = Object.keys(labels);
+  const got = allKeys.filter(k => have.has(k)).length;
+  const countTitle = r => `${r.n} student${r.n === 1 ? '' : 's'} put this under ${SUPPLY_LIST_BY_KEY[r.list].label}`;
   const groups = SUPPLY_LISTS.map(l => ({ ...l, rows: rows.filter(r => r.list === l.key) })).filter(g => g.rows.length);
   return `
     <div class="info-card supply-summary">
@@ -4740,7 +4736,7 @@ function supplySummaryHtml(posts) {
           <strong><i class="fa-solid fa-clipboard-list"></i> Supply list</strong>
           <small>From ${lists} student${lists === 1 ? "'s list" : "s' lists"} · tick what you've got</small>
         </div>
-        <span class="supply-progress ${got === rows.length ? 'done' : ''}">${got}/${rows.length}</span>
+        <span class="supply-progress ${got === allKeys.length ? 'done' : ''}">${got}/${allKeys.length}</span>
       </div>
       ${groups.map(g => `
         <div class="supply-group">
@@ -4799,8 +4795,9 @@ function renderTpItems() {
         </span>`).join('')}</div>
     </div>`).join('') : '<span class="tp-items-empty">Nothing added yet. Pick a list, then add what goes on it.</span>';
 
-  // Suggestions: what others put on this list first, then anything else.
-  const taken = new Set(entries.map(e => supplyKey(e.name)));
+  // Suggestions: what others put on this list first, then anything else
+  // (leaving out what's already on this list).
+  const taken = new Set(entries.filter(e => e.list === active.key).map(e => supplyKey(e.name)));
   const others = teacherPosts.filter(p => p.kind === 'supplies' && p.id !== editingPostId).flatMap(supplyEntries);
   const pool = [...others.filter(e => e.list === active.key).map(e => e.name), ...others.map(e => e.name), ...COMMON_SUPPLIES];
   const seen = new Set();
@@ -4825,13 +4822,10 @@ function addTpItem(value) {
   const list = SUPPLY_LIST_BY_KEY[tpDraft.supplyList] ? tpDraft.supplyList : SUPPLY_LISTS[0].key;
   const entries = tpDraft.supplies = tpDraft.supplies || [];
   const cleared = () => { if (input && value == null) { input.value = ''; input.focus(); } };
-  // Each item sits on one list; adding it to another list moves it there.
-  const existing = entries.find(e => supplyKey(e.name) === supplyKey(name));
+  // The same item can go on more than one list, but only once on each.
+  const existing = entries.find(e => e.list === list && supplyKey(e.name) === supplyKey(name));
   if (existing) {
-    if (existing.list !== list) {
-      existing.list = list;
-      showToast(`Moved ${existing.name} to ${SUPPLY_LIST_BY_KEY[list].label}.`, 'info', 2200);
-    }
+    showToast(`${existing.name} is already on ${SUPPLY_LIST_BY_KEY[list].label}.`, 'info', 2200);
     cleared();
     return renderTpItems();
   }
