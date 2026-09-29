@@ -4200,3 +4200,6 @@ html:not(.layout-desktop) .chat-head-btn {
   font-size: 0.9rem;
 }
 html:not(.layout-desktop) .chat-head-btn-text { display: none; }
+
+/* Phones: chats in the row snap to the middle (the open one is scrolled there) */
+html:not(.layout-desktop) .friend-chip { scroll-snap-align: center; }

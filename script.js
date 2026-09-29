@@ -935,7 +935,7 @@ function switchTab(viewId, element) {
   document.querySelector('.content-container')?.scrollTo(0, 0);
 
   if (viewId === 'chat-view') {
-    renderFriendsStrip(); renderDMThread({ toBottom: true, instant: true }); markOpenThreadRead();
+    renderFriendsStrip(); centerActiveChip(true); renderDMThread({ toBottom: true, instant: true }); markOpenThreadRead();
     if (chatKey()) fetchThread({ quiet: true });   // catch up on anything missed
   }
   if (viewId === 'search-view') {
@@ -1866,6 +1866,25 @@ function renderFriendsStrip() {
         <span class="friend-avatar"><i class="fa-solid fa-user-plus"></i></span>
         <span class="friend-name">Add friend</span>
       </button>`);
+  centerActiveChip();
+}
+
+// Phones: the open chat's chip sits in the middle of the row, so the chats
+// on either side are easy to reach. Only when the open chat changes (or you
+// come back to Messages), so it never fights you while you scroll the row.
+let stripCenteredFor = null;
+function centerActiveChip(force) {
+  const strip = document.getElementById('friends-strip');
+  const key = chatKey();
+  if (!strip || !key || document.documentElement.classList.contains('layout-desktop')) return;
+  if (!force && key === stripCenteredFor) return;
+  const chip = strip.querySelector('.friend-chip.active');
+  if (!chip || !strip.clientWidth) return;   // not on screen yet
+  stripCenteredFor = key;
+  const box = strip.getBoundingClientRect();
+  const c = chip.getBoundingClientRect();
+  const left = strip.scrollLeft + (c.left - box.left) - (strip.clientWidth - c.width) / 2;
+  strip.scrollTo({ left: Math.max(0, left), behavior: force ? 'auto' : 'smooth' });
 }
 
 function escapeAttr(v) { return String(v).replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
