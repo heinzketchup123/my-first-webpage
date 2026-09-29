@@ -3993,12 +3993,18 @@ html.layout-desktop #teacher-directory { grid-template-columns: repeat(auto-fill
 .tp-item-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; }
 .tp-item-suggest small { font-size: 0.72rem; font-weight: 700; color: var(--sub-text-color); }
 .tp-label small { font-weight: 600; color: var(--sub-text-color); }
-/* Four tabs now (Reviews, Course Info, Notes, Supplies) — one row everywhere */
-.teacher-tabs { grid-template-columns: repeat(4, 1fr); }
-@media (max-width: 420px) {
-  .teacher-tabs { grid-template-columns: repeat(4, auto); justify-content: space-between; gap: 2px; }
-  .teacher-tab { padding: 9px 5px; font-size: 0.72rem; gap: 3px; }
-  .teacher-tab .tt-count { min-width: 16px; }
+/* Four tabs now (Reviews, Course Info, Notes, Supplies) — one row everywhere.
+   Sized by the space the tabs actually have (a container query), so they
+   also fit inside the phone frame on a computer, where the window is wide. */
+.teacher-tabs { display: flex; container-type: inline-size; }
+.teacher-tab { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+@container (max-width: 460px) {
+  .teacher-tab { padding: 9px 3px; font-size: 0.7rem; gap: 3px; }
+  .teacher-tab i { display: none; }
+  .teacher-tab .tt-count { min-width: 16px; padding: 1px 4px; }
+}
+@container (max-width: 280px) {
+  .teacher-tab .tt-count { display: none; }
 }
 
 /* ---------- Supplies: separate lists (Required, For labs...) ---------- */
@@ -4066,10 +4072,8 @@ html.layout-desktop #teacher-directory { grid-template-columns: repeat(auto-fill
 .tpost-supplies:empty { display: none; }
 .tpost-supply-group .supply-group-head { margin-bottom: 6px; }
 
-/* ---------- Sidebar: items spread evenly down the full height ---------- */
-/* The spare height is shared out between the items (auto margins), and each
-   section heading stays with its first item. Short windows just scroll. */
-html.layout-desktop .bottom-nav > .nav-btn,
+/* ---------- Sidebar: sections spread evenly down the full height ---------- */
+/* Items inside a section stay close together; the spare height is shared out
+   equally between the sections (auto margins). Short windows just scroll. */
 html.layout-desktop .bottom-nav > .nav-section-label,
 html.layout-desktop .bottom-nav > .sidebar-user { margin-top: auto; }
-html.layout-desktop .bottom-nav > .nav-section-label + .nav-btn { margin-top: 0; }
