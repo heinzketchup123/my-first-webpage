@@ -10,6 +10,11 @@
   <!-- PWA Meta Tags -->
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#080d14" />
+  <!-- App logo: browser tab, iPhone Home Screen (iOS rounds the corners itself) -->
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="icons/favicon-64.png" sizes="64x64" type="image/png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Campus Pulse" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <!-- Solid status bar for the installed iPhone app. Measured on an iPhone
        (iOS 26): iOS paints it in the page's background colour and sizes the
@@ -60,6 +65,7 @@
     <!-- Auth Overlay -->
     <div id="auth-screen" class="auth-overlay">
       <div class="auth-box">
+        <img class="auth-logo" src="icons/favicon.svg" alt="Campus Pulse" width="72" height="72" />
         <form id="login-form" class="auth-form" onsubmit="handleAuth(event)">
           <h2>Welcome Back</h2>
           <p class="auth-sub">Sign in to your school's Campus Pulse</p>
@@ -104,8 +110,8 @@
     <!-- App Header -->
     <header class="app-header">
       <div class="brand-group">
-        <span class="brand-badge">PULSE</span>
-        <span class="brand-title">Campus Hub</span>
+        <img class="brand-logo" src="icons/favicon.svg" alt="" width="28" height="28" />
+        <span class="brand-title">Campus Pulse</span>
       </div>
       <!-- Computer layout: search teachers from any page -->
       <label class="topbar-search desktop-only">
@@ -669,8 +675,8 @@
     <!-- Phones: bottom tab bar. Computers: left sidebar (extra items shown there). -->
     <nav class="bottom-nav">
       <div class="sidebar-brand desktop-only">
-        <span class="brand-badge">PULSE</span>
-        <span class="brand-title">Campus Hub</span>
+        <img class="brand-logo" src="icons/favicon.svg" alt="" width="32" height="32" />
+        <span class="brand-title">Campus Pulse</span>
       </div>
       <button class="primary-btn sidebar-post-btn desktop-only" onclick="openNewPostModal()">
         <i class="fa-solid fa-pen"></i> New Post

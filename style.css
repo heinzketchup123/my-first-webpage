@@ -3626,3 +3626,20 @@ html.layout-desktop .anon-indicator { height: 40px; }
 }
 .auth-divider::before,
 .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--card-border); }
+
+/* ---------- App logo ---------- */
+.brand-logo { width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; display: block; }
+html.layout-desktop .sidebar-brand .brand-logo { width: 32px; height: 32px; border-radius: 9px; }
+.auth-logo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 6px;
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(34, 211, 238, 0.18);
+}
+/* Phone top bar: logo + name on one line, even with the Anonymous badge showing */
+html.layout-phone .app-header .brand-group { gap: 7px; min-width: 0; flex-shrink: 1; }
+html.layout-phone .app-header .brand-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.layout-phone .app-header .header-actions { gap: 6px; flex-shrink: 0; }
+html.layout-phone .app-header .review-trigger-btn { white-space: nowrap; padding: 8px 12px; }

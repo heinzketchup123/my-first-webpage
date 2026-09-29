@@ -1,13 +1,16 @@
 // Network-first: when online, always load the latest app files so updates
 // show up on the next reload. The cache is only a fallback for offline use.
 // (The old cache-first version kept serving outdated CSS/JS indefinitely.)
-const CACHE_NAME = 'campus-pulse-v40';
+const CACHE_NAME = 'campus-pulse-v41';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './script.js',
-  './manifest.json'
+  './manifest.json',
+  './icons/favicon.svg',
+  './icons/apple-touch-icon.png',
+  './icons/icon-192.png'
 ];
 
 self.addEventListener('install', (e) => {
