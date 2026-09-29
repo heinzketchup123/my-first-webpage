@@ -2321,29 +2321,34 @@ function renderChatThreadHead() {
   const g = openGroupChat();
   if (g) {
     const n = g.members || 0;
-    head.style.display = 'flex';
+    head.style.display = '';
     head.innerHTML = `
-      <span class="friend-avatar group-avatar"><i class="fa-solid fa-users"></i></span>
-      <div class="chat-thread-who">
-        <strong>${escapeHtml(g.name || 'Study group')}</strong>
-        <small>${escapeHtml(g.course || 'Study group')} · ${n} member${n === 1 ? '' : 's'}</small>
+      <div class="chat-thread-center">
+        <span class="friend-avatar group-avatar"><i class="fa-solid fa-users"></i></span>
+        <div class="chat-thread-who">
+          <strong>${escapeHtml(g.name || 'Study group')}</strong>
+          <small>${escapeHtml(g.course || 'Study group')} · ${n} member${n === 1 ? '' : 's'}</small>
+        </div>
       </div>
-      <button class="secondary-btn chat-head-btn" onclick="openGroupDetailModal('${escapeAttr(g.id)}')">Details</button>`;
+      <button class="secondary-btn chat-head-btn" onclick="openGroupDetailModal('${escapeAttr(g.id)}')" aria-label="Group details">
+        <i class="fa-solid fa-circle-info"></i> <span class="chat-head-btn-text">Details</span></button>`;
     return;
   }
   const f = friends.find(x => x.friend_id === selectedFriendId);
   if (!f) { head.style.display = 'none'; head.innerHTML = ''; return; }
   const name = personName(f.friend_id, f.display_name || f.handle || 'Friend');
   const fid = escapeAttr(f.friend_id);
-  head.style.display = 'flex';
+  head.style.display = '';
   head.innerHTML = `
-    <span class="friend-avatar">${escapeHtml(name[0].toUpperCase())}</span>
-    <div class="chat-thread-who">
-      <strong>${nameLink(f.friend_id, name, false)}</strong>
-      <small>${f.handle ? '@' + escapeHtml(f.handle) : 'Friend'}</small>
+    <div class="chat-thread-center">
+      <span class="friend-avatar">${escapeHtml(name[0].toUpperCase())}</span>
+      <div class="chat-thread-who">
+        <strong>${nameLink(f.friend_id, name, false)}</strong>
+        <small>${f.handle ? '@' + escapeHtml(f.handle) : 'Friend'}</small>
+      </div>
     </div>
     <button class="secondary-btn chat-head-btn" onclick="showProfileCard('${fid}')" aria-label="Profile, unfriend or block">
-      <i class="fa-solid fa-user"></i> Profile</button>`;
+      <i class="fa-solid fa-user"></i> <span class="chat-head-btn-text">Profile</span></button>`;
 }
 
 function chatDayLabel(d) {

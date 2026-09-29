@@ -4153,3 +4153,50 @@ html.layout-desktop .bottom-nav > .sb-off,
 html.layout-desktop .bottom-nav > .sb-nofit,
 html.layout-desktop .sidebar-groups > .sb-nofit,
 html.layout-desktop .sidebar-see-all.sb-off { display: none !important; }
+
+/* ---------- Chats: who you're talking to, and their messages, easier to see ---------- */
+.chat-thread-center { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+/* Friends' (and group members') messages stand out from the background */
+.chat-bubble-other {
+  background: color-mix(in srgb, var(--main-text-color) 10%, var(--card-bg-solid));
+  border-color: color-mix(in srgb, var(--main-text-color) 14%, transparent);
+  color: var(--main-text-color);
+}
+/* Phones: the name sits in the middle of the top bar, bigger, with the
+   profile/details button as a round icon on the right. */
+html:not(.layout-desktop) #chat-view .page-header .description { display: none; }
+html:not(.layout-desktop) .chat-thread-head {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 12px;
+}
+html:not(.layout-desktop) .chat-thread-center {
+  grid-column: 2;
+  flex-direction: column;
+  gap: 5px;
+  text-align: center;
+}
+html:not(.layout-desktop) .chat-thread-center .friend-avatar { width: 42px; height: 42px; font-size: 1.05rem; }
+html:not(.layout-desktop) .chat-thread-who { flex: none; align-items: center; max-width: 100%; }
+html:not(.layout-desktop) .chat-thread-who strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.05rem;
+}
+html:not(.layout-desktop) .chat-head-btn {
+  grid-column: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0.9rem;
+}
+html:not(.layout-desktop) .chat-head-btn-text { display: none; }
