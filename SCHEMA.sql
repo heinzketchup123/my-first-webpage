@@ -46,8 +46,9 @@ declare
   final_handle text;
   n int := 0;
 begin
-  base_handle := lower(regexp_replace(split_part(new.email, '@', 1),
-                                      '[^a-z0-9_]', '', 'g'));
+  -- Lower-case first, so capitals in the email are kept as letters.
+  base_handle := regexp_replace(lower(split_part(coalesce(new.email, ''), '@', 1)),
+                                '[^a-z0-9_]', '', 'g');
   if char_length(base_handle) < 3 then
     base_handle := 'user' || substr(replace(new.id::text, '-', ''), 1, 6);
   end if;
@@ -57,9 +58,13 @@ begin
     final_handle := base_handle || n;
   end loop;
 
+  -- Name from the sign-up form, or from Google (full_name / name).
   insert into public.profiles (user_id, handle, display_name)
   values (new.id, final_handle,
-          coalesce(new.raw_user_meta_data->>'display_name', final_handle));
+          coalesce(nullif(trim(new.raw_user_meta_data->>'display_name'), ''),
+                   nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
+                   nullif(trim(new.raw_user_meta_data->>'name'), ''),
+                   final_handle));
   return new;
 end $$;
 
@@ -83,7 +88,7 @@ begin
     from auth.users
     where id not in (select user_id from public.profiles)
   loop
-    base_handle := lower(regexp_replace(split_part(u.email, '@', 1), '[^a-z0-9_]', '', 'g'));
+    base_handle := regexp_replace(lower(split_part(coalesce(u.email, ''), '@', 1)), '[^a-z0-9_]', '', 'g');
     if char_length(base_handle) < 3 then
       base_handle := 'user' || substr(replace(u.id::text, '-', ''), 1, 6);
     end if;
@@ -94,7 +99,11 @@ begin
       final_handle := base_handle || n;
     end loop;
     insert into public.profiles (user_id, handle, display_name)
-    values (u.id, final_handle, coalesce(u.raw_user_meta_data->>'display_name', final_handle));
+    values (u.id, final_handle,
+            coalesce(nullif(trim(u.raw_user_meta_data->>'display_name'), ''),
+                     nullif(trim(u.raw_user_meta_data->>'full_name'), ''),
+                     nullif(trim(u.raw_user_meta_data->>'name'), ''),
+                     final_handle));
   end loop;
 end $$;
 

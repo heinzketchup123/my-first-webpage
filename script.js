@@ -229,7 +229,8 @@ document.addEventListener("DOMContentLoaded", () => {
       renderEmptyStates();
     }
   };
-  supabaseClient.auth.getSession().then(({ data: { session } }) => boot(session));
+  // (getSession waits until Supabase has read a Google sign-in from the address bar.)
+  supabaseClient.auth.getSession().then(({ data: { session } }) => { finishAuthRedirect(); boot(session); });
   supabaseClient.auth.onAuthStateChange((_ev, session) => boot(session));
 });
 
@@ -467,6 +468,52 @@ async function createGroup(event) {
 }
 
 // Authentication Handlers
+// -------------------- Google sign-in --------------------
+// Goes to Google and back through Supabase. Google has to be switched on in
+// Supabase first (Authentication > Sign In / Providers > Google); until then
+// the button says so instead of sending you to an error page.
+async function googleSignInEnabled() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/settings`, { headers: { apikey: SUPABASE_ANON_KEY } });
+    if (!res.ok) return null;
+    const settings = await res.json();
+    return !!settings?.external?.google;
+  } catch (_) {
+    return null;   // couldn't tell (offline?): try anyway
+  }
+}
+
+async function signInWithGoogle() {
+  if (!isSupabaseConnected) return showToast('Sign-in is not available right now.', 'error');
+  const btns = document.querySelectorAll('.google-btn');
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    if (await googleSignInEnabled() === false) {
+      return showToast("Google sign-in isn't switched on yet. It needs to be turned on in Supabase first.", 'warn', 6000);
+    }
+    // Come back to this same page (works for the website and the Home Screen app).
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: 'select_account' } }
+    });
+    if (error) showToast('Google sign-in failed: ' + error.message, 'error', 5000);
+  } finally {
+    btns.forEach(b => { b.disabled = false; });
+  }
+}
+
+// Back from Google: say what went wrong (e.g. you cancelled), and take the
+// sign-in details out of the address bar either way.
+function finishAuthRedirect() {
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const query = new URLSearchParams(location.search);
+  const err = hash.get('error_description') || query.get('error_description') || hash.get('error') || query.get('error');
+  if (err) showToast("Google sign-in didn't finish: " + err.replace(/\+/g, ' '), 'warn', 6000);
+  if (err || /access_token=|refresh_token=|(^|[?&])code=/.test(location.hash.slice(1) + '&' + location.search.slice(1))) {
+    history.replaceState(null, '', location.pathname);
+  }
+}
+
 function toggleAuthMode() {
   document.getElementById('login-form').classList.toggle('hidden');
   document.getElementById('signup-form').classList.toggle('hidden');
