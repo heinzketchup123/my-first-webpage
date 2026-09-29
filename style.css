@@ -3730,3 +3730,35 @@ html.layout-desktop #settings-view > .legal-links { grid-column: 1 / -1; }
 .teacher-meta .teacher-classes i { font-size: 0.66rem; margin-right: 3px; color: var(--accent-color); }
 .teacher-edit-btn { padding: 2px 0; margin-top: 2px; font-size: 0.78rem; }
 .teacher-edit-btn i { font-size: 0.7rem; margin-right: 3px; }
+
+/* ---------- Teacher page: reviews by rating ---------- */
+button.dist-row {
+  width: 100%;
+  padding: 3px 6px;
+  margin: 0 -6px;
+  width: calc(100% + 12px);
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+button.dist-row:hover:not(:disabled) { background: var(--input-bg); }
+button.dist-row:disabled { cursor: default; opacity: 0.55; }
+button.dist-row.active { background: var(--accent-muted); color: var(--accent-color); }
+.star-chips[hidden] { display: none; }
+.star-chips { margin-bottom: 8px; }
+.star-chip i { font-size: 0.66rem; margin-left: 2px; color: var(--star, #fbbf24); }
+.star-chip.active i { color: inherit; }
+.chip:disabled { opacity: 0.45; cursor: default; }
+#teacher-sort { flex: 0 0 auto; }
+/* Phones: the two menus share a row, "Write a review" gets its own */
+html.layout-phone .teacher-toolbar { flex-wrap: wrap; }
+html.layout-phone .teacher-toolbar select { flex: 1 1 0; min-width: 0; }
+html.layout-phone .teacher-toolbar .teacher-compose-btn { flex: 1 1 100%; }
+html.layout-phone .star-chips { gap: 5px; }
+html.layout-phone .star-chips .chip { padding: 5px 8px; font-size: 0.72rem; }
+html.layout-phone .star-chips .chip-count { display: none; }   /* the chart above shows the counts */

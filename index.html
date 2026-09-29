@@ -296,8 +296,11 @@
           </button>
         </div>
 
+        <div class="filter-chips star-chips" id="teacher-star-chips" hidden></div>
+
         <div class="teacher-toolbar">
           <select id="teacher-course-filter" class="mini-select flex-1" onchange="renderTeacherPosts()"></select>
+          <select id="teacher-sort" class="mini-select" onchange="setTeacherPostSort(this.value)" aria-label="Sort"></select>
           <button id="teacher-compose-btn" class="primary-btn teacher-compose-btn" onclick="openTeacherPostModal()">+ Write</button>
         </div>
 

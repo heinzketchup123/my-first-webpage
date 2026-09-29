@@ -3992,6 +3992,8 @@ let tpVotesHaveValue = true;      // false until the database knows about dislik
 const openTpComments = new Set(); // posts whose comments are showing
 const tpBusy = new Set();         // posts with a vote on its way
 let teacherTab = 'review';
+let reviewStarFilter = 0;         // 1-5 = only reviews with that many stars, 0 = all
+let teacherPostSort = 'liked';    // 'liked' | 'new' | 'high' | 'low'
 let composerKind = 'review';
 let editingPostId = null;
 let tpDraft = { rating: 0, difficulty: 0, again: null, tags: [] };
@@ -4265,7 +4267,7 @@ async function submitAddTeacher(event) {
 async function openTeacherPage(id) {
   lastTeacherId = id;
   teacherTab = 'review';
-  if (String(id) !== String(currentTeacher?.id)) openTpComments.clear();
+  if (String(id) !== String(currentTeacher?.id)) { openTpComments.clear(); reviewStarFilter = 0; }
   currentTeacher = null;
   teacherPosts = [];
   document.getElementById('teacher-hero').innerHTML = '<div class="teacher-loading"><i class="fa-solid fa-spinner fa-spin"></i></div>';
@@ -4335,6 +4337,7 @@ function renderTeacherPage() {
   document.querySelectorAll('#teacher-tabs .teacher-tab')
     .forEach(b => b.classList.toggle('active', b.dataset.kind === teacherTab));
   renderTeacherCourseFilter();
+  renderTeacherReviewControls();
   renderTeacherPosts();
 }
 
@@ -4348,7 +4351,10 @@ function renderTeacherHero() {
   const dist = [5, 4, 3, 2, 1].map(n => {
     const c = reviews.filter(r => r.rating === n).length;
     const pct = reviews.length ? Math.round(100 * c / reviews.length) : 0;
-    return `<div class="dist-row"><span>${n}★</span><div class="dist-bar"><div style="width:${pct}%"></div></div><span>${c}</span></div>`;
+    const on = reviewStarFilter === n;
+    return `<button type="button" class="dist-row ${on ? 'active' : ''}" onclick="setReviewStarFilter(${n}, true)" ${c ? '' : 'disabled'}
+              aria-pressed="${on}" aria-label="${on ? 'Show all reviews' : `Show ${n}-star reviews (${c})`}">
+              <span>${n}★</span><div class="dist-bar"><div style="width:${pct}%"></div></div><span>${c}</span></button>`;
   }).join('');
 
   const tagCounts = {};
@@ -4390,6 +4396,43 @@ function setTeacherTab(kind) {
   renderTeacherPage();
 }
 
+// Show only reviews with this many stars (tap the same one again for all).
+function setReviewStarFilter(stars, fromChart) {
+  reviewStarFilter = reviewStarFilter === stars ? 0 : stars;
+  teacherTab = 'review';
+  renderTeacherPage();
+  if (fromChart) document.getElementById('teacher-tabs')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function setTeacherPostSort(mode) {
+  teacherPostSort = mode;
+  renderTeacherPosts();
+}
+
+// The All / 5★ … 1★ buttons and the sort menu above the reviews.
+function renderTeacherReviewControls() {
+  const chips = document.getElementById('teacher-star-chips');
+  const reviews = teacherPosts.filter(p => p.kind === 'review');
+  if (chips) {
+    const show = teacherTab === 'review' && reviews.length > 0;
+    chips.hidden = !show;
+    chips.innerHTML = show ? `
+      <button class="chip ${reviewStarFilter === 0 ? 'active' : ''}" onclick="setReviewStarFilter(0)">All <span class="chip-count">${reviews.length}</span></button>
+      ${[5, 4, 3, 2, 1].map(n => {
+        const c = reviews.filter(r => r.rating === n).length;
+        return `<button class="chip star-chip ${reviewStarFilter === n ? 'active' : ''}" onclick="setReviewStarFilter(${n})" ${c ? '' : 'disabled'}>
+          ${n}<i class="fa-solid fa-star"></i> <span class="chip-count">${c}</span></button>`;
+      }).join('')}` : '';
+  }
+  const sort = document.getElementById('teacher-sort');
+  if (sort) {
+    const opts = [['liked', 'Most liked'], ['new', 'Newest']];
+    if (teacherTab === 'review') opts.push(['high', 'Highest rated'], ['low', 'Lowest rated']);
+    if (!opts.some(([v]) => v === teacherPostSort)) teacherPostSort = 'liked';
+    sort.innerHTML = opts.map(([v, label]) => `<option value="${v}" ${v === teacherPostSort ? 'selected' : ''}>${label}</option>`).join('');
+  }
+}
+
 function renderTeacherCourseFilter() {
   const sel = document.getElementById('teacher-course-filter');
   if (!sel) return;
@@ -4415,13 +4458,27 @@ function renderTeacherPosts() {
   const meta = POST_KIND_META[teacherTab];
   const course = document.getElementById('teacher-course-filter')?.value || 'all';
 
+  const stars = teacherTab === 'review' ? reviewStarFilter : 0;
+  const newest = (a, b) => new Date(b.created_at) - new Date(a.created_at);
+  const sorters = {
+    liked: (a, b) => (b.author_id === currentUserId) - (a.author_id === currentUserId) || tpScore(b.id) - tpScore(a.id) || newest(a, b),
+    new: newest,
+    high: (a, b) => (b.rating || 0) - (a.rating || 0) || tpScore(b.id) - tpScore(a.id) || newest(a, b),
+    low: (a, b) => (a.rating || 0) - (b.rating || 0) || tpScore(b.id) - tpScore(a.id) || newest(a, b)
+  };
   const list = teacherPosts
-    .filter(p => p.kind === teacherTab && (course === 'all' || (p.course || '').trim() === course))
-    .sort((a, b) =>
-      (b.author_id === currentUserId) - (a.author_id === currentUserId)
-      || tpScore(b.id) - tpScore(a.id)
-      || new Date(b.created_at) - new Date(a.created_at));
+    .filter(p => p.kind === teacherTab && (course === 'all' || (p.course || '').trim() === course)
+      && (!stars || p.rating === stars))
+    .sort(sorters[teacherPostSort] || sorters.liked);
 
+  if (!list.length && stars) {
+    container.innerHTML = `<div class="empty-state">
+      <i class="fa-regular fa-star"></i>
+      <p>No ${stars}-star reviews${course !== 'all' ? ' for ' + escapeHtml(course) : ''} yet.</p>
+      <button class="secondary-btn" onclick="setReviewStarFilter(0)">Show all reviews</button>
+    </div>`;
+    return;
+  }
   if (!list.length) {
     container.innerHTML = `<div class="empty-state">
       <i class="fa-solid fa-${teacherTab === 'review' ? 'star' : teacherTab === 'requirement' ? 'list-check' : 'note-sticky'}"></i>
