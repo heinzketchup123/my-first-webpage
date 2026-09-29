@@ -3762,3 +3762,29 @@ html.layout-phone .teacher-toolbar .teacher-compose-btn { flex: 1 1 100%; }
 html.layout-phone .star-chips { gap: 5px; }
 html.layout-phone .star-chips .chip { padding: 5px 8px; font-size: 0.72rem; }
 html.layout-phone .star-chips .chip-count { display: none; }   /* the chart above shows the counts */
+
+/* ---------- Tappable names + profile card ---------- */
+.name-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.name-link:hover { color: var(--accent-color); text-decoration: underline; text-underline-offset: 2px; }
+.name-link:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.chat-sender .name-link { font-weight: 800; color: var(--accent-color); }
+.profile-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0 2px; text-align: center; }
+.friend-avatar.profile-avatar { width: 64px; height: 64px; font-size: 1.6rem; margin-bottom: 6px; }
+.profile-name { font-size: 1.15rem; font-weight: 800; color: var(--main-text-color); }
+.profile-handle { font-size: 0.9rem; font-weight: 700; color: var(--accent-color); }
+.profile-handle.muted { color: var(--sub-text-color); font-weight: 600; }
+.profile-school { font-size: 0.8rem; color: var(--sub-text-color); }
+.profile-school i { margin-right: 4px; }
+.profile-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; margin-top: 12px; }
+.profile-actions .primary-btn, .profile-actions .secondary-btn { width: 100%; max-width: 260px; margin: 0; }
+.profile-note { margin: 0; font-size: 0.8rem; color: var(--sub-text-color); }

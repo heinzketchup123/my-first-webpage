@@ -1709,6 +1709,7 @@ async function fetchFriendships() {
   renderFriendsModalIfOpen();
   updateNotifBadgeFromState();
   renderNotifications();
+  refreshProfileCard();
 }
 
 async function sendFriendRequestFromInput() {
@@ -1817,6 +1818,91 @@ function renderFriendsStrip() {
 }
 
 function escapeAttr(v) { return String(v).replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
+
+// -------------------- Names you can tap --------------------
+// Posts, comments and reviews that aren't anonymous show the person's name;
+// tap it to see their @username (and add them as a friend or message them).
+// Anonymous ones stay "Anonymous Student" and can't be tapped.
+function personName(uid, fallback) {
+  const p = uid && profileMap[uid];
+  return (p && (p.display_name || p.handle)) || fallback || 'Student';
+}
+
+function nameLink(uid, shown, anon) {
+  if (anon || !uid) return escapeHtml(shown);
+  return `<button type="button" class="name-link" onclick="event.stopPropagation(); showProfileCard('${escapeAttr(uid)}')"
+            title="See their profile">${escapeHtml(shown)}</button>`;
+}
+
+// Fetch names for these people, then redraw if any were new.
+async function loadNames(ids, redraw) {
+  const missing = [...new Set(ids.filter(id => id && !profileMap[id]))];
+  if (!missing.length || !isSupabaseConnected) return;
+  await fetchProfilesByIds(missing);
+  if (missing.some(id => profileMap[id])) redraw();
+}
+
+let profileCardFor = null;   // whose card is open (so it can refresh after a friend request)
+
+async function showProfileCard(uid) {
+  if (!uid) return;
+  const known = profileMap[uid];
+  openModal('Profile', profileCardHtml(uid));
+  document.getElementById('detailModal').dataset.kind = 'profile';
+  profileCardFor = uid;
+  // Fresh copy, including their school.
+  const { data } = await supabaseClient.from('profiles')
+    .select('user_id, handle, display_name, school_id').eq('user_id', uid).maybeSingle();
+  if (data) profileMap[uid] = { ...(known || {}), handle: data.handle, display_name: data.display_name, school_id: data.school_id };
+  refreshProfileCard();
+}
+
+function refreshProfileCard() {
+  const modal = document.getElementById('detailModal');
+  if (!profileCardFor || modal?.style.display !== 'flex' || modal.dataset.kind !== 'profile') return;
+  document.getElementById('modalBody').innerHTML = profileCardHtml(profileCardFor);
+}
+
+function profileCardHtml(uid) {
+  const p = profileMap[uid] || {};
+  const name = personName(uid, 'Student');
+  const me = uid === currentUserId;
+  const uidA = escapeAttr(uid);
+  const incoming = pendingIncoming.find(r => r.requester_id === uid);
+  let action;
+  if (me) action = '<p class="profile-note">This is you.</p>';
+  else if (friends.some(f => f.friend_id === uid)) {
+    action = `<button class="primary-btn" onclick="closeModalForce(); switchTab('chat-view'); selectFriend('${uidA}')"><i class="fa-solid fa-comment"></i> Message</button>
+              <p class="profile-note"><i class="fa-solid fa-user-check"></i> You're friends</p>`;
+  } else if (incoming) {
+    action = `<button class="primary-btn" onclick="respondFriendRequest('${escapeAttr(incoming.id)}', true).then(refreshProfileCard)"><i class="fa-solid fa-user-check"></i> Accept friend request</button>`;
+  } else if (pendingOutgoing.some(r => r.addressee_id === uid)) {
+    action = '<button class="secondary-btn" disabled><i class="fa-solid fa-clock"></i> Friend request sent</button>';
+  } else if (currentUserId) {
+    action = `<button class="primary-btn" onclick="sendFriendRequestTo('${uidA}')"><i class="fa-solid fa-user-plus"></i> Add friend</button>`;
+  } else action = '';
+  return `
+    <div class="profile-card">
+      <span class="friend-avatar profile-avatar">${escapeHtml(name[0].toUpperCase())}</span>
+      <div class="profile-name">${escapeHtml(name)}</div>
+      ${p.handle ? `<div class="profile-handle">@${escapeHtml(p.handle)}</div>` : '<div class="profile-handle muted">Loading…</div>'}
+      ${p.school_id ? `<div class="profile-school"><i class="fa-solid fa-graduation-cap"></i> ${escapeHtml(schoolName(p.school_id))}</div>` : ''}
+      <div class="profile-actions">${action}</div>
+    </div>`;
+}
+
+async function sendFriendRequestTo(uid) {
+  if (!currentUserId || !uid || uid === currentUserId) return;
+  const { error } = await supabaseClient.from('friendships').insert([{
+    requester_id: currentUserId, addressee_id: uid, status: 'pending'
+  }]);
+  if (error) {
+    return showToast(error.code === '23505' ? "There's already a friend request between you two." : 'Could not send request: ' + error.message, 'warn', 4000);
+  }
+  showToast(`Friend request sent to ${personName(uid, 'them')}.`, 'success');
+  await fetchFriendships();
+  refreshProfileCard();
+}
 
 function renderFriendsBadge() {
   const badge = document.getElementById('friends-badge');
@@ -2161,7 +2247,7 @@ function renderDMThread(opts = {}) {
       : escapeHtml(when ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : String(msg.time || ''));
     // In a group, say who wrote each run of messages.
     const sender = group && !mine && !withPrev
-      ? `<div class="chat-sender">${escapeHtml(memberLabel(msg.sender_id))}</div>` : '';
+      ? `<div class="chat-sender">${nameLink(msg.sender_id, memberLabel(msg.sender_id), false)}</div>` : '';
     // Animate only what's new since the last draw; a sent message that was
     // already showing as "Sending…" just fades up instead of popping in again.
     const motion = !onScreen || dmShown.has(msg.id) ? ''
@@ -2310,6 +2396,12 @@ async function fetchFeedExtras() {
     const [pid, key] = tag.split('|'); mine.add(tag); (counts[pid] ||= {})[key] = (counts[pid][key] || 0) + 1; } });
   (cm.data || []).forEach(c => (comments[String(c.post_id)] ||= []).push(c));
   feedReactions = counts; myFeedReactions = mine; feedComments = comments;
+  const named = campusFeed.filter(p => !/^anonymous/i.test(p.author || '')).map(p => p.author_id)
+    .concat((cm.data || []).filter(c => !/^anonymous/i.test(c.author || '')).map(c => c.author_id));
+  loadNames(named, () => {
+    renderFeed();
+    if (document.getElementById('comments-list')) renderCommentsList();
+  });
 }
 
 // Realtime: someone reacted or commented — refresh counts (debounced).
@@ -2460,8 +2552,8 @@ function renderFeed() {
               </button>`;
     }).join('');
 
-    const author = String(post.author || 'Student');
-    const anon = /^anonymous/i.test(author);
+    const anon = /^anonymous/i.test(String(post.author || ''));
+    const author = anon ? String(post.author) : personName(post.author_id, String(post.author || 'Student'));
     const mine = post.author_id && post.author_id === currentUserId;
     const el = document.createElement('article');
     el.className = 'info-card feed-post';
@@ -2470,7 +2562,7 @@ function renderFeed() {
       <header class="post-head">
         <span class="post-avatar">${anon ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(author[0].toUpperCase())}</span>
         <div class="post-who">
-          <strong>${escapeHtml(author)}${mine ? ' <em>(you)</em>' : ''}</strong>
+          <strong>${nameLink(post.author_id, author, anon)}${mine ? ' <em>(you)</em>' : ''}</strong>
           <small>${escapeHtml(post.created_at ? timeAgo(post.created_at) : (post.time || ''))}</small>
         </div>
         ${isAdmin || mine
@@ -2577,14 +2669,15 @@ function renderCommentsList() {
   const list = postComments(post);
   const ownsPost = post.author_id && post.author_id === currentUserId;
   box.innerHTML = list.length ? list.map(c => {
-    const name = String(c.author || 'Anonymous Student');
+    const anon = /^anonymous/i.test(String(c.author || 'Anonymous'));
+    const name = anon ? String(c.author || 'Anonymous Student') : personName(c.author_id, String(c.author || 'Student'));
     const canDelete = feedExtrasReady && c.id && (c.author_id === currentUserId || ownsPost || isAdmin);
     return `
       <div class="comment-row">
-        <span class="post-avatar sm">${/^anonymous/i.test(name) ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(name[0].toUpperCase())}</span>
+        <span class="post-avatar sm">${anon ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(name[0].toUpperCase())}</span>
         <div class="comment-main">
           <div class="comment-meta">
-            <strong>${escapeHtml(name)}${c.author_id && c.author_id === currentUserId ? ' <em>(you)</em>' : ''}</strong>
+            <strong>${nameLink(c.author_id, name, anon)}${c.author_id && c.author_id === currentUserId ? ' <em>(you)</em>' : ''}</strong>
             ${c.created_at ? `<small>${escapeHtml(timeAgo(c.created_at))}</small>` : ''}
             ${canDelete ? `<button class="comment-delete" onclick="deleteComment('${escapeAttr(c.id)}')" aria-label="Delete comment"><i class="fa-solid fa-xmark"></i></button>` : ''}
           </div>
@@ -2777,7 +2870,7 @@ function groupDetailHtml(g) {
     return `
       <div class="group-member">
         <span class="friend-avatar sm">${escapeHtml(n[0].toUpperCase())}</span>
-        <span class="group-member-name"><strong>${escapeHtml(n)}</strong>${handle}</span>
+        <span class="group-member-name"><strong>${nameLink(uid, n, false)}</strong>${handle}</span>
         ${uid === g.creator_id ? '<span class="group-badge host">Host</span>' : ''}
       </div>`;
   }).join('') || '<p class="friends-empty-inner">No one has joined yet. Be the first!</p>';
@@ -4335,6 +4428,9 @@ async function loadTeacherPage(id) {
     (commentsRes.data || []).forEach(c => { (teacherComments[c.post_id] = teacherComments[c.post_id] || []).push(c); });
   }
   renderTeacherPage();
+  const named = teacherPosts.filter(p => !/^anonymous/i.test(p.author_name || ANON_AUTHOR)).map(p => p.author_id)
+    .concat(Object.values(teacherComments).flat().filter(c => !c.anonymous && !/^anonymous/i.test(c.author_name || '')).map(c => c.author_id));
+  loadNames(named, () => { if (currentTeacher && String(currentTeacher.id) === String(id)) renderTeacherPosts(); });
 }
 
 function canPostOnTeacher() {
@@ -4517,7 +4613,8 @@ function renderTeacherPosts() {
     const comments = teacherComments[p.id] || [];
     const open = openTpComments.has(String(p.id));
     const busy = tpBusy.has(String(p.id)) ? ' disabled' : '';
-    const author = p.author_name || ANON_AUTHOR;
+    const anonPost = /^anonymous/i.test(p.author_name || ANON_AUTHOR);
+    const author = anonPost ? (p.author_name || ANON_AUTHOR) : personName(p.author_id, p.author_name);
     const sub = [p.course ? escapeHtml(p.course) : null, timeAgo(p.created_at), p.updated_at ? 'edited' : null]
       .filter(Boolean).join(' · ');
     const reviewBits = p.kind === 'review' ? `
@@ -4531,7 +4628,7 @@ function renderTeacherPosts() {
         <div class="tpost-head">
           <span class="friend-avatar sm">${escapeHtml(author[0].toUpperCase())}</span>
           <div class="tpost-author">
-            <strong>${escapeHtml(author)}${mine ? ' <em>(you)</em>' : ''}</strong>
+            <strong>${nameLink(p.author_id, author, anonPost)}${mine ? ' <em>(you)</em>' : ''}</strong>
             <small>${sub}</small>
           </div>
           ${p.kind === 'review' ? `<div class="rating-badge sm ${ratingClass(p.rating)}">${p.rating}</div>` : ''}
@@ -4580,15 +4677,15 @@ function tpCommentsHtml(p, comments) {
     return `<div class="tpost-comments"><p class="tpc-note">Comments need a quick database update: an admin needs to run the updated SCHEMA.sql in Supabase (section 6k).</p></div>`;
   }
   const rows = comments.map(c => {
-    const name = c.author_name || 'Student';
+    const anon = c.anonymous || /^anonymous/i.test(c.author_name || '');
+    const name = anon ? (c.author_name || 'Anonymous student') : personName(c.author_id, c.author_name || 'Student');
     const me = c.author_id === currentUserId;
-    const anon = /^anonymous/i.test(name);
     return `
       <div class="tpc">
         <span class="friend-avatar xs">${anon ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(name[0].toUpperCase())}</span>
         <div class="tpc-main">
           <div class="tpc-head">
-            <strong>${escapeHtml(name)}${me ? ' <em>(you)</em>' : ''}</strong>
+            <strong>${nameLink(c.author_id, name, anon)}${me ? ' <em>(you)</em>' : ''}</strong>
             <small>${timeAgo(c.created_at)}</small>
             ${me || isAdmin ? `<button class="tpc-del" onclick="deleteTeacherComment('${escapeAttr(c.id)}', '${pid}')" aria-label="Delete comment"><i class="fa-solid fa-xmark"></i></button>` : ''}
           </div>
@@ -4869,6 +4966,7 @@ function onTeacherDataChanged() {
 
 function openModal(title, text) {
   document.getElementById('detailModal').dataset.kind = '';
+  profileCardFor = null;
   document.getElementById('modalTitle').textContent = title;
   if (typeof text === 'string' && text.trim().startsWith('<')) {
     document.getElementById('modalBody').innerHTML = text;
