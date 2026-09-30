@@ -958,7 +958,7 @@ function switchTab(viewId, element) {
 
   document.getElementById(viewId).classList.add('active-view');
   // A teacher page lives under the Teachers tab in the nav.
-  const navView = viewId === 'teacher-view' ? 'search-view' : viewId;
+  const navView = PAGE_PARENT[viewId] || viewId;
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === navView));
   document.querySelector('.content-container')?.scrollTo(0, 0);
 
@@ -983,6 +983,8 @@ function switchTab(viewId, element) {
 // The page you're on (plus the teacher page or chat that's open) is saved on
 // this device, so refreshing or reopening the app brings you back to it.
 const PLACE_KEY = 'lastPlace';
+// Pages that belong under a tab (and need their data before they can show).
+const PAGE_PARENT = { 'teacher-view': 'search-view', 'group-view': 'groups-view', 'event-view': 'events-view' };
 let placeQuiet = false;        // true while putting you back, so that doesn't overwrite it
 let startPlace = null;         // where you were when the app opened
 let placeDetailsDone = false;
@@ -994,6 +996,8 @@ function savePlace() {
   if (!view) return;
   const place = { view };
   if (view === 'teacher-view' && lastTeacherId) place.teacher = String(lastTeacherId);
+  if (view === 'group-view' && openGroupId) place.group = String(openGroupId);
+  if (view === 'event-view' && openEventId) place.event = String(openEventId);
   if (view === 'chat-view' && chatKey()) place.chat = chatKey();
   try { localStorage.setItem(PLACE_KEY, JSON.stringify(place)); } catch (_) {}
 }
@@ -1002,10 +1006,11 @@ function savePlace() {
 // A link ending in #teacher/<id> or #group/<id> opens that teacher page or
 // study group (after signing in, if needed). The link is tidied away once used.
 function linkPlace() {
-  const m = /^#(teacher|group)\/([0-9a-z-]{8,64})$/i.exec(location.hash || '');
+  const m = /^#(teacher|group|event)\/([0-9a-z-]{8,64})$/i.exec(location.hash || '');
   if (!m) return null;
   try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
-  return m[1].toLowerCase() === 'teacher' ? { view: 'teacher-view', teacher: m[2] } : { view: 'groups-view', group: m[2] };
+  const kind = m[1].toLowerCase();
+  return { view: kind + '-view', [kind]: m[2] };
 }
 function shareUrl(kind, id) { return `${location.origin}${location.pathname}#${kind}/${id}`; }
 async function shareLink(url, title) {
@@ -1031,11 +1036,8 @@ window.addEventListener('hashchange', () => {
   const place = linkPlace();
   if (!place || !currentUserId) return;
   if (place.teacher) openTeacherPage(place.teacher);
-  else {
-    switchTab('groups-view');
-    if (findGroup(place.group)) openGroupDetailModal(place.group);
-    else showToast("That group isn't available to you.", 'info');
-  }
+  else if (place.group) openGroupPage(place.group);
+  else if (place.event) openEventPage(place.event);
 });
 
 // Straight away on load: show the page you were on (before any data arrives).
@@ -1043,7 +1045,7 @@ function restorePlaceView() {
   try { startPlace = linkPlace() || JSON.parse(localStorage.getItem(PLACE_KEY) || 'null'); } catch (_) { startPlace = null; }
   if (!startPlace || !startPlace.view) return;
   // A teacher page needs its data first; show the Teachers list until then.
-  const view = startPlace.view === 'teacher-view' ? 'search-view' : startPlace.view;
+  const view = PAGE_PARENT[startPlace.view] || startPlace.view;
   if (!document.getElementById(view)?.classList.contains('view')) return;
   placeQuiet = true;
   try { switchTab(view); } finally { placeQuiet = false; }
@@ -1054,13 +1056,14 @@ function restorePlaceView() {
 function restorePlaceDetails() {
   if (placeDetailsDone || !startPlace) return;
   placeDetailsDone = true;
-  const expected = startPlace.view === 'teacher-view' ? 'search-view' : startPlace.view;
+  const expected = PAGE_PARENT[startPlace.view] || startPlace.view;
   if (!isViewActive(expected)) return;
   if (startPlace.view === 'teacher-view' && startPlace.teacher) {
     openTeacherPage(startPlace.teacher);
-  } else if (startPlace.view === 'groups-view' && startPlace.group) {
-    if (findGroup(startPlace.group)) openGroupDetailModal(startPlace.group);
-    else showToast("That group isn't available to you.", 'info');
+  } else if (startPlace.view === 'group-view' && startPlace.group) {
+    openGroupPage(startPlace.group);
+  } else if (startPlace.view === 'event-view' && startPlace.event) {
+    openEventPage(startPlace.event);
   } else if (startPlace.view === 'chat-view' && startPlace.chat) {
     const id = startPlace.chat.slice(2);
     if (startPlace.chat.startsWith('d:') && friends.some(f => f.friend_id === id)) selectFriend(id);
@@ -1628,7 +1631,7 @@ function renderHomeSide() {
       const d = new Date(e.starts_at);
       const when = e.all_day ? 'All day' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       return `
-        <button class="side-item" onclick="switchTab('events-view'); selectCalDay('${dayKey(d)}')">
+        <button class="side-item" onclick="openEventPage('${escapeAttr(e.id)}')">
           <span class="side-date"><small>${d.toLocaleDateString([], { month: 'short' })}</small><b>${d.getDate()}</b></span>
           <span class="side-text"><strong>${escapeHtml(e.title)}</strong>
             <small>${dayKey(d) === dayKey(new Date()) ? 'Today' : d.toLocaleDateString([], { weekday: 'short' })} · ${when}</small></span>
@@ -3239,12 +3242,15 @@ function groupCardHtml(g) {
     + (g.joined && !host ? '<span class="group-badge joined"><i class="fa-solid fa-check"></i> Joined</span>' : '')
     + (full ? '<span class="group-badge full">Full</span>' : '');
   return `
-    <article class="info-card group-card${g.joined ? ' joined' : ''}">
+    <article class="info-card group-card${g.joined ? ' joined' : ''}" style="--av-h:${avatarHue(g.id)}">
       <div class="group-card-top">
         <span class="group-course">${escapeHtml(g.course || 'Study group')}</span>
         <span class="group-badges">${badges}</span>
       </div>
-      <button class="group-title" type="button" onclick="openGroupDetailModal('${gid}')">${escapeHtml(g.name || 'Untitled group')}</button>
+      <div class="group-title-row">
+        <span class="group-mark sm">${escapeHtml(groupInitials(g.name))}</span>
+        <button class="group-title" type="button" onclick="openGroupPage('${gid}')">${escapeHtml(g.name || 'Untitled group')}</button>
+      </div>
       <div class="group-meta">
         <span><i class="fa-solid fa-location-dot"></i> ${escapeHtml(g.location || 'Place TBD')}</span>
         <span><i class="fa-regular fa-clock"></i> ${escapeHtml(g.schedule || 'Time TBD')}</span>
@@ -3264,11 +3270,10 @@ function groupCardHtml(g) {
     </article>`;
 }
 
-function groupDetailHtml(g) {
+// People in a group (host first, then you), plus, for the host, who's
+// invited and who was removed.
+function groupPeopleHtml(g) {
   const gid = escapeAttr(g.id);
-  const host = !!g.creator_id && g.creator_id === currentUserId;
-  const canDelete = canManageSchool(g.school_id || currentSchoolId) || host;
-  // Host first, then you, then everyone else.
   const ids = (groupMembers[g.id] || []).slice().sort((a, b) =>
     (b === g.creator_id) - (a === g.creator_id) || (b === currentUserId) - (a === currentUserId)
     || memberLabel(a).localeCompare(memberLabel(b)));
@@ -3286,7 +3291,6 @@ function groupDetailHtml(g) {
                          aria-label="Remove ${escapeAttr(n)} from the group">Remove</button>` : ''}
       </div>`;
   }).join('') || '<p class="friends-empty-inner">No one has joined yet. Be the first!</p>';
-  // Invites still waiting (the host sees all of them; others see the ones they sent).
   const pending = (groupInvites[g.id] || []).filter(i => i.user_id !== currentUserId
     && (hostsGroup(g) || i.invited_by === currentUserId)).map(i => {
     const n = memberLabel(i.user_id);
@@ -3297,14 +3301,6 @@ function groupDetailHtml(g) {
         <button class="secondary-btn friend-btn-sm" onclick="cancelGroupInvite('${gid}', '${escapeAttr(i.user_id)}')">Cancel</button>
       </div>`;
   }).join('');
-  const invite = myGroupInvite(g);
-  const inviteBanner = invite && !g.joined ? `
-    <div class="group-invite-banner">
-      <i class="fa-solid fa-envelope-open-text"></i>
-      <span><strong>${escapeHtml(invite.invited_by ? memberLabel(invite.invited_by) : 'Someone')}</strong> invited you to this group${g.private ? ' (it\'s private)' : ''}.</span>
-      <button class="secondary-btn friend-btn-sm" onclick="declineGroupInvite('${gid}')">Decline</button>
-    </div>` : '';
-  // Hosts see who they removed, and can let them back in.
   const removed = kick ? (groupBans[g.id] || []).map(b => {
     const n = memberLabel(b.user_id);
     return `
@@ -3314,52 +3310,185 @@ function groupDetailHtml(g) {
         <button class="secondary-btn friend-btn-sm" onclick="letBackIntoGroup('${gid}', '${escapeAttr(b.user_id)}')">Let back in</button>
       </div>`;
   }).join('') : '';
-  const topics = (g.topics || []).map(t => `<span class="group-topic">${escapeHtml(t)}</span>`).join('')
-    || '<span class="group-topic">General study</span>';
+  return { people, pending, removed };
+}
+
+function groupInitials(name) {
+  const words = String(name || '').replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  return ((words[0]?.[0] || '?') + (words[1]?.[0] || '')).toUpperCase();
+}
+
+// Other groups for the same course, or sharing a topic.
+function similarGroups(g) {
+  const norm = v => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const course = norm(g.course);
+  const topics = new Set((g.topics || []).map(norm));
+  return studyGroups.filter(x => String(x.id) !== String(g.id) && !x.joined
+      && ((course && norm(x.course) === course) || (x.topics || []).some(t => topics.has(norm(t)))))
+    .sort((a, b) => Number(groupIsFull(a)) - Number(groupIsFull(b)) || b.members - a.members)
+    .slice(0, 3);
+}
+
+// The last few messages in a group's chat, for its page (members only).
+let groupChatPeek = {};
+async function loadGroupChatPeek(g) {
+  if (!g?.joined || !isSupabaseConnected) return;
+  const { data, error } = await supabaseClient.from('group_messages')
+    .select('id, sender_id, text, created_at').eq('group_id', g.id)
+    .order('created_at', { ascending: false }).limit(3);
+  if (error) return;
+  groupChatPeek[g.id] = (data || []).reverse();
+  await fetchProfilesByIds(groupChatPeek[g.id].map(m => m.sender_id));
+  if (openGroupId === String(g.id) && isViewActive('group-view')) renderGroupPage();
+}
+
+let groupAnimatedFor = null;
+function openGroupPage(groupId) {
+  const g = findGroup(groupId);
+  if (!g) return showToast("That group isn't available to you.", 'info');
+  closeModalForce();
+  openGroupId = String(g.id);
+  groupAnimatedFor = null;
+  switchTab('group-view');
+  renderGroupPage();
+  loadGroupChatPeek(g);
+}
+// (Older name, still used from cards, notifications and the home screen.)
+function openGroupDetailModal(groupId) { openGroupPage(groupId); }
+function closeGroupPage() { switchTab('groups-view'); }
+
+// Keep the page in step with joins, leaves, invites and edits.
+function refreshOpenGroup() {
+  if (!openGroupId || !isViewActive('group-view')) return;
+  if (!findGroup(openGroupId)) {
+    openGroupId = null;
+    switchTab('groups-view');
+    return showToast("That group isn't available any more.", 'info');
+  }
+  renderGroupPage();
+}
+
+function renderGroupPage() {
+  const g = findGroup(openGroupId);
+  const hero = document.getElementById('group-hero');
+  const side = document.getElementById('group-side');
+  const main = document.getElementById('group-main');
+  const related = document.getElementById('group-related');
+  if (!g || !hero || !side || !main || !related) return;
+  hero.classList.toggle('th-still', groupAnimatedFor === String(g.id));
+  groupAnimatedFor = String(g.id);
+
+  const gid = escapeAttr(g.id);
+  const host = !!g.creator_id && g.creator_id === currentUserId;
+  const canDelete = canManageSchool(g.school_id || currentSchoolId) || host;
   const max = g.max || 0;
-  return `
-    <div class="group-detail">
-      ${inviteBanner}
-      <div class="group-course">${escapeHtml(g.course || 'Study group')}${g.private ? ' <span class="group-badge private"><i class="fa-solid fa-lock"></i> Private</span>' : ''}</div>
-      <div class="group-detail-rows">
-        <div><i class="fa-solid fa-location-dot"></i><span>${escapeHtml(g.location || 'Place TBD')}</span></div>
-        <div><i class="fa-regular fa-clock"></i><span>${escapeHtml(g.schedule || 'Time TBD')}</span></div>
-        <div><i class="fa-solid fa-user"></i><span>Hosted by ${escapeHtml(groupHostName(g))}</span></div>
+  const full = groupIsFull(g);
+  const left = Math.max(0, max - g.members);
+  const C = 2 * Math.PI * 34;
+  const frac = max ? Math.min(1, g.members / max) : 0;
+  const invite = myGroupInvite(g);
+  const unread = unreadGroupCount(g.id);
+  const { people, pending, removed } = groupPeopleHtml(g);
+  const badges = [
+    g.private ? '<span class="group-badge private"><i class="fa-solid fa-lock"></i> Private</span>' : '',
+    host ? '<span class="group-badge host">You host this</span>' : g.joined ? '<span class="group-badge joined"><i class="fa-solid fa-check"></i> Joined</span>' : '',
+    full ? '<span class="group-badge full">Full</span>' : ''
+  ].join('');
+
+  hero.style.setProperty('--av-h', avatarHue(g.id));
+  hero.innerHTML = `
+    <div class="th-cover" aria-hidden="true"></div>
+    <div class="th-head">
+      <div class="group-mark lg">${escapeHtml(groupInitials(g.name))}</div>
+      <div class="th-actions">
+        ${g.private ? '' : `<button class="th-icon-btn" onclick="shareGroup('${gid}')" aria-label="Share this group" title="Share"><i class="fa-solid fa-share-nodes"></i></button>`}
+        ${canInviteToGroup(g) ? `<button class="th-icon-btn" onclick="openGroupInvitePicker('${gid}')" aria-label="Invite people" title="Invite"><i class="fa-solid fa-user-plus"></i></button>` : ''}
+        ${host ? `<button class="th-icon-btn" onclick="openCreateGroupModal('${gid}')" aria-label="Edit group" title="Edit"><i class="fa-solid fa-pen"></i></button>` : ''}
       </div>
-      <div class="group-detail-label">Topics</div>
-      <div class="group-topics">${topics}</div>
-      <div class="group-detail-label">Members · ${g.members}/${max}${groupIsFull(g) ? ' · full' : ''}</div>
+    </div>
+    ${invite && !g.joined ? `
+      <div class="group-invite-banner">
+        <i class="fa-solid fa-envelope-open-text"></i>
+        <span><strong>${escapeHtml(invite.invited_by ? memberLabel(invite.invited_by) : 'Someone')}</strong> invited you to this group.</span>
+        <button class="secondary-btn friend-btn-sm" onclick="declineGroupInvite('${gid}')">Decline</button>
+      </div>` : ''}
+    <div class="teacher-hero-text">
+      <h1>${escapeHtml(g.name || 'Study group')}</h1>
+      <p>${escapeHtml(g.course || 'Study group')} · Hosted by ${escapeHtml(groupHostName(g))}</p>
+      ${badges ? `<div class="gp-badges">${badges}</div>` : ''}
+    </div>
+    <div class="th-score">
+      <div class="th-ring ${full ? 'r-bad' : frac >= 0.75 ? 'r-ok' : 'r-good'}" role="img" aria-label="${g.members} of ${max} seats taken">
+        <svg viewBox="0 0 80 80" aria-hidden="true">
+          <circle class="th-ring-track" cx="40" cy="40" r="34"></circle>
+          <circle class="th-ring-fill" cx="40" cy="40" r="34" style="stroke-dasharray:${(frac * C).toFixed(1)} ${C.toFixed(1)}"></circle>
+        </svg>
+        <div class="th-ring-text"><strong>${g.members}/${max}</strong><small>members</small></div>
+      </div>
+      <div class="th-meters gp-facts">
+        <div><i class="fa-regular fa-clock"></i><span>When</span><b>${escapeHtml(g.schedule || 'Time TBD')}</b></div>
+        <div><i class="fa-solid fa-location-dot"></i><span>Where</span><b>${escapeHtml(g.location || 'Place TBD')}</b></div>
+        <div><i class="fa-solid fa-chair"></i><span>Open seats</span><b>${full ? 'None' : left}</b></div>
+      </div>
+    </div>
+    <div class="gp-cta">
+      ${g.joined
+        ? `<button class="primary-btn" onclick="openGroupChatFromGroups('${gid}')"><i class="fa-solid fa-comments"></i> Group chat${unread ? ` <span class="chat-unread-dot">${unread}</span>` : ''}</button>
+           ${groupJoinButton(g)}`
+        : groupJoinButton(g)}
+    </div>
+    ${removedFromGroup(g) ? '<p class="group-removed-note"><i class="fa-solid fa-user-slash"></i> The host removed you from this group.</p>' : ''}
+  `;
+
+  side.innerHTML = `
+    <div class="info-card to-card">
+      <div class="to-head"><h3><i class="fa-solid fa-user-group"></i> Members</h3><small>${g.members}/${max}${full ? ' · full' : ''}</small></div>
       <div class="group-member-list">${people}</div>
       ${pending ? `<div class="group-detail-label">Invited</div><div class="group-member-list">${pending}</div>` : ''}
       ${removed ? `<div class="group-detail-label">Removed</div><div class="group-member-list">${removed}</div>` : ''}
-      ${removedFromGroup(g) ? '<p class="group-removed-note"><i class="fa-solid fa-user-slash"></i> The host removed you from this group.</p>' : ''}
-      <div class="group-actions">
-        ${g.joined ? `<button class="primary-btn" onclick="openGroupChatFromGroups('${gid}')"><i class="fa-solid fa-comments"></i> Group chat</button>` : ''}
-        ${groupJoinButton(g)}
-        ${canInviteToGroup(g) ? `<button class="secondary-btn" onclick="openGroupInvitePicker('${gid}')"><i class="fa-solid fa-user-plus"></i> Invite</button>` : ''}
-        ${g.private ? '' : `<button class="secondary-btn group-icon-btn" onclick="shareGroup('${gid}')" aria-label="Share group link" title="Share"><i class="fa-solid fa-share-nodes"></i></button>`}
-        ${host ? `<button class="secondary-btn" onclick="openCreateGroupModal('${gid}')"><i class="fa-solid fa-pen"></i> Edit</button>` : ''}
-        ${canDelete ? `<button class="secondary-btn group-icon-btn danger-text" onclick="deleteGroup('${gid}')" aria-label="Delete group"><i class="fa-solid fa-trash"></i></button>` : ''}
-      </div>
+    </div>
+    ${canDelete ? `<button class="text-btn th-admin-delete" onclick="deleteGroup('${gid}')"><i class="fa-solid fa-trash"></i> Delete this group</button>` : ''}`;
+
+  const peek = (groupChatPeek[g.id] || []).filter(m => !isBlocked(m.sender_id));
+  const chatCard = g.joined ? `
+    <div class="info-card to-card">
+      <div class="to-head"><h3><i class="fa-solid fa-comments"></i> Latest in the chat</h3>
+        <button class="text-btn" onclick="openGroupChatFromGroups('${gid}')">Open chat</button></div>
+      ${peek.length ? `<div class="gp-peek">${peek.map(m => {
+        const n = memberLabel(m.sender_id);
+        return `
+          <div class="gp-peek-msg">
+            <span class="friend-avatar sm">${escapeHtml(n[0].toUpperCase())}</span>
+            <div><strong>${escapeHtml(n)}</strong> <small>${escapeHtml(timeAgo(m.created_at))}</small>
+              <p>${escapeHtml(String(m.text || '').slice(0, 160))}</p></div>
+          </div>`;
+      }).join('')}</div>` : '<p class="friends-empty-inner">No messages yet. Say hi to the group!</p>'}
+    </div>` : `
+    <div class="info-card to-card to-empty">
+      <i class="fa-solid fa-lock"></i>
+      <div><strong>Group chat</strong><small>${g.private && !invite ? 'This group is invite-only.' : 'Join the group to see what everyone is talking about.'}</small></div>
     </div>`;
-}
+  const topics = (g.topics || []).map(t => `<span class="group-topic">${escapeHtml(t)}</span>`).join('')
+    || '<span class="group-topic">General study</span>';
+  main.innerHTML = `
+    ${chatCard}
+    <div class="info-card to-card">
+      <div class="to-head"><h3><i class="fa-solid fa-lightbulb"></i> What we study</h3></div>
+      <div class="group-topics">${topics}</div>
+      <p class="gp-since">Started ${escapeHtml(timeAgo(g.created_at))} by ${escapeHtml(groupHostName(g))}.</p>
+    </div>`;
 
-function openGroupDetailModal(groupId) {
-  const g = findGroup(groupId);
-  if (!g) return showToast('That group is no longer available.', 'info');
-  openModal(g.name || 'Study group', groupDetailHtml(g));
-  openGroupId = String(g.id);
-  document.getElementById('detailModal').dataset.kind = 'group';
-}
-
-// Keep an open details window in step with joins, leaves and edits.
-function refreshOpenGroup() {
-  const modal = document.getElementById('detailModal');
-  if (!openGroupId || !modal || modal.style.display !== 'flex' || modal.dataset.kind !== 'group') return;
-  const g = findGroup(openGroupId);
-  if (!g) { closeModalForce(); openGroupId = null; return; }
-  document.getElementById('modalTitle').textContent = g.name || 'Study group';
-  document.getElementById('modalBody').innerHTML = groupDetailHtml(g);
+  const others = similarGroups(g);
+  related.innerHTML = others.length ? `
+    <div class="to-head"><h3><i class="fa-solid fa-people-group"></i> Similar groups</h3>
+      <button class="text-btn" onclick="closeGroupPage()">See all</button></div>
+    <div class="related-list">${others.map(x => `
+      <button type="button" class="related-card" onclick="openGroupPage('${escapeAttr(x.id)}')">
+        <span class="group-mark" style="--av-h:${avatarHue(x.id)}">${escapeHtml(groupInitials(x.name))}</span>
+        <span class="related-text"><strong>${escapeHtml(x.name || 'Study group')}</strong>
+          <small>${escapeHtml(x.course || 'Study group')} · ${groupIsFull(x) ? 'full' : `${Math.max(0, (x.max || 0) - x.members)} seats left`}</small></span>
+        <i class="fa-solid fa-chevron-right related-go"></i>
+      </button>`).join('')}</div>` : '';
 }
 
 function filterGroups(type) {
@@ -3477,7 +3606,7 @@ async function declineGroupInvite(groupId) {
     .eq('group_id', groupId).eq('user_id', currentUserId);
   if (error) return showToast('Could not decline: ' + error.message, 'error');
   showToast('Invite declined.', 'info');
-  if (g?.private) closeModalForce();   // you can't see a private group without the invite
+  if (g?.private && isViewActive('group-view')) { openGroupId = null; switchTab('groups-view'); }   // you can't see a private group without the invite
   await fetchGroups();
 }
 async function cancelGroupInvite(groupId, userId) {
@@ -3539,12 +3668,17 @@ async function fetchEvents() {
   calEvents = evRes.data || [];
   calRsvps = {};
   (rsvpRes.data || []).forEach(r => {
-    const c = calRsvps[r.event_id] || { count: 0, mine: false };
+    const c = calRsvps[r.event_id] || { count: 0, mine: false, who: [] };
     c.count += 1;
+    c.who.push(r.user_id);
     if (r.user_id === currentUserId) c.mine = true;
     calRsvps[r.event_id] = c;
   });
   renderCalendar();
+  // Names for "who's going" (profiles are readable by everyone).
+  const before = Object.keys(profileMap).length;
+  await fetchProfilesByIds([...new Set(Object.values(calRsvps).flatMap(c => c.who).concat(calEvents.map(e => e.created_by)))].filter(Boolean));
+  if (Object.keys(profileMap).length !== before) { renderEventList(); renderCalNext(); if (isViewActive('event-view')) renderEventPage(); }
 }
 
 function onEventsChanged() {
@@ -3596,8 +3730,87 @@ function renderCalendar() {
     }
     grid.innerHTML = cells.join('');
   }
+  renderCalNext();
   renderEventList();
   renderHomeSide();
+  if (isViewActive('event-view')) renderEventPage();
+}
+
+// ---- Event helpers ----
+function eventEnds(e) {
+  const d = new Date(e.starts_at);
+  return e.all_day ? new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1) : new Date(d.getTime() + 60 * 60000);
+}
+function eventIsOver(e) { return eventEnds(e) <= new Date(); }
+function eventTime(e) {
+  return e.all_day ? 'All day' : new Date(e.starts_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+// "Today", "Tomorrow", "Friday", or "Mon, Oct 12" (and further out, with the year if it's different).
+function dayWords(d) {
+  const start = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const days = Math.round((start(d) - start(new Date())) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  if (days === -1) return 'Yesterday';
+  if (days > 1 && days < 7) return d.toLocaleDateString([], { weekday: 'long' });
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+}
+// "Happening now", "Today at 3:30 PM", "in 3 days", "2 weeks ago"
+function eventCountdown(e) {
+  const d = new Date(e.starts_at), now = new Date();
+  if (d <= now && !eventIsOver(e)) return 'Happening now';
+  if (eventIsOver(e)) return 'Happened ' + timeAgo(e.starts_at);
+  const day = dayWords(d);
+  if (day === 'Today' || day === 'Tomorrow') return e.all_day ? `${day}, all day` : `${day} at ${eventTime(e)}`;
+  const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+  return days < 14 ? `in ${days} days` : `in ${Math.round(days / 7)} weeks`;
+}
+function goingFaces(ids, max = 4) {
+  const shown = ids.slice(0, max).map(uid => {
+    const n = uid === currentUserId ? 'You' : personName(uid, 'Student');
+    return `<span class="friend-avatar sm" title="${escapeAttr(n)}">${escapeHtml(n[0].toUpperCase())}</span>`;
+  }).join('');
+  return shown ? `<span class="going-faces">${shown}${ids.length > max ? `<span class="going-more">+${ids.length - max}</span>` : ''}</span>` : '';
+}
+function eventDateBlock(e, cls = '') {
+  const d = new Date(e.starts_at);
+  return `<div class="ev-bigdate ${cls}" style="--av-h:${avatarHue(e.id)}"><span>${d.toLocaleDateString([], { month: 'short' })}</span><b>${d.getDate()}</b><small>${d.toLocaleDateString([], { weekday: 'short' })}</small></div>`;
+}
+
+// The next thing happening, big, at the top of the calendar.
+function renderCalNext() {
+  const box = document.getElementById('cal-next');
+  if (!box) return;
+  if (!currentUserId || !currentSchoolId) { box.innerHTML = ''; return; }
+  const next = calEvents.filter(e => !eventIsOver(e)).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at))[0];
+  if (!next) {
+    box.innerHTML = `
+      <div class="cal-next-card empty">
+        <div class="cal-next-kicker"><span class="cal-next-dot"></span> Nothing coming up</div>
+        <p>Add a test, a club meeting or a game so everyone at ${escapeHtml(currentSchool?.name || 'your school')} knows.</p>
+        <button class="primary-btn" onclick="openEventModal()"><i class="fa-solid fa-plus"></i> Add an event</button>
+      </div>`;
+    return;
+  }
+  const r = calRsvps[next.id] || { count: 0, mine: false, who: [] };
+  const id = escapeAttr(next.id);
+  box.innerHTML = `
+    <div class="cal-next-card" style="--av-h:${avatarHue(next.id)}" role="button" tabindex="0"
+         onclick="openEventPage('${id}')" onkeydown="pressOnEnter(event)">
+      <div class="cal-next-kicker"><span class="cal-next-dot"></span> Next up · ${escapeHtml(eventCountdown(next))}</div>
+      <div class="cal-next-row">
+        ${eventDateBlock(next)}
+        <div class="cal-next-text">
+          <strong>${escapeHtml(next.title)}</strong>
+          <small>${escapeHtml(dayWords(new Date(next.starts_at)))} · ${escapeHtml(eventTime(next))}${next.location ? ` · <i class="fa-solid fa-location-dot"></i> ${escapeHtml(next.location)}` : ''}</small>
+        </div>
+      </div>
+      <div class="cal-next-foot">
+        ${goingFaces(r.who || [])}
+        <span class="event-going">${r.count ? `${r.count} going` : 'Be the first to go'}</span>
+        <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} event-rsvp-btn" onclick="event.stopPropagation(); toggleRsvp('${id}')">${r.mine ? '✓ Going' : "I'm going"}</button>
+      </div>
+    </div>`;
 }
 
 function renderEventList() {
@@ -3630,31 +3843,148 @@ function renderEventList() {
       <button class="primary-btn" onclick="openEventModal()">+ Add Event</button></div>`;
     return;
   }
-  container.innerHTML = list.map(eventCardHtml).join('');
+  if (calSelectedDay) { container.innerHTML = list.map(eventCardHtml).join(''); return; }
+  // Upcoming: under a heading for each day ("Today", "Tomorrow", "Friday"...).
+  let lastDay = null;
+  container.innerHTML = list.map(e => {
+    const day = dayWords(new Date(e.starts_at));
+    const head = day !== lastDay ? `<div class="ev-day-head">${escapeHtml(day)}</div>` : '';
+    lastDay = day;
+    return head + eventCardHtml(e);
+  }).join('');
 }
 
 function eventCardHtml(e) {
   const d = new Date(e.starts_at);
-  const r = calRsvps[e.id] || { count: 0, mine: false };
-  const isToday = dayKey(d) === dayKey(new Date());
-  const past = e.all_day ? (d < new Date() && !isToday) : d < new Date();
-  const canDelete = canManageSchool(e.school_id || currentSchoolId) || (e.created_by && e.created_by === currentUserId);
-  const when = e.all_day ? 'All day' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const r = calRsvps[e.id] || { count: 0, mine: false, who: [] };
+  const past = eventIsOver(e);
+  const id = escapeAttr(e.id);
   return `
-    <div class="info-card event-card ${past ? 'past' : ''}">
-      <div class="event-date"><span>${d.toLocaleDateString([], { month: 'short' })}</span><b>${d.getDate()}</b></div>
+    <div class="info-card event-card ${past ? 'past' : ''}" role="button" tabindex="0" style="--av-h:${avatarHue(e.id)}"
+         onclick="openEventPage('${id}')" onkeydown="pressOnEnter(event)" aria-label="${escapeAttr(e.title)}, ${escapeAttr(dayWords(d))}">
+      ${eventDateBlock(e, 'sm')}
       <div class="event-body">
         <strong>${escapeHtml(e.title)}</strong>
-        <small>${isToday ? 'Today' : d.toLocaleDateString([], { weekday: 'short' })} · ${when}${e.location ? ` · <i class="fa-solid fa-location-dot"></i> ${escapeHtml(e.location)}` : ''}</small>
-        ${e.description ? `<p>${renderSafeMessage(e.description)}</p>` : ''}
+        <small>${escapeHtml(eventTime(e))}${e.location ? ` · <i class="fa-solid fa-location-dot"></i> ${escapeHtml(e.location)}` : ''}</small>
+        ${e.description ? `<p class="event-desc">${escapeHtml(e.description)}</p>` : ''}
         <div class="event-actions">
           <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} event-rsvp-btn"
-            onclick="toggleRsvp('${escapeAttr(e.id)}')" ${past ? 'disabled' : ''}>${r.mine ? '✓ Going' : 'RSVP'}</button>
+            onclick="event.stopPropagation(); toggleRsvp('${id}')" ${past ? 'disabled' : ''}>${r.mine ? '✓ Going' : "I'm going"}</button>
+          ${goingFaces(r.who || [], 3)}
           <span class="event-going">${r.count} going</span>
-          ${canDelete ? `<button class="text-btn danger-text" onclick="deleteEvent('${escapeAttr(e.id)}')">Delete</button>` : ''}
         </div>
       </div>
     </div>`;
+}
+
+// ---- An event's own page ----
+let openEventId = null;
+let eventAnimatedFor = null;
+function openEventPage(id) {
+  const e = calEvents.find(x => String(x.id) === String(id));
+  if (!e) return showToast('That event is no longer on the calendar.', 'info');
+  openEventId = String(e.id);
+  eventAnimatedFor = null;
+  switchTab('event-view');
+  renderEventPage();
+}
+function renderEventPage() {
+  const hero = document.getElementById('event-hero');
+  const cards = document.getElementById('event-cards');
+  if (!hero || !cards) return;
+  const e = calEvents.find(x => String(x.id) === String(openEventId));
+  if (!e) { if (isViewActive('event-view')) switchTab('events-view'); return; }
+  hero.classList.toggle('th-still', eventAnimatedFor === String(e.id));
+  eventAnimatedFor = String(e.id);
+  const d = new Date(e.starts_at);
+  const r = calRsvps[e.id] || { count: 0, mine: false, who: [] };
+  const past = eventIsOver(e);
+  const id = escapeAttr(e.id);
+  const canDelete = canManageSchool(e.school_id || currentSchoolId) || (e.created_by && e.created_by === currentUserId);
+  const fullDate = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+
+  hero.style.setProperty('--av-h', avatarHue(e.id));
+  hero.innerHTML = `
+    <div class="th-cover" aria-hidden="true"></div>
+    <div class="th-head">
+      ${eventDateBlock(e, 'lg')}
+      <div class="th-actions">
+        <button class="th-icon-btn" onclick="downloadEventIcs('${id}')" aria-label="Add to my calendar" title="Add to my calendar"><i class="fa-solid fa-calendar-plus"></i></button>
+        <button class="th-icon-btn" onclick="shareEvent('${id}')" aria-label="Share this event" title="Share"><i class="fa-solid fa-share-nodes"></i></button>
+        ${canDelete ? `<button class="th-icon-btn danger" onclick="deleteEvent('${id}')" aria-label="Delete event" title="Delete"><i class="fa-solid fa-trash"></i></button>` : ''}
+      </div>
+    </div>
+    <div class="teacher-hero-text">
+      <h1>${escapeHtml(e.title)}</h1>
+      <p>${escapeHtml(fullDate)} · ${escapeHtml(eventTime(e))}</p>
+      ${e.location ? `<p class="th-known"><i class="fa-solid fa-location-dot"></i> <b>${escapeHtml(e.location)}</b></p>` : ''}
+    </div>
+    <div class="ev-countdown ${past ? 'past' : ''}"><i class="fa-regular fa-clock"></i> ${escapeHtml(eventCountdown(e))}</div>
+    <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} th-cta" onclick="toggleRsvp('${id}')" ${past ? 'disabled' : ''}>
+      ${past ? 'This has already happened' : r.mine ? "<i class='fa-solid fa-check'></i> You're going" : "<i class='fa-solid fa-hand'></i> I'm going"}</button>
+  `;
+
+  const going = (r.who || []).slice().sort((a, b) => (b === currentUserId) - (a === currentUserId));
+  const creator = e.created_by ? (e.created_by === currentUserId ? 'you' : personName(e.created_by, 'a student')) : 'someone';
+  const upNext = calEvents.filter(x => String(x.id) !== String(e.id) && !eventIsOver(x))
+    .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)).slice(0, 3);
+  cards.innerHTML = `
+    <div class="info-card to-card">
+      <div class="to-head"><h3><i class="fa-solid fa-user-check"></i> Who's going</h3><small>${r.count} going</small></div>
+      ${going.length ? `<div class="group-member-list">${going.map(uid => {
+        const n = uid === currentUserId ? 'You' : personName(uid, 'Student');
+        return `<div class="group-member"><span class="friend-avatar sm">${escapeHtml(n[0].toUpperCase())}</span>
+          <span class="group-member-name"><strong>${uid === currentUserId ? 'You' : nameLink(uid, n, false)}</strong></span></div>`;
+      }).join('')}</div>` : `<p class="friends-empty-inner">${past ? 'No one said they were going.' : 'No one yet. Be the first!'}</p>`}
+    </div>
+    <div class="info-card to-card">
+      <div class="to-head"><h3><i class="fa-solid fa-align-left"></i> Details</h3></div>
+      ${e.description ? `<p class="ev-desc-full">${renderSafeMessage(e.description)}</p>` : '<p class="friends-empty-inner">No details added.</p>'}
+      <p class="gp-since">Added by ${escapeHtml(creator)} ${e.created_at ? escapeHtml(timeAgo(e.created_at)) : ''}.</p>
+    </div>
+    ${upNext.length ? `
+    <div class="teacher-related">
+      <div class="to-head"><h3><i class="fa-solid fa-calendar-days"></i> Also coming up</h3>
+        <button class="text-btn" onclick="switchTab('events-view')">Calendar</button></div>
+      <div class="related-list">${upNext.map(x => `
+        <button type="button" class="related-card" onclick="openEventPage('${escapeAttr(x.id)}')">
+          ${eventDateBlock(x, 'xs')}
+          <span class="related-text"><strong>${escapeHtml(x.title)}</strong>
+            <small>${escapeHtml(dayWords(new Date(x.starts_at)))} · ${escapeHtml(eventTime(x))}</small></span>
+          <i class="fa-solid fa-chevron-right related-go"></i>
+        </button>`).join('')}</div>
+    </div>` : ''}`;
+}
+function shareEvent(id) {
+  const e = calEvents.find(x => String(x.id) === String(id));
+  if (e) shareLink(shareUrl('event', e.id), `${e.title} on Campus Pulse`);
+}
+// A calendar file (.ics) that phones and computers open in their own calendar app.
+function downloadEventIcs(id) {
+  const e = calEvents.find(x => String(x.id) === String(id));
+  if (!e) return;
+  const d = new Date(e.starts_at);
+  const pad = n => String(n).padStart(2, '0');
+  const utc = x => `${x.getUTCFullYear()}${pad(x.getUTCMonth() + 1)}${pad(x.getUTCDate())}T${pad(x.getUTCHours())}${pad(x.getUTCMinutes())}00Z`;
+  const day = x => `${x.getFullYear()}${pad(x.getMonth() + 1)}${pad(x.getDate())}`;
+  const esc = v => String(v || '').replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/([,;])/g, '\\$1');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Campus Pulse//EN', 'CALSCALE:GREGORIAN', 'BEGIN:VEVENT',
+    `UID:${e.id}@campus-pulse`, `DTSTAMP:${utc(new Date())}`,
+    ...(e.all_day ? [`DTSTART;VALUE=DATE:${day(d)}`, `DTEND;VALUE=DATE:${day(eventEnds(e))}`]
+                  : [`DTSTART:${utc(d)}`, `DTEND:${utc(eventEnds(e))}`]),
+    `SUMMARY:${esc(e.title)}`,
+    e.location ? `LOCATION:${esc(e.location)}` : null,
+    e.description ? `DESCRIPTION:${esc(e.description)}` : null,
+    'END:VEVENT', 'END:VCALENDAR'].filter(Boolean);
+  const url = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/calendar' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (String(e.title).replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'event') + '.ics';
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  showToast('Calendar file saved. Open it to add the event to your calendar.', 'success', 4000);
 }
 
 async function toggleRsvp(id) {
@@ -3664,8 +3994,12 @@ async function toggleRsvp(id) {
     ? await supabaseClient.from('event_rsvps').delete().eq('event_id', id).eq('user_id', currentUserId)
     : await supabaseClient.from('event_rsvps').insert([{ event_id: id, user_id: currentUserId }]);
   if (error) return showToast('RSVP failed: ' + error.message, 'error');
-  calRsvps[id] = { count: Math.max(0, cur.count + (cur.mine ? -1 : 1)), mine: !cur.mine };
+  const who = (cur.who || []).filter(u => u !== currentUserId);
+  if (!cur.mine) who.push(currentUserId);
+  calRsvps[id] = { count: Math.max(0, cur.count + (cur.mine ? -1 : 1)), mine: !cur.mine, who };
   renderEventList();
+  renderCalNext();
+  if (isViewActive('event-view')) renderEventPage();
 }
 
 async function deleteEvent(id) {
@@ -3673,6 +4007,7 @@ async function deleteEvent(id) {
   const { data, error } = await supabaseClient.from('campus_events').delete().eq('id', id).select('id');
   if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
   calEvents = calEvents.filter(e => e.id !== id);
+  if (isViewActive('event-view') && String(openEventId) === String(id)) { openEventId = null; switchTab('events-view'); }
   renderCalendar();
   showToast('Event deleted.', 'success');
 }
@@ -4479,7 +4814,10 @@ async function deleteGroup(id) {
   const { data, error } = await supabaseClient.from('study_groups').delete().eq('id', g.id).select('id');
   if (error || !data?.length) return showToast('Could not delete: ' + (error?.message || 'not allowed'), 'error');
   studyGroups = studyGroups.filter(x => x !== g);
-  if (openGroupId === String(g.id)) { closeModalForce(); openGroupId = null; }
+  if (openGroupId === String(g.id)) {
+    openGroupId = null;
+    if (isViewActive('group-view')) switchTab('groups-view');
+  }
   renderGroups();
   showToast('Group deleted.', 'success');
   fetchGroups();
@@ -5322,6 +5660,7 @@ async function openTeacherPage(id) {
   document.getElementById('teacher-hero').innerHTML = '<div class="teacher-loading"><i class="fa-solid fa-spinner fa-spin"></i></div>';
   document.getElementById('teacher-posts').innerHTML = '';
   ['teacher-overview', 'teacher-related'].forEach(x => { const el = document.getElementById(x); if (el) el.innerHTML = ''; });
+  heroAnimatedFor = null;
   switchTab('teacher-view');
   await loadTeacherPage(id);
 }
@@ -5396,6 +5735,7 @@ function renderTeacherPage() {
   renderTeacherPosts();
 }
 
+let heroAnimatedFor = null;      // teacher whose header has already played its animations
 function renderTeacherHero() {
   const t = currentTeacher;
   const hero = document.getElementById('teacher-hero');
@@ -5412,6 +5752,9 @@ function renderTeacherHero() {
   const mine = myReviewOnTeacher();
 
   hero.style.setProperty('--av-h', avatarHue(t.id));  // the cover matches their avatar colour
+  // The ring and heartbeat play when you open a teacher, not on every redraw (tabs, likes...).
+  hero.classList.toggle('th-still', heroAnimatedFor === String(t.id));
+  heroAnimatedFor = String(t.id);
   hero.innerHTML = `
     <div class="th-cover" aria-hidden="true"></div>
     <div class="th-head">

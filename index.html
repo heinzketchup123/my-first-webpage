@@ -383,6 +383,30 @@
         </div>
       </section>
 
+      <!-- A study group's own page (opened from Groups) -->
+      <section id="group-view" class="view profile-view">
+        <button class="teacher-back-btn" onclick="closeGroupPage()"><i class="fa-solid fa-arrow-left"></i> All groups</button>
+        <div class="profile-side">
+          <div id="group-hero" class="teacher-hero group-hero"></div>
+          <div id="group-side" class="teacher-overview"></div>
+        </div>
+        <div class="profile-main">
+          <div id="group-main" class="teacher-overview"></div>
+          <div id="group-related" class="teacher-related"></div>
+        </div>
+      </section>
+
+      <!-- An event's own page (opened from the calendar) -->
+      <section id="event-view" class="view profile-view">
+        <button class="teacher-back-btn" onclick="switchTab('events-view')"><i class="fa-solid fa-arrow-left"></i> Calendar</button>
+        <div class="profile-side">
+          <div id="event-hero" class="teacher-hero event-hero"></div>
+        </div>
+        <div class="profile-main">
+          <div id="event-cards" class="teacher-overview"></div>
+        </div>
+      </section>
+
       <!-- Tab 5: Event Calendar -->
       <section id="events-view" class="view">
         <div class="page-header">
@@ -392,6 +416,8 @@
           </div>
           <button class="review-trigger-btn" onclick="openEventModal()"><i class="fa-solid fa-plus"></i> Add Event</button>
         </div>
+
+        <div id="cal-next" class="cal-next"></div>
 
         <div class="cal-card">
           <div class="cal-head">
