@@ -477,62 +477,77 @@
         <div class="page-header">
           <div class="page-header-text">
             <h1 class="page-title">Settings</h1>
-            <p class="description">Your school, appearance and privacy.</p>
+            <p class="description">Your account, privacy and how the app looks.</p>
           </div>
         </div>
 
-        <!-- Your profile: the name people see -->
-        <div class="pref-card profile-settings-card" id="profile-settings-card">
-          <div class="pref-header">
-            <i class="fa-solid fa-id-card"></i>
-            <h3>Your Profile</h3>
-            <span class="pref-value" id="profile-handle-label"></span>
+        <!-- Account + privacy (left column on a computer) -->
+        <div class="settings-col settings-col-main">
+          <h2 class="settings-group-title">Account</h2>
+          <div class="settings-group" id="profile-settings-card">
+            <div class="set-row set-profile">
+              <span class="friend-avatar set-avatar" id="settings-avatar">?</span>
+              <div class="set-text">
+                <strong id="settings-profile-name">Not signed in</strong>
+                <small id="profile-handle-label"></small>
+              </div>
+            </div>
+            <div class="set-row set-stack">
+              <form class="display-name-form" onsubmit="event.preventDefault(); saveDisplayName();">
+                <label class="set-field">
+                  <span>Display name</span>
+                  <input id="display-name-input" class="auth-input" maxlength="40" autocomplete="name" placeholder="Your name" />
+                </label>
+                <button type="submit" class="primary-btn" id="display-name-save">Save</button>
+              </form>
+              <p class="set-hint" id="display-name-hint">Shown on your posts, comments and reviews (not anonymous ones). People can tap it to see your @username.</p>
+            </div>
+            <div class="set-row">
+              <i class="set-icon fa-solid fa-graduation-cap"></i>
+              <div class="set-text">
+                <strong>School</strong>
+                <small id="current-school-label">Not set</small>
+              </div>
+              <button class="secondary-btn set-btn" onclick="openSchoolPicker(false)">Change</button>
+            </div>
           </div>
-          <form class="display-name-form" onsubmit="event.preventDefault(); saveDisplayName();">
-            <label class="gpa-field">
-              <span>Display name</span>
-              <input id="display-name-input" class="auth-input" maxlength="40" autocomplete="name" placeholder="Your name" />
-            </label>
-            <button type="submit" class="primary-btn" id="display-name-save">Save</button>
-          </form>
-          <p class="admin-hint" id="display-name-hint">Shown on your posts, comments and reviews (not anonymous ones). People can tap it to see your @username.</p>
-        </div>
 
-        <!-- School -->
-        <div class="pref-card">
-          <div class="pref-header">
-            <i class="fa-solid fa-graduation-cap"></i>
-            <h3>School</h3>
-            <span class="pref-value" id="current-school-label">Not set</span>
-          </div>
-          <button class="secondary-btn" style="width:100%; margin:0;" onclick="openSchoolPicker(false)">
-            <i class="fa-solid fa-pen-to-square"></i> Change School
-          </button>
-        </div>
+          <h2 class="settings-group-title">Privacy</h2>
+          <div class="settings-group">
+            <!-- Anonymous mode (off unless you turn it on) -->
+            <div class="set-row set-stack anon-card" id="anon-card">
+              <div class="set-head">
+                <i class="set-icon fa-solid fa-user-secret"></i>
+                <div class="set-text"><strong>Anonymous mode</strong></div>
+                <span class="anon-state" id="anon-state">Off</span>
+              </div>
+              <div class="segmented" id="anon-seg" role="group" aria-label="How your posts are signed">
+                <button class="seg-btn active" data-anon="off" onclick="setAnonymous(false)"><i class="fa-solid fa-user"></i><span>Show my name</span></button>
+                <button class="seg-btn" data-anon="on" onclick="setAnonymous(true)"><i class="fa-solid fa-user-secret"></i><span>Anonymous</span></button>
+              </div>
+              <p class="set-hint anon-hint" id="anon-hint">New posts, comments and reviews show your name.</p>
+            </div>
 
-        <!-- Anonymous mode (off unless you turn it on) -->
-        <div class="pref-card anon-card" id="anon-card">
-          <div class="pref-header">
-            <i class="fa-solid fa-user-secret"></i>
-            <h3>Anonymous Mode</h3>
-            <span class="anon-state" id="anon-state">Off</span>
-          </div>
-          <div class="segmented" id="anon-seg" role="group" aria-label="How your posts are signed">
-            <button class="seg-btn active" data-anon="off" onclick="setAnonymous(false)"><i class="fa-solid fa-user"></i><span>Show my name</span></button>
-            <button class="seg-btn" data-anon="on" onclick="setAnonymous(true)"><i class="fa-solid fa-user-secret"></i><span>Anonymous</span></button>
-          </div>
-          <p class="admin-hint anon-hint" id="anon-hint">New posts, comments and reviews show your name.</p>
-        </div>
+            <!-- People you've blocked -->
+            <div class="set-row set-stack" id="blocked-card">
+              <div class="set-head">
+                <i class="set-icon fa-solid fa-ban"></i>
+                <div class="set-text"><strong>Blocked people</strong></div>
+                <span class="pref-value" id="blocked-count"></span>
+              </div>
+              <div id="blocked-list"></div>
+              <p class="set-hint">They can't message you or send friend requests, and you won't see their posts. They aren't told. To block someone, tap their name.</p>
+            </div>
 
-        <!-- People you've blocked -->
-        <div class="pref-card" id="blocked-card">
-          <div class="pref-header">
-            <i class="fa-solid fa-ban"></i>
-            <h3>Blocked People</h3>
-            <span class="pref-value" id="blocked-count"></span>
+            <div class="set-row set-toggle-row" role="button" tabindex="0" onclick="toggleDeviceAlerts()" onkeydown="pressOnEnter(event)">
+              <i class="set-icon fa-solid fa-bell"></i>
+              <div class="set-text">
+                <strong>Device alerts</strong>
+                <small>Pop-ups for messages and activity while the app is in the background</small>
+              </div>
+              <div id="alerts-toggle" class="toggle-btn"></div>
+            </div>
           </div>
-          <div id="blocked-list"></div>
-          <p class="admin-hint">Blocked people can't message you or send you friend requests, and you won't see their posts, comments or group-chat messages. They aren't told. Block someone from their profile (tap their name).</p>
         </div>
 
         <!-- Admin tools (only shown to admins) -->
@@ -595,125 +610,110 @@
           </div>
         </div>
 
-        <!-- Appearance Mode -->
-        <div class="pref-card">
-          <div class="pref-header">
-            <i class="fa-solid fa-circle-half-stroke"></i>
-            <h3>Appearance</h3>
-          </div>
-          <div class="segmented" id="mode-segmented">
-            <button class="seg-btn active" data-mode="dark" onclick="setColorMode('dark', this)">
-              <i class="fa-solid fa-moon"></i><span>Dark</span>
-            </button>
-            <button class="seg-btn" data-mode="light" onclick="setColorMode('light', this)">
-              <i class="fa-solid fa-sun"></i><span>Light</span>
-            </button>
-            <button class="seg-btn" data-mode="auto" onclick="setColorMode('auto', this)">
-              <i class="fa-solid fa-desktop"></i><span>Auto</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Layout: phone vs computer (only offered on screens wide enough for both) -->
-        <div class="pref-card wide-only" id="layout-card">
-          <div class="pref-header">
-            <i class="fa-solid fa-display"></i>
-            <h3>Layout</h3>
-          </div>
-          <div class="segmented" id="layout-segmented">
-            <button class="seg-btn active" data-layout="auto" onclick="setLayout('auto')">
-              <i class="fa-solid fa-wand-magic-sparkles"></i><span>Auto</span>
-            </button>
-            <button class="seg-btn" data-layout="phone" onclick="setLayout('phone')">
-              <i class="fa-solid fa-mobile-screen"></i><span>Phone</span>
-            </button>
-            <button class="seg-btn" data-layout="desktop" onclick="setLayout('desktop')">
-              <i class="fa-solid fa-desktop"></i><span>Computer</span>
-            </button>
-          </div>
-          <p class="admin-hint layout-hint">Auto uses the computer layout on wide screens and the phone layout on narrow ones. In the computer layout you can also switch with the Phone layout button in the sidebar.</p>
-        </div>
-
-        <!-- Color Theme Presets -->
-        <div class="pref-card">
-          <div class="pref-header">
-            <i class="fa-solid fa-palette"></i>
-            <h3>Color Theme</h3>
-          </div>
-          <div id="theme-swatch-grid" class="theme-swatch-grid">
-            <!-- rendered by JS -->
-          </div>
-        </div>
-
-        <!-- Custom Colors -->
-        <div class="pref-card">
-          <div class="pref-header collapsible" onclick="togglePrefSection(this)">
-            <i class="fa-solid fa-eye-dropper"></i>
-            <h3>Custom Accent</h3>
-            <i class="fa-solid fa-chevron-down pref-chevron"></i>
-          </div>
-          <div class="pref-body">
-            <div class="custom-accent-row">
-              <input type="color" id="picker-main" value="#22d3ee" oninput="updateTheme()" aria-label="Accent color" />
-              <p class="admin-hint custom-accent-hint">Pick any color. It's adjusted automatically so text stays readable in both light and dark mode.</p>
+        <!-- Appearance (right column on a computer) -->
+        <div class="settings-col settings-col-side">
+          <h2 class="settings-group-title">Appearance</h2>
+          <div class="settings-group">
+            <div class="set-row set-stack">
+              <div class="set-head">
+                <i class="set-icon fa-solid fa-circle-half-stroke"></i>
+                <div class="set-text"><strong>Mode</strong></div>
+              </div>
+              <div class="segmented" id="mode-segmented">
+                <button class="seg-btn active" data-mode="dark" onclick="setColorMode('dark', this)">
+                  <i class="fa-solid fa-moon"></i><span>Dark</span>
+                </button>
+                <button class="seg-btn" data-mode="light" onclick="setColorMode('light', this)">
+                  <i class="fa-solid fa-sun"></i><span>Light</span>
+                </button>
+                <button class="seg-btn" data-mode="auto" onclick="setColorMode('auto', this)">
+                  <i class="fa-solid fa-desktop"></i><span>Auto</span>
+                </button>
+              </div>
             </div>
-            <button id="custom-accent-reset" class="secondary-btn custom-accent-reset" onclick="resetCustomAccent()" style="display:none;">
-              <i class="fa-solid fa-rotate-left"></i> Use theme color
+
+            <div class="set-row set-stack set-theme-row">
+              <div class="set-head">
+                <i class="set-icon fa-solid fa-palette"></i>
+                <div class="set-text"><strong>Color theme</strong></div>
+              </div>
+              <div id="theme-swatch-grid" class="theme-swatch-grid">
+                <!-- rendered by JS -->
+              </div>
+              <div class="custom-accent-row">
+                <input type="color" id="picker-main" value="#22d3ee" oninput="updateTheme()" aria-label="Custom accent color" />
+                <div class="set-text">
+                  <strong>Custom color</strong>
+                  <small>Pick any color. It's adjusted so text stays readable.</small>
+                </div>
+                <button id="custom-accent-reset" class="secondary-btn set-btn" onclick="resetCustomAccent()" style="display:none;">
+                  <i class="fa-solid fa-rotate-left"></i> Theme color
+                </button>
+              </div>
+            </div>
+
+            <div class="set-row set-stack">
+              <div class="set-head">
+                <i class="set-icon fa-solid fa-text-height"></i>
+                <div class="set-text"><strong>Text size</strong></div>
+                <span class="pref-value" id="font-size-label">Medium</span>
+              </div>
+              <div class="size-slider-row">
+                <span class="size-label-small">Aa</span>
+                <input type="range" min="0" max="2" step="1" value="1" id="font-size-slider" class="pref-slider" oninput="setFontSize(this.value)" aria-label="Text size" />
+                <span class="size-label-large">Aa</span>
+              </div>
+            </div>
+
+            <div class="set-row set-stack">
+              <div class="set-head">
+                <i class="set-icon fa-solid fa-grip-lines"></i>
+                <div class="set-text"><strong>Spacing</strong></div>
+              </div>
+              <div class="segmented" id="density-segmented">
+                <button class="seg-btn" data-density="compact" onclick="setDensity('compact', this)">Compact</button>
+                <button class="seg-btn active" data-density="normal" onclick="setDensity('normal', this)">Comfy</button>
+                <button class="seg-btn" data-density="spacious" onclick="setDensity('spacious', this)">Spacious</button>
+              </div>
+            </div>
+
+            <!-- Layout: phone vs computer (only offered on screens wide enough for both) -->
+            <div class="set-row set-stack wide-only" id="layout-card">
+              <div class="set-head">
+                <i class="set-icon fa-solid fa-display"></i>
+                <div class="set-text"><strong>Layout</strong></div>
+              </div>
+              <div class="segmented" id="layout-segmented">
+                <button class="seg-btn active" data-layout="auto" onclick="setLayout('auto')">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i><span>Auto</span>
+                </button>
+                <button class="seg-btn" data-layout="phone" onclick="setLayout('phone')">
+                  <i class="fa-solid fa-mobile-screen"></i><span>Phone</span>
+                </button>
+                <button class="seg-btn" data-layout="desktop" onclick="setLayout('desktop')">
+                  <i class="fa-solid fa-desktop"></i><span>Computer</span>
+                </button>
+              </div>
+              <p class="set-hint">Auto picks the computer layout on wide screens and the phone layout on narrow ones.</p>
+            </div>
+
+            <button type="button" class="set-row set-link-row" onclick="resetAppearance()">
+              <i class="set-icon fa-solid fa-rotate-left"></i>
+              <span class="set-text"><strong>Reset appearance</strong></span>
             </button>
           </div>
         </div>
 
-        <!-- Text Size -->
-        <div class="pref-card">
-          <div class="pref-header">
-            <i class="fa-solid fa-text-height"></i>
-            <h3>Text Size</h3>
-            <span class="pref-value" id="font-size-label">Medium</span>
-          </div>
-          <div class="size-slider-row">
-            <span class="size-label-small">Aa</span>
-            <input type="range" min="0" max="2" step="1" value="1" id="font-size-slider" class="pref-slider" oninput="setFontSize(this.value)" />
-            <span class="size-label-large">Aa</span>
-          </div>
-        </div>
-
-        <!-- Density -->
-        <div class="pref-card">
-          <div class="pref-header">
-            <i class="fa-solid fa-grip-lines"></i>
-            <h3>Density</h3>
-          </div>
-          <div class="segmented" id="density-segmented">
-            <button class="seg-btn" data-density="compact" onclick="setDensity('compact', this)">Compact</button>
-            <button class="seg-btn active" data-density="normal" onclick="setDensity('normal', this)">Comfy</button>
-            <button class="seg-btn" data-density="spacious" onclick="setDensity('spacious', this)">Spacious</button>
-          </div>
-        </div>
-
-        <!-- Privacy / misc toggles -->
-        <ul class="settings-list">
-          <li onclick="toggleDeviceAlerts()">
-            <div class="setting-text">
-              <span>Device Alerts</span>
-              <small>Pop-ups for messages and activity while the app is in the background</small>
-            </div>
-            <div id="alerts-toggle" class="toggle-btn"></div>
-          </li>
-        </ul>
-
-        <div class="settings-btn-row">
-          <button class="secondary-btn" onclick="resetAppearance()">
-            <i class="fa-solid fa-rotate-left"></i> Reset Appearance
-          </button>
+        <div class="settings-footer">
           <button class="secondary-btn logout-btn" onclick="logout()">
             <i class="fa-solid fa-right-from-bracket"></i> Sign Out
           </button>
+          <p class="legal-links">
+            <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
+            <span aria-hidden="true">·</span>
+            <a href="terms.html" target="_blank" rel="noopener">Terms of Service</a>
+          </p>
         </div>
-        <p class="legal-links">
-          <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
-          <span aria-hidden="true">·</span>
-          <a href="terms.html" target="_blank" rel="noopener">Terms of Service</a>
-        </p>
       </section>
 
     </main>

@@ -1465,6 +1465,7 @@ function updateSchoolChrome() {
   const av = document.getElementById('sidebar-avatar');
   if (av) av.textContent = currentUserId ? who[0].toUpperCase() : '?';
   renderSidebarGroups();
+  renderProfileSettings();
 }
 
 // Top-bar search (computer layout): searches teachers from any page.
@@ -2020,7 +2021,13 @@ async function sendFriendRequestTo(uid) {
 function renderProfileSettings() {
   const input = document.getElementById('display-name-input');
   const handleEl = document.getElementById('profile-handle-label');
-  if (handleEl) handleEl.textContent = currentHandle ? '@' + currentHandle : '';
+  if (handleEl) handleEl.textContent = currentUserId ? (currentHandle ? '@' + currentHandle : '') : 'Sign in to set your name';
+  // Settings > Account: who you are, at the top.
+  const who = currentUserId ? personName(currentUserId, currentHandle || (currentUser || '').split('@')[0] || 'Student') : 'Not signed in';
+  const nameEl = document.getElementById('settings-profile-name');
+  if (nameEl) nameEl.textContent = who;
+  const av = document.getElementById('settings-avatar');
+  if (av) av.textContent = currentUserId ? who[0].toUpperCase() : '?';
   if (input) {
     if (document.activeElement !== input) input.value = profileMap[currentUserId]?.display_name || '';
     input.placeholder = currentHandle || 'Your name';

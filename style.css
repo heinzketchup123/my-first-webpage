@@ -4210,3 +4210,141 @@ html:not(.layout-desktop) .friend-chip { scroll-snap-align: center; }
 .filter-chips::-webkit-scrollbar, .friends-strip::-webkit-scrollbar { display: none; }
 /* Panels that scroll up and down never scroll sideways. */
 .content-container, .modal-content, .notif-body, .chat-messages-box, .friends-tab-body { overflow-x: hidden; }
+
+/* =====================================================================
+   SETTINGS — grouped sections: Account, Privacy, Appearance (+ Admin)
+   Phones: one column. Computers: Account + Privacy on the left,
+   Appearance on the right, Admin full width underneath.
+   ===================================================================== */
+.settings-col { display: flex; flex-direction: column; width: 100%; min-width: 0; }
+.settings-group-title {
+  margin: 20px 6px 8px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sub-text-color);
+  text-align: left;
+}
+.settings-col > .settings-group-title:first-child { margin-top: 6px; }
+.settings-group {
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  text-align: left;
+}
+body:not(.light-mode) .settings-group {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 38%);
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  color: var(--main-text-color);
+}
+body.density-compact  .set-row { padding: 10px 14px; }
+body.density-spacious .set-row { padding: 18px 18px; }
+.set-row + .set-row { border-top: 1px solid var(--card-border); }
+.set-stack { flex-direction: column; align-items: stretch; gap: 10px; }
+.set-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+/* (".settings-group" so it beats the icon library's own display rule) */
+.settings-group .set-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--accent-muted);
+  color: var(--accent-color);
+  font-size: 0.82rem;
+}
+.set-text { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 2px; line-height: 1.3; }
+.set-text strong { font-size: 0.9rem; font-weight: 700; color: var(--main-text-color); }
+.set-text small { font-size: 0.74rem; color: var(--sub-text-color); }
+.set-hint { margin: 0; font-size: 0.74rem; line-height: 1.45; color: var(--sub-text-color); }
+.set-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+}
+.set-row .segmented, .set-row .theme-swatch-grid { margin: 0; }
+
+/* Account */
+.set-profile .set-avatar { width: 48px; height: 48px; font-size: 1.2rem; }
+.set-profile .set-text strong { font-size: 1.05rem; }
+.set-field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.set-field span { font-size: 0.72rem; font-weight: 700; color: var(--sub-text-color); }
+.set-field .auth-input { margin: 0; }
+.display-name-form { width: 100%; }
+
+/* Privacy */
+.settings-group .anon-card .set-icon { background: var(--anon-soft); color: var(--anon); }
+.set-row.anon-card.on { background: var(--anon-soft); }
+.set-row .anon-hint { margin: 0; }
+.set-row.anon-card.flash { animation: anon-flash-row 1.4s ease; }
+@keyframes anon-flash-row { 30% { box-shadow: inset 0 0 0 2px var(--anon); } }
+#blocked-list:empty { display: none; }
+#blocked-list .friends-empty-inner { margin: 0; padding: 0; font-size: 0.8rem; text-align: left; color: var(--sub-text-color); }
+#blocked-list .blocked-row { padding: 6px 0; }
+.set-toggle-row, .set-link-row { cursor: pointer; transition: background 0.15s ease; }
+.set-toggle-row:hover, .set-link-row:hover { background: var(--input-bg); }
+.set-toggle-row .toggle-btn { flex-shrink: 0; }
+
+/* Appearance */
+/* 10 themes: two even rows of five. Where that's tight (phones), each
+   swatch shows just its colour dot. */
+.set-theme-row { container-type: inline-size; }
+.set-theme-row .theme-swatch-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+@container (max-width: 400px) {
+  .set-theme-row .theme-swatch { padding: 8px 3px 6px; }
+  .set-theme-row .swatch-bar { display: none; }
+  .set-theme-row .swatch-preview { justify-content: center; padding: 0; }
+  .set-theme-row .swatch-dot { width: 14px; height: 14px; }
+  .set-theme-row .swatch-label { font-size: 0.66rem; }
+}
+.set-row .custom-accent-row { margin-top: 2px; }
+.set-row .custom-accent-row input[type="color"] { width: 44px; height: 44px; border-radius: 12px; }
+.set-link-row { border: none; background: transparent; font: inherit; }
+.settings-group .set-link-row .set-icon { background: var(--input-bg); color: var(--sub-text-color); }
+
+/* Sign out + legal links */
+#settings-view > #admin-card { margin: 20px 0 0; }
+.settings-footer { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; margin-top: 20px; }
+.settings-footer .logout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+  margin: 0;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.settings-footer .logout-btn:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+/* Computer layout: two tidy columns instead of a grid of loose cards */
+html.layout-desktop #settings-view.active-view {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: "head head" "main side" "admin admin" "foot foot";
+  column-gap: 24px;
+  row-gap: 0;
+}
+html.layout-desktop #settings-view > .page-header { grid-area: head; }
+html.layout-desktop #settings-view > .settings-col-main { grid-area: main; }
+html.layout-desktop #settings-view > .settings-col-side { grid-area: side; }
+html.layout-desktop #settings-view > #admin-card { grid-area: admin; margin-top: 24px; }
+html.layout-desktop #settings-view > .settings-footer { grid-area: foot; }
