@@ -4348,3 +4348,69 @@ html.layout-desktop #settings-view > .settings-col-main { grid-area: main; }
 html.layout-desktop #settings-view > .settings-col-side { grid-area: side; }
 html.layout-desktop #settings-view > #admin-card { grid-area: admin; margin-top: 24px; }
 html.layout-desktop #settings-view > .settings-footer { grid-area: foot; }
+
+/* ---------- Admin levels: districts, school admins, role picker ---------- */
+.admin-level-1 { background: var(--accent-muted); color: var(--accent-color); }
+.admin-level-2 { background: rgba(167, 139, 250, 0.18); color: #a78bfa; }
+body.light-mode .admin-level-2 { color: #7c3aed; }
+.admin-school-meta { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 0 4px 34px; }
+.admin-district-pick, .admin-district-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--sub-text-color);
+}
+.admin-district-pick i, .admin-district-name i { color: var(--accent-color); font-size: 0.72rem; }
+.admin-district-pick .mini-select { min-width: 0; max-width: 220px; }
+.admin-people { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 0 8px 34px; }
+.admin-people-label {
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sub-text-color);
+  margin-right: 2px;
+}
+.admin-people-none { font-size: 0.76rem; color: var(--sub-text-color); }
+.admin-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--main-text-color);
+}
+.admin-person small { font-weight: 600; color: var(--sub-text-color); }
+.admin-person button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sub-text-color);
+  cursor: pointer;
+}
+.admin-person button:hover { color: var(--danger); background: var(--card-bg); }
+.admin-person:not(:has(button)) { padding-right: 10px; }
+.admin-add-btn { font-size: 0.78rem; font-weight: 800; padding: 3px 6px; }
+.admin-new-district { display: flex; gap: 8px; margin: 2px 0 10px; }
+.admin-new-district .auth-input { flex: 1; min-width: 0; margin: 0; }
+.admin-new-district .primary-btn { flex-shrink: 0; margin: 0; width: auto; }
+.admin-role-select { width: auto; max-width: 150px; font-size: 0.76rem; }
+.admin-section[hidden] { display: none; }
+/* A school's details stay with it: the line goes under the whole school, not its first row. */
+.admin-school > .admin-row { border-bottom: none; }
+.admin-school { border-bottom: 1px solid var(--card-border); padding-bottom: 4px; }
+.admin-school:last-child { border-bottom: none; }
+.admin-district-pick { font-size: 0.74rem; }
+.admin-district-pick .mini-select { padding: 5px 8px; font-size: 0.76rem; }

@@ -559,12 +559,12 @@
             <i class="fa-solid fa-shield-halved"></i>
             <h3>Admin</h3>
             <span class="admin-waiting-pill" id="admin-waiting-pill" hidden></span>
-            <span class="admin-badge">ADMIN</span>
+            <span class="admin-badge" id="admin-level-badge">ADMIN</span>
             <i class="fa-solid fa-chevron-down pref-chevron"></i>
           </div>
           <div class="admin-collapse" id="admin-card-body">
             <div class="admin-collapse-inner">
-              <p class="admin-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Manage who can join each school below.</p>
+              <p class="admin-hint" id="admin-card-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Manage who can join each school below.</p>
 
               <div class="admin-section" data-section="requests">
                 <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-requests-body"
@@ -604,6 +604,18 @@
                 </button>
                 <div class="admin-collapse" id="admin-schools-body">
                   <div class="admin-collapse-inner"><div id="admin-school-list"></div></div>
+                </div>
+              </div>
+
+              <!-- Districts: app admins manage them; district admins see theirs -->
+              <div class="admin-section" data-section="districts" hidden>
+                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-districts-body"
+                        onclick="toggleAdminSection('districts')">
+                  <span>Districts</span><span class="admin-count" id="admin-districts-count"></span>
+                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
+                </button>
+                <div class="admin-collapse" id="admin-districts-body">
+                  <div class="admin-collapse-inner"><div id="admin-district-list"></div></div>
                 </div>
               </div>
             </div>

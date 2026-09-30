@@ -763,6 +763,106 @@ as $$
   select exists (select 1 from public.admins where user_id = auth.uid());
 $$;
 
+-- ------------------------------------------------------------
+-- Admin levels
+--   App admins (the admins table above)  everything, at every school
+--   District admins                      every school in their district
+--   School admins                        one school
+-- App admins make districts, put schools in them and pick district admins.
+-- District admins (and app admins) pick school admins. Admins at every
+-- level can moderate, set join rules, answer join requests and remove
+-- students, but only at the schools they look after. Seeing who posted
+-- anonymously stays app admins only (6l). Role changes go through the
+-- functions in 6i.
+create table if not exists public.districts (
+  id         uuid primary key default gen_random_uuid(),
+  name       text unique not null check (char_length(name) between 2 and 80),
+  created_at timestamptz not null default now(),
+  created_by uuid references auth.users(id) on delete set null
+);
+alter table public.districts enable row level security;
+drop policy if exists "districts: everyone reads" on public.districts;
+create policy "districts: everyone reads" on public.districts for select using (true);
+grant select on public.districts to anon, authenticated;
+
+alter table public.schools
+  add column if not exists district_id uuid references public.districts(id) on delete set null;
+
+create table if not exists public.district_admins (
+  district_id uuid not null references public.districts(id) on delete cascade,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  added_by    uuid references auth.users(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  primary key (district_id, user_id)
+);
+create table if not exists public.school_admins (
+  school_id  uuid not null references public.schools(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  added_by   uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  primary key (school_id, user_id)
+);
+alter table public.district_admins enable row level security;
+alter table public.school_admins enable row level security;
+
+-- Someone's admin level at a school: 3 = app admin, 2 = admin of the
+-- school's district, 1 = admin of that school, 0 = none.
+create or replace function public.admin_level_at(uid uuid, sid uuid)
+returns int language sql stable security definer set search_path = public as $$
+  select case
+    when uid is null then 0
+    when exists (select 1 from public.admins where user_id = uid) then 3
+    when sid is null then 0
+    when exists (select 1 from public.district_admins da
+                 join public.schools s on s.district_id = da.district_id
+                 where s.id = sid and da.user_id = uid) then 2
+    when exists (select 1 from public.school_admins where school_id = sid and user_id = uid) then 1
+    else 0 end;
+$$;
+
+-- Do I (the signed-in user) look after this school?
+create or replace function public.can_manage_school(sid uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select public.admin_level_at(auth.uid(), sid) > 0;
+$$;
+
+-- Am I an admin at any level? (Admins can see who the other admins are.)
+create or replace function public.is_any_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and (
+    exists (select 1 from public.admins where user_id = auth.uid())
+    or exists (select 1 from public.district_admins where user_id = auth.uid())
+    or exists (select 1 from public.school_admins where user_id = auth.uid()));
+$$;
+
+-- The school a teacher page belongs to (for moderating posts and comments on it).
+create or replace function public.teacher_school(tid uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select school_id from public.teachers where id = tid;
+$$;
+
+-- Who hears about a school's join requests: its own admins and its
+-- district's admins, or the app admins when it has neither.
+create or replace function public.school_manager_ids(sid uuid)
+returns setof uuid language sql stable security definer set search_path = public as $$
+  with local_admins as (
+    select user_id from public.school_admins where school_id = sid
+    union
+    select da.user_id from public.district_admins da
+    join public.schools s on s.district_id = da.district_id where s.id = sid
+  )
+  select user_id from local_admins
+  union
+  select user_id from public.admins where not exists (select 1 from local_admins);
+$$;
+
+drop policy if exists "district admins: admins and self read" on public.district_admins;
+create policy "district admins: admins and self read" on public.district_admins
+  for select using (user_id = auth.uid() or public.is_any_admin());
+drop policy if exists "school admins: admins and self read" on public.school_admins;
+create policy "school admins: admins and self read" on public.school_admins
+  for select using (user_id = auth.uid() or public.is_any_admin());
+
 -- Grant admin to lh3801866 (matched by handle or email name).
 insert into public.admins (user_id)
 select user_id from public.profiles where lower(handle) = 'lh3801866'
@@ -770,23 +870,30 @@ union
 select id from auth.users where lower(split_part(email, '@', 1)) = 'lh3801866'
 on conflict do nothing;
 
--- Admins can delete anything moderatable, in addition to authors.
+-- Admins can delete anything moderatable at the schools they look after
+-- (app admins: everywhere), in addition to authors.
 drop policy if exists "admin: delete feed posts" on public.campus_feed;
-create policy "admin: delete feed posts" on public.campus_feed for delete using (public.is_admin());
+create policy "admin: delete feed posts" on public.campus_feed for delete
+  using (public.can_manage_school(school_id));
 drop policy if exists "admin: delete groups" on public.study_groups;
-create policy "admin: delete groups" on public.study_groups for delete using (public.is_admin());
+create policy "admin: delete groups" on public.study_groups for delete
+  using (public.can_manage_school(school_id));
 drop policy if exists "admin: delete old reviews" on public.instructor_reviews;
-create policy "admin: delete old reviews" on public.instructor_reviews for delete using (public.is_admin());
+create policy "admin: delete old reviews" on public.instructor_reviews for delete
+  using (public.can_manage_school(school_id));
 drop policy if exists "admin: delete teachers" on public.teachers;
-create policy "admin: delete teachers" on public.teachers for delete using (public.is_admin());
+create policy "admin: delete teachers" on public.teachers for delete
+  using (public.can_manage_school(school_id));
 -- Admins can also fix a teacher's name or subjects.
 drop policy if exists "admin: edit teachers" on public.teachers;
 create policy "admin: edit teachers" on public.teachers for update
-  using (public.is_admin()) with check (public.is_admin());
+  using (public.can_manage_school(school_id)) with check (public.can_manage_school(school_id));
 drop policy if exists "admin: delete teacher posts" on public.teacher_posts;
-create policy "admin: delete teacher posts" on public.teacher_posts for delete using (public.is_admin());
+create policy "admin: delete teacher posts" on public.teacher_posts for delete
+  using (public.can_manage_school(public.teacher_school(teacher_id)));
 drop policy if exists "admin: delete events" on public.campus_events;
-create policy "admin: delete events" on public.campus_events for delete using (public.is_admin());
+create policy "admin: delete events" on public.campus_events for delete
+  using (public.can_manage_school(school_id));
 
 -- Deleting a school removes everything scoped to it in one step (so its
 -- feed posts don't become school-less and visible to everyone).
@@ -814,9 +921,9 @@ grant execute on function public.admin_delete_school(uuid) to authenticated;
 -- The school list stays public (anyone, signed in or not, on any device,
 -- can read it). Joining is controlled per school:
 --   open      anyone can join (default — Demo University stays open)
---   code      needs a join code (stored in a table only admins can read)
+--   code      needs a join code (stored in a table only its admins can read)
 --   domain    needs a confirmed email at one of the school's domains
---   approval  sends a request that an admin approves or denies
+--   approval  sends a request that one of its admins approves or denies
 -- The app can't bypass this: a trigger rejects any change to
 -- profiles.school_id that doesn't come through join_school() or an admin.
 
@@ -841,7 +948,7 @@ create table if not exists public.school_join_codes (
 alter table public.school_join_codes enable row level security;
 drop policy if exists "join codes: admins only" on public.school_join_codes;
 create policy "join codes: admins only" on public.school_join_codes
-  for select using (public.is_admin());
+  for select using (public.can_manage_school(school_id));
 
 create table if not exists public.school_join_requests (
   id          uuid primary key default gen_random_uuid(),
@@ -861,7 +968,7 @@ do $$ declare p record; begin
 end $$;
 create policy "join requests: see own or admin"
   on public.school_join_requests for select
-  using (user_id = auth.uid() or public.is_admin());
+  using (user_id = auth.uid() or public.can_manage_school(school_id));
 create policy "join requests: cancel own"
   on public.school_join_requests for delete using (user_id = auth.uid());
 
@@ -898,7 +1005,7 @@ create table if not exists public.school_bans (
 alter table public.school_bans enable row level security;
 drop policy if exists "bans: admins and the student read" on public.school_bans;
 create policy "bans: admins and the student read" on public.school_bans
-  for select using (public.is_admin() or user_id = auth.uid());
+  for select using (public.can_manage_school(school_id) or user_id = auth.uid());
 
 create or replace function public.join_school(target uuid, code text default null)
 returns text   -- 'joined' or 'pending'
@@ -917,7 +1024,7 @@ begin
   select * into s from public.schools where id = target;
   if not found then raise exception 'That school no longer exists'; end if;
 
-  if not public.is_admin() then
+  if not public.can_manage_school(target) then
     if exists (select 1 from public.school_bans b where b.school_id = target and b.user_id = auth.uid()) then
       raise exception 'An admin removed you from this school. Ask an admin to let you back in.';
     end if;
@@ -960,7 +1067,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if not public.is_admin() then raise exception 'Only admins can change join rules'; end if;
+  if not public.can_manage_school(target) then raise exception 'Only this school''s admins can change its join rules'; end if;
   if mode not in ('open','code','domain','approval') then raise exception 'Unknown join mode'; end if;
   if mode = 'code' and char_length(coalesce(trim(code), '')) < 4 then
     raise exception 'Join codes need at least 4 characters';
@@ -989,9 +1096,11 @@ set search_path = public
 as $$
 declare r public.school_join_requests%rowtype;
 begin
-  if not public.is_admin() then raise exception 'Only admins can review requests'; end if;
   select * into r from public.school_join_requests where id = request;
   if not found then raise exception 'Request not found'; end if;
+  if not public.can_manage_school(r.school_id) then
+    raise exception 'Only this school''s admins can answer its requests';
+  end if;
   update public.school_join_requests
      set status = case when approve then 'approved' else 'denied' end,
          reviewed_at = now(), reviewed_by = auth.uid()
@@ -1078,7 +1187,8 @@ create policy "comments: add own"
               and exists (select 1 from public.campus_feed f where f.id = post_id));
 create policy "comments: author, post owner or admin deletes"
   on public.feed_comments for delete
-  using (author_id = auth.uid() or public.is_admin()
+  using (author_id = auth.uid()
+         or public.can_manage_school((select f.school_id from public.campus_feed f where f.id = post_id))
          or exists (select 1 from public.campus_feed f where f.id = post_id and f.author_id = auth.uid()));
 
 -- The shown name on a comment comes from the profile (or "Anonymous
@@ -1296,7 +1406,7 @@ create trigger notify_friendship after insert or update or delete on public.frie
 -- School join requests (admins get the request, the student gets the answer)
 create or replace function public.notify_join_request()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare a record; sname text;
+declare mgr uuid; sname text;
 begin
   if tg_op = 'DELETE' then
     delete from public.notifications where kind = 'join_request' and ref_id = old.id::text and read_at is null;
@@ -1304,8 +1414,9 @@ begin
   end if;
   select name into sname from public.schools where id = new.school_id;
   if new.status = 'pending' and (tg_op = 'INSERT' or old.status is distinct from 'pending') then
-    for a in select user_id from public.admins loop
-      perform public.push_notification(a.user_id, new.user_id,
+    -- The school's own admins and its district's (app admins if it has neither).
+    for mgr in select m from public.school_manager_ids(new.school_id) as m loop
+      perform public.push_notification(mgr, new.user_id,
         coalesce(public.notif_name(new.user_id), 'A student'), 'join_request', new.id::text, sname);
     end loop;
   elsif tg_op = 'UPDATE' and new.status in ('approved','denied') and old.status = 'pending' then
@@ -1399,7 +1510,7 @@ select a.user_id, r.user_id, coalesce(public.notif_name(r.user_id), 'A student')
        'join_request', r.id::text, s.name, r.created_at
 from public.school_join_requests r
 join public.schools s on s.id = r.school_id
-cross join public.admins a
+cross join lateral public.school_manager_ids(r.school_id) as a(user_id)
 where r.status = 'pending'
   and not exists (select 1 from public.notifications n
                   where n.user_id = a.user_id and n.kind = 'join_request' and n.ref_id = r.id::text);
@@ -1408,22 +1519,26 @@ where r.status = 'pending'
 -- 6i. ADMIN: SCHOOL MEMBERS (see everyone, remove, promote)
 -- ============================================================
 -- Admins can see who's in each school (profiles are already public), who
--- the other admins are, remove a student from a school (they can't rejoin
--- until an admin lets them back in) and make or unmake admins. Every
--- change goes through these functions, which check is_admin() first.
+-- the other admins are, and remove a student from a school they look after
+-- (they can't rejoin until an admin lets them back in). App admins make or
+-- unmake app admins, manage districts and pick district admins; district
+-- admins (and app admins) pick school admins. Every change goes through
+-- these functions, which check the caller's level first.
 
--- Admins can see the full admin list (everyone else only sees their own row).
+-- Admins (any level) can see the full admin list (everyone else only sees their own row).
 drop policy if exists "admins: admins see all" on public.admins;
-create policy "admins: admins see all" on public.admins for select using (public.is_admin());
+create policy "admins: admins see all" on public.admins for select using (public.is_any_admin());
 
 create or replace function public.admin_remove_member(target_user uuid, target_school uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare sname text;
 begin
-  if not public.is_admin() then raise exception 'Only admins can remove students'; end if;
+  if not public.can_manage_school(target_school) then
+    raise exception 'Only this school''s admins can remove its students';
+  end if;
   if target_user = auth.uid() then raise exception 'You can''t remove yourself'; end if;
-  if exists (select 1 from public.admins where user_id = target_user) then
-    raise exception 'That person is an admin. Remove their admin role first.';
+  if public.admin_level_at(target_user, target_school) > 0 then
+    raise exception 'That person is an admin here. Remove their admin role first.';
   end if;
   select name into sname from public.schools where id = target_school;
   if sname is null then raise exception 'That school no longer exists'; end if;
@@ -1450,7 +1565,7 @@ end $$;
 create or replace function public.admin_allow_back(target_user uuid, target_school uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  if not public.is_admin() then raise exception 'Only admins can do that'; end if;
+  if not public.can_manage_school(target_school) then raise exception 'Only this school''s admins can do that'; end if;
   delete from public.school_bans where school_id = target_school and user_id = target_user;
 end $$;
 
@@ -1479,6 +1594,101 @@ revoke all on function public.admin_set_admin(uuid, boolean) from public, anon;
 grant execute on function public.admin_remove_member(uuid, uuid) to authenticated;
 grant execute on function public.admin_allow_back(uuid, uuid) to authenticated;
 grant execute on function public.admin_set_admin(uuid, boolean) to authenticated;
+
+-- Districts (app admins): make, rename, delete, and put schools in them.
+create or replace function public.admin_save_district(target uuid, dname text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare clean text := regexp_replace(trim(coalesce(dname, '')), '\s+', ' ', 'g'); did uuid;
+begin
+  if not public.is_admin() then raise exception 'Only app admins can manage districts'; end if;
+  if char_length(clean) not between 2 and 80 then raise exception 'District names need 2 to 80 characters'; end if;
+  if target is null then
+    insert into public.districts (name, created_by) values (clean, auth.uid()) returning id into did;
+  else
+    update public.districts set name = clean where id = target returning id into did;
+    if did is null then raise exception 'That district no longer exists'; end if;
+  end if;
+  return did;
+exception when unique_violation then
+  raise exception 'There''s already a district called %', clean;
+end $$;
+
+create or replace function public.admin_delete_district(target uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Only app admins can manage districts'; end if;
+  delete from public.districts where id = target;  -- its schools stay, just without a district
+end $$;
+
+create or replace function public.admin_set_school_district(target uuid, district uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Only app admins can move schools between districts'; end if;
+  if district is not null and not exists (select 1 from public.districts where id = district) then
+    raise exception 'That district no longer exists';
+  end if;
+  update public.schools set district_id = district where id = target;
+  if not found then raise exception 'That school no longer exists'; end if;
+end $$;
+
+-- District admins: app admins pick them.
+create or replace function public.admin_set_district_admin(target_user uuid, target_district uuid, make boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare dname text;
+begin
+  if not public.is_admin() then raise exception 'Only app admins can pick district admins'; end if;
+  select name into dname from public.districts where id = target_district;
+  if dname is null then raise exception 'That district no longer exists'; end if;
+  if not exists (select 1 from public.profiles where user_id = target_user) then
+    raise exception 'That account no longer exists';
+  end if;
+  if make then
+    insert into public.district_admins (district_id, user_id, added_by)
+    values (target_district, target_user, auth.uid()) on conflict do nothing;
+    if found then
+      perform public.push_notification(target_user, auth.uid(),
+        coalesce(public.notif_name(auth.uid()), 'An admin'), 'promoted', target_district::text, dname, 'district');
+    end if;
+  else
+    delete from public.district_admins where district_id = target_district and user_id = target_user;
+  end if;
+end $$;
+
+-- School admins: the school's district admins or app admins pick them.
+create or replace function public.admin_set_school_admin(target_user uuid, target_school uuid, make boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare sname text;
+begin
+  if public.admin_level_at(auth.uid(), target_school) < 2 then
+    raise exception 'Only the district''s admins or app admins can pick school admins';
+  end if;
+  select name into sname from public.schools where id = target_school;
+  if sname is null then raise exception 'That school no longer exists'; end if;
+  if not exists (select 1 from public.profiles where user_id = target_user) then
+    raise exception 'That account no longer exists';
+  end if;
+  if make then
+    insert into public.school_admins (school_id, user_id, added_by)
+    values (target_school, target_user, auth.uid()) on conflict do nothing;
+    if found then
+      perform public.push_notification(target_user, auth.uid(),
+        coalesce(public.notif_name(auth.uid()), 'An admin'), 'promoted', target_school::text, sname, 'school');
+    end if;
+  else
+    delete from public.school_admins where school_id = target_school and user_id = target_user;
+  end if;
+end $$;
+
+revoke all on function public.admin_save_district(uuid, text) from public, anon;
+revoke all on function public.admin_delete_district(uuid) from public, anon;
+revoke all on function public.admin_set_school_district(uuid, uuid) from public, anon;
+revoke all on function public.admin_set_district_admin(uuid, uuid, boolean) from public, anon;
+revoke all on function public.admin_set_school_admin(uuid, uuid, boolean) from public, anon;
+grant execute on function public.admin_save_district(uuid, text) to authenticated;
+grant execute on function public.admin_delete_district(uuid) to authenticated;
+grant execute on function public.admin_set_school_district(uuid, uuid) to authenticated;
+grant execute on function public.admin_set_district_admin(uuid, uuid, boolean) to authenticated;
+grant execute on function public.admin_set_school_admin(uuid, uuid, boolean) to authenticated;
 
 -- ============================================================
 -- 6j. STUDY GROUP CHATS
@@ -1589,7 +1799,9 @@ create policy "teacher comments: same-school students write"
   );
 create policy "teacher comments: author or admin deletes"
   on public.teacher_post_comments for delete
-  using (auth.uid() = author_id or public.is_admin());
+  using (auth.uid() = author_id
+         or public.can_manage_school(public.teacher_school(
+              (select p.teacher_id from public.teacher_posts p where p.id = post_id))));
 
 -- Tell the review's author (an anonymous commenter stays anonymous).
 create or replace function public.notify_teacher_comment()
@@ -1763,7 +1975,8 @@ create policy "comments: add own"
 drop policy if exists "comments: author, post owner or admin deletes" on public.feed_comments;
 create policy "comments: author, post owner or admin deletes"
   on public.feed_comments for delete
-  using (public.i_wrote('feed_comments', id::text) or public.is_admin()
+  using (public.i_wrote('feed_comments', id::text)
+         or public.can_manage_school((select f.school_id from public.campus_feed f where f.id = post_id))
          or public.i_wrote('campus_feed', post_id::text));
 
 drop policy if exists "teacher_posts: same-school students write" on public.teacher_posts;
@@ -1794,7 +2007,9 @@ create policy "teacher comments: same-school students write"
 drop policy if exists "teacher comments: author or admin deletes" on public.teacher_post_comments;
 create policy "teacher comments: author or admin deletes"
   on public.teacher_post_comments for delete
-  using (public.i_wrote('teacher_post_comments', id::text) or public.is_admin());
+  using (public.i_wrote('teacher_post_comments', id::text)
+         or public.can_manage_school(public.teacher_school(
+              (select p.teacher_id from public.teacher_posts p where p.id = post_id))));
 
 drop policy if exists "votes: user casts own" on public.teacher_post_votes;
 create policy "votes: user casts own"
@@ -1940,7 +2155,8 @@ begin
                            'teachers','teacher_posts','teacher_post_votes',
                            'campus_events','event_rsvps','school_join_requests','schools',
                            'feed_reactions','feed_comments','notifications','admins','school_bans',
-                           'group_messages','teacher_post_comments'] loop
+                           'group_messages','teacher_post_comments',
+                           'districts','district_admins','school_admins'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'

@@ -362,7 +362,10 @@ function initSupabaseRealtime() {
   listen('school_join_requests', p => onJoinRequestChanged(p));
   listen('schools', () => onSchoolsChanged());
   listen('admins', () => onAdminsChanged());
-  listen('school_bans', () => { if (isAdmin) fetchAdminMembers(); });
+  listen('school_bans', () => { if (isAnyAdmin()) fetchAdminMembers(); });
+  listen('districts', () => onAdminsChanged());
+  listen('district_admins', () => onAdminsChanged());
+  listen('school_admins', () => onAdminsChanged());
   startDmPolling();
 }
 
@@ -947,7 +950,7 @@ function switchTab(viewId, element) {
   }
   if (viewId === 'groups-view') { renderGroups(); }
   if (viewId === 'events-view') { fetchEvents(); }
-  if (viewId === 'settings-view') { renderAdminPanel(); if (isAdmin) fetchAdminMembers(); }
+  if (viewId === 'settings-view') { renderAdminPanel(); if (isAnyAdmin()) fetchAdminMembers(); }
   savePlace();
 }
 
@@ -1143,7 +1146,11 @@ function describeNotif(n) {
     case 'helpful':        return { icon: 'fa-thumbs-up',      html: `${times > 1 ? `<strong>${times} people</strong>` : 'Someone'} liked your teacher post`, sub: n.body };
     case 'review_comment': return { icon: 'fa-comment-dots',   html: `${who} ${times > 1 ? `left ${times} comments on` : 'commented on'} your teacher post`, sub: n.body };
     case 'event_rsvp':     return { icon: 'fa-calendar-check', html: `<strong>${times} ${times === 1 ? 'person is' : 'people are'}</strong> going to <strong>${escapeHtml(n.body || 'your event')}</strong>` };
-    case 'promoted':       return { icon: 'fa-shield-halved',  html: `${who} made you an admin`, sub: 'Admin tools are in Me → Admin' };
+    case 'promoted':       return { icon: 'fa-shield-halved',
+      html: n.meta === 'district' ? `${who} made you a district admin of <strong>${escapeHtml(n.body || 'a district')}</strong>`
+          : n.meta === 'school'   ? `${who} made you a school admin of <strong>${escapeHtml(n.body || 'a school')}</strong>`
+          : `${who} made you an app admin`,
+      sub: 'Admin tools are in Settings → Admin' };
     case 'removed_from_school': return { icon: 'fa-user-slash', html: `An admin removed you from <strong>${escapeHtml(n.body || 'your school')}</strong>`, sub: 'Tap to pick a school' };
     default:              return { icon: 'fa-bell',           html: escapeHtml(n.body || 'New activity') };
   }
@@ -1286,7 +1293,7 @@ function renderNotifications() {
         </div>
       </div>`);
   });
-  if (isAdmin && adminJoinRequests.length) {
+  if (isAnyAdmin() && adminJoinRequests.length) {
     const n = adminJoinRequests.length;
     items.push(`
       <div class="notif-item" style="cursor:pointer;" onclick="toggleNotifications(); showAdminCard('requests');">
@@ -1306,7 +1313,7 @@ function renderNotifications() {
 function updateNotifBadgeFromState() {
   unreadNotifs = notifsReady
     ? notifications.filter(n => !n.read_at && !isChatNotif(n)).length
-    : pendingIncoming.length + (isAdmin ? adminJoinRequests.length : 0);
+    : pendingIncoming.length + (isAnyAdmin() ? adminJoinRequests.length : 0);
   updateNotifBadge();
   const chatBadge = document.getElementById('chat-nav-badge');
   if (chatBadge) {
@@ -1409,7 +1416,11 @@ async function refreshSchoolsCache() {
   if (!isSupabaseConnected) { schoolsLoadState = 'error'; schoolsLoadError = 'Offline'; return false; }
   schoolsLoadState = 'loading';
   let { data, error } = await supabaseClient
-    .from('schools').select('id, name, slug, join_mode, allowed_domains').order('name');
+    .from('schools').select('id, name, slug, join_mode, allowed_domains, district_id').order('name');
+  if (error && /district_id/.test(error.message)) {
+    // Admin levels not added yet (SCHEMA.sql 6f).
+    ({ data, error } = await supabaseClient.from('schools').select('id, name, slug, join_mode, allowed_domains').order('name'));
+  }
   if (error && /join_mode|allowed_domains/.test(error.message)) {
     // Database not migrated yet — fall back to the basic columns.
     ({ data, error } = await supabaseClient.from('schools').select('id, name, slug').order('name'));
@@ -1647,7 +1658,7 @@ function pickSchool(schoolId) {
   const s = schoolsCache.find(x => x.id === schoolId);
   if (!s) return;
   if (schoolId === currentSchoolId) return closeSchoolPicker();
-  if (s.join_mode === 'code' && !isAdmin) {
+  if (s.join_mode === 'code' && !canManageSchool(s.id)) {
     pickerCodeSchoolId = pickerCodeSchoolId === schoolId ? null : schoolId;
     setPickerStatus('');
     return renderSchoolPicker();
@@ -2802,7 +2813,7 @@ function renderFeed() {
           <strong>${nameLink(post.author_id, author, anon)}${mine ? ' <em>(you)</em>' : ''}</strong>
           <small>${escapeHtml(post.created_at ? timeAgo(post.created_at) : (post.time || ''))}</small>
         </div>
-        ${isAdmin || mine
+        ${canManageSchool(post.school_id || currentSchoolId) || mine
           ? `<button class="post-delete-btn" onclick="deleteFeedPost('${pid}')" aria-label="Delete post"><i class="fa-solid fa-trash"></i></button>`
           : ''}
       </header>
@@ -2908,7 +2919,8 @@ function renderCommentsList() {
   box.innerHTML = list.length ? list.map(c => {
     const anon = /^anonymous/i.test(String(c.author || 'Anonymous'));
     const name = anon ? String(c.author || 'Anonymous Student') : personName(c.author_id, String(c.author || 'Student'));
-    const canDelete = feedExtrasReady && c.id && (c.author_id === currentUserId || ownsPost || isAdmin);
+    const canDelete = feedExtrasReady && c.id && (c.author_id === currentUserId || ownsPost
+      || canManageSchool(post.school_id || currentSchoolId));
     return `
       <div class="comment-row">
         <span class="post-avatar sm">${anon ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(name[0].toUpperCase())}</span>
@@ -3054,7 +3066,7 @@ function groupCardHtml(g) {
   const full = groupIsFull(g);
   const left = Math.max(0, max - g.members);
   const host = !!g.creator_id && g.creator_id === currentUserId;
-  const canDelete = isAdmin || host;
+  const canDelete = canManageSchool(g.school_id || currentSchoolId) || host;
   const ids = groupMembers[g.id] || [];
   const faces = ids.slice(0, 4).map(uid => {
     const n = memberLabel(uid);
@@ -3096,7 +3108,7 @@ function groupCardHtml(g) {
 function groupDetailHtml(g) {
   const gid = escapeAttr(g.id);
   const host = !!g.creator_id && g.creator_id === currentUserId;
-  const canDelete = isAdmin || host;
+  const canDelete = canManageSchool(g.school_id || currentSchoolId) || host;
   // Host first, then you, then everyone else.
   const ids = (groupMembers[g.id] || []).slice().sort((a, b) =>
     (b === g.creator_id) - (a === g.creator_id) || (b === currentUserId) - (a === currentUserId)
@@ -3318,7 +3330,7 @@ function eventCardHtml(e) {
   const r = calRsvps[e.id] || { count: 0, mine: false };
   const isToday = dayKey(d) === dayKey(new Date());
   const past = e.all_day ? (d < new Date() && !isToday) : d < new Date();
-  const canDelete = isAdmin || (e.created_by && e.created_by === currentUserId);
+  const canDelete = canManageSchool(e.school_id || currentSchoolId) || (e.created_by && e.created_by === currentUserId);
   const when = e.all_day ? 'All day' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   return `
     <div class="info-card event-card ${past ? 'past' : ''}">
@@ -3398,27 +3410,96 @@ async function submitEvent(event) {
 }
 
 // ==================== Admin ====================
-// Admin status comes from the `admins` table, which can only be edited
-// from the Supabase SQL editor. The UI just shows extra delete buttons;
-// the database policies are what actually allow the deletes.
-let isAdmin = false;
+// Three levels (SCHEMA.sql 6f):
+//   app admins       every school (the `admins` table)
+//   district admins  every school in their district
+//   school admins    one school
+// App admins make districts and pick district admins; district admins (and
+// app admins) pick school admins. The UI just shows the extra buttons; the
+// database policies are what actually allow each action, and only at the
+// schools you look after.
+let isAdmin = false;                 // app admin
+let myDistrictAdminIds = new Set();  // districts I look after
+let mySchoolAdminIds = new Set();    // schools I look after
+let districtsCache = [];             // every district (public)
+let adminLevelsReady = true;         // false until SCHEMA.sql adds admin levels
+let adminDistrictRows = [];          // everyone's district admin roles (admins can see them)
+let adminSchoolRows = [];            // everyone's school admin roles
+
+const LEVEL_NAMES = ['Student', 'School admin', 'District admin', 'App admin'];
+function isAnyAdmin() { return isAdmin || myDistrictAdminIds.size > 0 || mySchoolAdminIds.size > 0; }
+function schoolDistrictId(sid) { return schoolsCache.find(s => s.id === sid)?.district_id || null; }
+// 3 = app admin, 2 = admin of the school's district, 1 = admin of that
+// school, 0 = none (the same as admin_level_at() in the database).
+function myLevelAt(sid) {
+  if (isAdmin) return 3;
+  if (!sid) return 0;
+  const d = schoolDistrictId(sid);
+  if (d && myDistrictAdminIds.has(d)) return 2;
+  return mySchoolAdminIds.has(sid) ? 1 : 0;
+}
+function canManageSchool(sid) { return myLevelAt(sid) > 0; }
+function levelAt(uid, sid) {
+  if (adminIds.has(uid)) return 3;
+  const d = schoolDistrictId(sid);
+  if (d && adminDistrictRows.some(r => r.user_id === uid && r.district_id === d)) return 2;
+  return adminSchoolRows.some(r => r.user_id === uid && r.school_id === sid) ? 1 : 0;
+}
+function managedSchools() { return schoolsCache.filter(s => canManageSchool(s.id)); }
+function myAdminTitle() {
+  return isAdmin ? 'App admin' : myDistrictAdminIds.size ? 'District admin' : mySchoolAdminIds.size ? 'School admin' : '';
+}
 
 let adminJoinCodes = {};        // school_id -> join code (admins can read these)
 let adminJoinRequests = [];     // pending school_join_requests rows
 let adminEditingSchoolId = null;
 
 async function fetchAdminStatus() {
-  isAdmin = false;
+  isAdmin = false; myDistrictAdminIds = new Set(); mySchoolAdminIds = new Set();
   if (isSupabaseConnected && currentUserId) {
-    const { data } = await supabaseClient.from('admins').select('user_id').eq('user_id', currentUserId).maybeSingle();
-    isAdmin = !!data;
+    const [app, dist, sch, dl] = await Promise.all([
+      supabaseClient.from('admins').select('user_id').eq('user_id', currentUserId).maybeSingle(),
+      supabaseClient.from('district_admins').select('district_id').eq('user_id', currentUserId),
+      supabaseClient.from('school_admins').select('school_id').eq('user_id', currentUserId),
+      supabaseClient.from('districts').select('id, name').order('name')
+    ]);
+    isAdmin = !!app.data;
+    adminLevelsReady = !(dist.error || sch.error || dl.error);   // tables missing until SCHEMA.sql is re-run
+    myDistrictAdminIds = new Set((dist.data || []).map(r => r.district_id));
+    mySchoolAdminIds = new Set((sch.data || []).map(r => r.school_id));
+    districtsCache = dl.data || [];
   }
-  if (isAdmin) { await fetchAdminJoinData(); fetchAdminMembers(); }
-  else { adminJoinCodes = {}; adminJoinRequests = []; adminMembers = []; adminBans = []; renderAdminPanel(); }
+  if (isAnyAdmin()) { await Promise.all([fetchAdminJoinData(), fetchAdminRoles()]); fetchAdminMembers(); }
+  else {
+    adminJoinCodes = {}; adminJoinRequests = []; adminMembers = []; adminBans = [];
+    adminDistrictRows = []; adminSchoolRows = [];
+    renderAdminPanel();
+  }
+}
+
+// Everyone's admin roles (admins at any level can see them), with names.
+async function fetchAdminRoles() {
+  if (!isAnyAdmin() || !isSupabaseConnected) return;
+  const none = Promise.resolve({ data: [] });
+  const [adm, dist, sch] = await Promise.all([
+    supabaseClient.from('admins').select('user_id'),
+    adminLevelsReady ? supabaseClient.from('district_admins').select('district_id, user_id') : none,
+    adminLevelsReady ? supabaseClient.from('school_admins').select('school_id, user_id') : none
+  ]);
+  adminIds = new Set((adm.data || []).map(a => a.user_id));
+  adminDistrictRows = dist.data || [];
+  adminSchoolRows = sch.data || [];
+  await fetchProfilesByIds([...adminIds, ...adminDistrictRows.map(r => r.user_id), ...adminSchoolRows.map(r => r.user_id)]);
+  renderAdminPanel();
+}
+
+async function fetchDistricts() {
+  const { data, error } = await supabaseClient.from('districts').select('id, name').order('name');
+  if (!error) districtsCache = data || [];
 }
 
 async function fetchAdminJoinData() {
-  if (!isAdmin) return;
+  if (!isAnyAdmin()) return;
   const [codes, reqs] = await Promise.all([
     supabaseClient.from('school_join_codes').select('school_id, join_code'),
     supabaseClient.from('school_join_requests').select('id, school_id, user_id, created_at')
@@ -3426,7 +3507,8 @@ async function fetchAdminJoinData() {
   ]);
   adminJoinCodes = {};
   (codes.data || []).forEach(c => { adminJoinCodes[c.school_id] = c.join_code; });
-  adminJoinRequests = reqs.data || [];
+  // (The database only returns requests for schools you look after; this keeps the list right while roles change.)
+  adminJoinRequests = (reqs.data || []).filter(r => canManageSchool(r.school_id));
   await fetchProfilesByIds(adminJoinRequests.map(r => r.user_id));
   renderAdminPanel();
   renderNotifications();
@@ -3479,19 +3561,41 @@ function setAdminCount(id, n) {
   if (el) el.textContent = n ? String(n) : '';
 }
 
+// A person on an admin list, with a remove button when you can remove them.
+function adminPersonChip(uid, removeCall) {
+  const name = personName(uid, 'Someone');
+  return `<span class="admin-person">${escapeHtml(name)}${uid === currentUserId ? ' <small>(you)</small>' : ''}${removeCall
+    ? `<button type="button" onclick="${removeCall}" aria-label="Remove ${escapeAttr(name)}" title="Remove"><i class="fa-solid fa-xmark"></i></button>` : ''}</span>`;
+}
+
 function renderAdminPanel() {
   const card = document.getElementById('admin-card');
   if (!card) return;
-  card.style.display = isAdmin ? 'block' : 'none';
-  if (!isAdmin) return;
+  const any = isAnyAdmin();
+  card.style.display = any ? 'block' : 'none';
+  if (!any) return;
   applyAdminFolds();
+
+  // Which level you are, and what you look after.
+  const badge = document.getElementById('admin-level-badge');
+  if (badge) badge.textContent = myAdminTitle().toUpperCase();
+  const mine = managedSchools();
+  const hint = document.getElementById('admin-card-hint');
+  if (hint) {
+    const names = list => list.length <= 3 ? list.join(', ') : `${list.slice(0, 3).join(', ')} and ${list.length - 3} more`;
+    const where = isAdmin ? 'every school'
+      : myDistrictAdminIds.size ? names(districtsCache.filter(d => myDistrictAdminIds.has(d.id)).map(d => d.name))
+        + (mySchoolAdminIds.size ? ' (plus any other schools below)' : '')
+      : names(mine.map(x => x.name)) || 'your school';
+    hint.textContent = `You look after ${where}. Delete buttons appear on the teacher pages, reviews, notes, feed posts, study groups and events there, and you manage who can join below.`;
+  }
 
   // Waiting requests stay visible on the header even with the card folded.
   const waiting = adminJoinRequests.length;
   const pill = document.getElementById('admin-waiting-pill');
   if (pill) { pill.hidden = !waiting; pill.textContent = `${waiting} waiting`; }
   setAdminCount('admin-requests-count', waiting);
-  setAdminCount('admin-schools-count', schoolsCache.length);
+  setAdminCount('admin-schools-count', mine.length);
 
   const reqEl = document.getElementById('admin-request-list');
   if (reqEl) {
@@ -3514,10 +3618,29 @@ function renderAdminPanel() {
       : '<p class="friends-empty-inner">No one is waiting to join.</p>';
   }
 
-  document.getElementById('admin-school-list').innerHTML = schoolsCache.length
-    ? schoolsCache.map(s => {
+  document.getElementById('admin-school-list').innerHTML = mine.length
+    ? mine.map(s => {
         const rule = joinRuleLabel(s);
         const editing = adminEditingSchoolId === s.id;
+        const sid = escapeAttr(s.id);
+        const lvl = myLevelAt(s.id);
+        const district = districtsCache.find(d => d.id === s.district_id);
+        // App admins put schools in districts; everyone else just sees which one.
+        const districtBit = isAdmin && adminLevelsReady
+          ? `<label class="admin-district-pick"><i class="fa-solid fa-map"></i>
+               <select class="mini-select" onchange="adminSetSchoolDistrict('${sid}', this.value)" aria-label="District for ${escapeAttr(s.name)}">
+                 <option value="">No district</option>
+                 ${districtsCache.map(d => `<option value="${escapeAttr(d.id)}" ${d.id === s.district_id ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('')}
+               </select></label>`
+          : district ? `<span class="admin-district-name"><i class="fa-solid fa-map"></i> ${escapeHtml(district.name)}</span>` : '';
+        const admins = adminSchoolRows.filter(r => r.school_id === s.id);
+        const people = adminLevelsReady ? `
+          <div class="admin-people">
+            <span class="admin-people-label">School admins</span>
+            ${admins.map(r => adminPersonChip(r.user_id, lvl >= 2 ? `adminSetSchoolAdmin('${escapeAttr(r.user_id)}', '${sid}', false)` : null)).join('')
+              || '<span class="admin-people-none">None yet</span>'}
+            ${lvl >= 2 ? `<button type="button" class="text-btn admin-add-btn" onclick="adminAddSchoolAdmin('${sid}')">+ Add</button>` : ''}
+          </div>` : '';
         return `
           <div class="admin-school">
             <div class="admin-row">
@@ -3526,17 +3649,67 @@ function renderAdminPanel() {
                 <strong>${escapeHtml(s.name)}</strong>
                 <small><i class="fa-solid fa-${rule.icon}"></i> ${escapeHtml(rule.text)}${s.id === currentSchoolId ? ' · Your school' : ''}</small>
               </div>
-              <button class="secondary-btn admin-rule-btn ${editing ? 'active-state' : ''}" onclick="toggleJoinRuleEditor('${escapeAttr(s.id)}')">Join rules</button>
-              <button class="secondary-btn admin-del-btn" onclick="adminDeleteSchool('${escapeAttr(s.id)}')" aria-label="Delete ${escapeAttr(s.name)}">
+              <button class="secondary-btn admin-rule-btn ${editing ? 'active-state' : ''}" onclick="toggleJoinRuleEditor('${sid}')">Join rules</button>
+              ${isAdmin ? `<button class="secondary-btn admin-del-btn" onclick="adminDeleteSchool('${sid}')" aria-label="Delete ${escapeAttr(s.name)}">
                 <i class="fa-solid fa-trash"></i>
-              </button>
+              </button>` : ''}
             </div>
+            ${districtBit ? `<div class="admin-school-meta">${districtBit}</div>` : ''}
+            ${people}
             ${editing ? joinRuleEditorHtml(s) : ''}
           </div>`;
       }).join('')
     : '<p class="friends-empty-inner">No schools.</p>';
   if (adminEditingSchoolId) renderJoinRuleFields();
+  renderAdminDistricts();
   renderAdminMembers();
+}
+
+// Districts: app admins make them, rename or delete them and pick their
+// admins; district admins see the districts they look after.
+function renderAdminDistricts() {
+  const sec = document.querySelector('#admin-card .admin-section[data-section="districts"]');
+  const list = document.getElementById('admin-district-list');
+  if (!sec || !list) return;
+  const shown = isAdmin ? districtsCache : districtsCache.filter(d => myDistrictAdminIds.has(d.id));
+  sec.hidden = !(isAdmin || shown.length);
+  if (sec.hidden) return;
+  setAdminCount('admin-districts-count', shown.length);
+  if (!adminLevelsReady) {
+    list.innerHTML = '<p class="friends-empty-inner">Districts need a quick database update: run the updated SCHEMA.sql in Supabase.</p>';
+    return;
+  }
+  const add = isAdmin ? `
+    <form class="admin-new-district" onsubmit="event.preventDefault(); adminCreateDistrict();">
+      <input id="admin-new-district" class="auth-input" maxlength="80" autocomplete="off" placeholder="New district name" aria-label="New district name" />
+      <button type="submit" class="primary-btn friend-btn-sm">Add district</button>
+    </form>` : '';
+  const rows = shown.map(d => {
+    const did = escapeAttr(d.id);
+    const schools = schoolsCache.filter(x => x.district_id === d.id);
+    const admins = adminDistrictRows.filter(r => r.district_id === d.id);
+    return `
+      <div class="admin-school admin-district">
+        <div class="admin-row">
+          <i class="fa-solid fa-map"></i>
+          <div class="school-row-text">
+            <strong>${escapeHtml(d.name)}</strong>
+            <small>${schools.length ? `${schools.length} school${schools.length === 1 ? '' : 's'}: ${schools.map(x => escapeHtml(x.name)).join(', ')}`
+              : 'No schools yet' + (isAdmin ? ', pick this district on a school below' : '')}</small>
+          </div>
+          ${isAdmin ? `
+            <button class="secondary-btn friend-btn-sm" onclick="adminRenameDistrict('${did}')">Rename</button>
+            <button class="secondary-btn admin-del-btn" onclick="adminDeleteDistrict('${did}')" aria-label="Delete ${escapeAttr(d.name)}"><i class="fa-solid fa-trash"></i></button>` : ''}
+        </div>
+        <div class="admin-people">
+          <span class="admin-people-label">District admins</span>
+          ${admins.map(r => adminPersonChip(r.user_id, isAdmin ? `adminSetDistrictAdmin('${escapeAttr(r.user_id)}', '${did}', false)` : null)).join('')
+            || '<span class="admin-people-none">None yet</span>'}
+          ${isAdmin ? `<button type="button" class="text-btn admin-add-btn" onclick="adminAddDistrictAdmin('${did}')">+ Add</button>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  list.innerHTML = add + (rows || (isAdmin ? '<p class="friends-empty-inner">No districts yet. Add one, then choose it on each of its schools in the Schools list.</p>' : ''));
 }
 
 function joinRuleEditorHtml(s) {
@@ -3618,24 +3791,22 @@ function setAdminMembersSchool(id) {
 }
 
 async function fetchAdminMembers() {
-  if (!isAdmin || !isSupabaseConnected) return;
-  if (!adminMembersSchoolId || !schoolsCache.some(s => s.id === adminMembersSchoolId)) {
-    adminMembersSchoolId = currentSchoolId || schoolsCache[0]?.id || null;
+  if (!isAnyAdmin() || !isSupabaseConnected) return;
+  if (!adminMembersSchoolId || !canManageSchool(adminMembersSchoolId)) {
+    adminMembersSchoolId = (canManageSchool(currentSchoolId) ? currentSchoolId : managedSchools()[0]?.id) || null;
   }
   const sid = adminMembersSchoolId;
   if (!sid) { adminMembers = []; adminBans = []; adminMembersState = 'ok'; return renderAdminMembers(); }
   adminMembersState = 'loading';
   renderAdminMembers();
-  const [mem, adm, bans] = await Promise.all([
+  const [mem, bans] = await Promise.all([
     supabaseClient.from('profiles').select('user_id, handle, display_name, created_at')
       .eq('school_id', sid).order('handle').limit(1000),
-    supabaseClient.from('admins').select('user_id'),
     supabaseClient.from('school_bans').select('user_id, created_at').eq('school_id', sid)
   ]);
   if (sid !== adminMembersSchoolId) return;           // picked another school meanwhile
   if (mem.error) { adminMembersState = 'error:' + mem.error.message; return renderAdminMembers(); }
   adminMembers = mem.data || [];
-  adminIds = new Set((adm.data || []).map(a => a.user_id));
   adminBans = bans.error ? [] : (bans.data || []);    // table missing until SCHEMA.sql 6g is re-run
   await fetchProfilesByIds(adminBans.map(b => b.user_id));
   adminMembersState = 'ok';
@@ -3645,9 +3816,9 @@ async function fetchAdminMembers() {
 function renderAdminMembers() {
   const sel = document.getElementById('admin-members-school');
   const list = document.getElementById('admin-member-list');
-  if (!sel || !list || !isAdmin) return;
+  if (!sel || !list || !isAnyAdmin()) return;
 
-  sel.innerHTML = schoolsCache.map(s =>
+  sel.innerHTML = managedSchools().map(s =>
     `<option value="${escapeAttr(s.id)}" ${s.id === adminMembersSchoolId ? 'selected' : ''}>${escapeHtml(s.name)}${s.id === currentSchoolId ? ' (your school)' : ''}</option>`
   ).join('') || '<option value="">No schools</option>';
 
@@ -3663,21 +3834,33 @@ function renderAdminMembers() {
   const q = (document.getElementById('admin-members-search')?.value || '').trim().toLowerCase().replace(/^@/, '');
   const shown = adminMembers.filter(m => !q
     || (m.handle || '').toLowerCase().includes(q) || (m.display_name || '').toLowerCase().includes(q));
-  const nAdmins = adminMembers.filter(m => adminIds.has(m.user_id)).length;
+  const sid = adminMembersSchoolId;
+  const myLvl = myLevelAt(sid);
+  const nAdmins = adminMembers.filter(m => levelAt(m.user_id, sid) > 0).length;
 
   const rows = shown.map(m => {
     const name = m.display_name || m.handle || 'Student';
     const me = m.user_id === currentUserId;
-    const admin = adminIds.has(m.user_id);
+    const lvl = levelAt(m.user_id, sid);
     const uid = escapeAttr(m.user_id);
-    const actions = me ? '' : `
-      <button class="secondary-btn friend-btn-sm" onclick="adminToggleAdmin('${uid}', ${!admin})">${admin ? 'Remove admin' : 'Make admin'}</button>
-      ${admin ? '' : `<button class="secondary-btn friend-btn-sm danger-text" onclick="adminRemoveMember('${uid}')">Remove</button>`}`;
+    // District and app admins can change roles below their own level
+    // (app admins: any role). Before the database update: the old admin switch.
+    let role = '';
+    if (!me && adminLevelsReady && myLvl >= 2 && (myLvl === 3 || lvl < 2)) {
+      const opts = [0, 1].concat(myLvl === 3 && schoolDistrictId(sid) ? [2] : [], myLvl === 3 ? [3] : []);
+      role = `<select class="mini-select admin-role-select" onchange="adminChangeRole('${uid}', Number(this.value), this)" aria-label="Role for ${escapeAttr(name)}">
+        ${opts.map(o => `<option value="${o}" ${o === lvl ? 'selected' : ''}>${LEVEL_NAMES[o]}</option>`).join('')}
+      </select>`;
+    } else if (!me && !adminLevelsReady && isAdmin) {
+      role = `<button class="secondary-btn friend-btn-sm" onclick="adminToggleAdmin('${uid}', ${lvl !== 3})">${lvl === 3 ? 'Remove admin' : 'Make admin'}</button>`;
+    }
+    const actions = me ? '' : `${role}
+      ${lvl ? '' : `<button class="secondary-btn friend-btn-sm danger-text" onclick="adminRemoveMember('${uid}')">Remove</button>`}`;
     return `
       <div class="admin-row admin-member-row">
         <span class="friend-avatar sm">${escapeHtml(name[0].toUpperCase())}</span>
         <div class="school-row-text">
-          <strong>${escapeHtml(name)}${admin ? ' <span class="admin-badge">ADMIN</span>' : ''}${me ? ' <small>(you)</small>' : ''}</strong>
+          <strong>${escapeHtml(name)}${lvl ? ` <span class="admin-badge admin-level-${lvl}">${LEVEL_NAMES[lvl].toUpperCase()}</span>` : ''}${me ? ' <small>(you)</small>' : ''}</strong>
           <small>@${escapeHtml(m.handle || '')}${m.created_at ? ' · joined the app ' + escapeHtml(timeAgo(m.created_at)) : ''}</small>
         </div>
         <div class="admin-member-actions">${actions}</div>
@@ -3713,10 +3896,156 @@ function renderAdminMembers() {
 
 function adminRpcError(error) {
   const msg = error?.message || 'Something went wrong';
-  if (/admin_(remove_member|allow_back|set_admin)/.test(msg) && /(function|schema cache)/i.test(msg)) {
-    return 'Run the updated SCHEMA.sql in Supabase first (section 6i adds this).';
+  if (/admin_(remove_member|allow_back|set_admin|set_school_admin|set_district_admin|save_district|delete_district|set_school_district)/.test(msg)
+      && /(function|schema cache)/i.test(msg)) {
+    return 'Run the updated SCHEMA.sql in Supabase first (it adds admin levels).';
   }
   return msg;
+}
+
+// After any role or district change: fresh roles, then the lists.
+async function afterAdminChange() {
+  await fetchAdminStatus();
+  refreshModerationUi();
+}
+
+// Delete buttons depend on which schools you look after.
+function refreshModerationUi() {
+  const redraw = f => { try { if (typeof f === 'function') f(); } catch (_) {} };
+  redraw(renderFeed);
+  redraw(renderGroups);
+  redraw(renderCalendar);
+  if (currentTeacher && isViewActive('teacher-view')) redraw(renderTeacherPage);
+}
+
+// Find someone by their @username (to make them an admin).
+async function findPersonByHandle(text) {
+  const handle = String(text || '').trim().replace(/^@/, '').toLowerCase();
+  if (!handle) return null;
+  const { data } = await supabaseClient.from('profiles')
+    .select('user_id, handle, display_name').eq('handle', handle).maybeSingle();
+  if (data) profileMap[data.user_id] = { ...(profileMap[data.user_id] || {}), handle: data.handle, display_name: data.display_name };
+  return data || null;
+}
+function nameOf(p) { return p.display_name || '@' + p.handle; }
+
+// Students list: pick someone's level at this school. Done as the smallest
+// set of changes (e.g. school admin → district admin adds the district role
+// and drops the school one); the database checks each step.
+async function adminChangeRole(userId, to, sel) {
+  const sid = adminMembersSchoolId;
+  const from = levelAt(userId, sid);
+  if (to === from) return;
+  const school = schoolsCache.find(x => x.id === sid);
+  const dist = school?.district_id || null;
+  const district = districtsCache.find(d => d.id === dist);
+  const name = memberName(userId);
+  const ok = confirm({
+    0: `Make ${name} a regular student at ${school?.name || 'this school'}? They lose their admin tools there.`,
+    1: `Make ${name} a school admin of ${school?.name || 'this school'}?\n\nThey can delete posts, reviews, teacher pages, groups and events there, change its join rules, answer join requests and remove students.`,
+    2: `Make ${name} a district admin of ${district?.name || 'this district'}?\n\nThey can do everything a school admin can at every school in the district, and pick school admins.`,
+    3: `Make ${name} an app admin?\n\nApp admins can do everything at every school, manage districts and pick any admin.`
+  }[to]);
+  if (!ok) { if (sel) sel.value = String(from); return; }
+
+  const hasSchool = adminSchoolRows.some(r => r.user_id === userId && r.school_id === sid);
+  const hasDistrict = !!dist && adminDistrictRows.some(r => r.user_id === userId && r.district_id === dist);
+  const steps = [];
+  if (to === 3) steps.push(['admin_set_admin', { target_user: userId, make: true }]);
+  else {
+    if (adminIds.has(userId)) steps.push(['admin_set_admin', { target_user: userId, make: false }]);
+    if ((to === 2) !== hasDistrict) steps.push(['admin_set_district_admin', { target_user: userId, target_district: dist, make: to === 2 }]);
+    if ((to === 1) !== hasSchool) steps.push(['admin_set_school_admin', { target_user: userId, target_school: sid, make: to === 1 }]);
+  }
+  for (const [fn, args] of steps) {
+    const { error } = await supabaseClient.rpc(fn, args);
+    if (error) { showToast(adminRpcError(error), 'error', 5500); await afterAdminChange(); return; }
+  }
+  showToast(to ? `${name} is now ${to === 3 ? 'an' : 'a'} ${LEVEL_NAMES[to].toLowerCase()}.` : `${name} is a regular student again.`, 'success');
+  await afterAdminChange();
+}
+
+async function adminAddSchoolAdmin(sid) {
+  const school = schoolsCache.find(x => x.id === sid);
+  const typed = prompt(`Who should be a school admin of ${school?.name || 'this school'}?\n\nType their @username:`);
+  if (!typed || !typed.trim()) return;
+  const p = await findPersonByHandle(typed);
+  if (!p) return showToast(`No one has the username @${typed.trim().replace(/^@/, '')}.`, 'warn');
+  const { error } = await supabaseClient.rpc('admin_set_school_admin', { target_user: p.user_id, target_school: sid, make: true });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast(`${nameOf(p)} is now a school admin of ${school?.name || 'the school'}.`, 'success');
+  await afterAdminChange();
+}
+async function adminSetSchoolAdmin(userId, sid, make) {
+  const school = schoolsCache.find(x => x.id === sid);
+  const name = personName(userId, 'this person');
+  if (!make && !confirm(`Remove ${name} as a school admin of ${school?.name || 'this school'}?`)) return;
+  const { error } = await supabaseClient.rpc('admin_set_school_admin', { target_user: userId, target_school: sid, make });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast(make ? `${name} is now a school admin.` : `${name} is no longer a school admin of ${school?.name || 'that school'}.`, 'success');
+  await afterAdminChange();
+}
+
+async function adminAddDistrictAdmin(did) {
+  const d = districtsCache.find(x => x.id === did);
+  const typed = prompt(`Who should be a district admin of ${d?.name || 'this district'}?\n\nThey'll look after every school in it. Type their @username:`);
+  if (!typed || !typed.trim()) return;
+  const p = await findPersonByHandle(typed);
+  if (!p) return showToast(`No one has the username @${typed.trim().replace(/^@/, '')}.`, 'warn');
+  const { error } = await supabaseClient.rpc('admin_set_district_admin', { target_user: p.user_id, target_district: did, make: true });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast(`${nameOf(p)} is now a district admin of ${d?.name || 'the district'}.`, 'success');
+  await afterAdminChange();
+}
+async function adminSetDistrictAdmin(userId, did, make) {
+  const d = districtsCache.find(x => x.id === did);
+  const name = personName(userId, 'this person');
+  if (!make && !confirm(`Remove ${name} as a district admin of ${d?.name || 'this district'}?`)) return;
+  const { error } = await supabaseClient.rpc('admin_set_district_admin', { target_user: userId, target_district: did, make });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast(make ? `${name} is now a district admin.` : `${name} is no longer a district admin of ${d?.name || 'that district'}.`, 'success');
+  await afterAdminChange();
+}
+
+async function adminCreateDistrict() {
+  const input = document.getElementById('admin-new-district');
+  const name = (input?.value || '').replace(/\s+/g, ' ').trim();
+  if (name.length < 2) return showToast('Give the district a name (at least 2 characters).', 'warn');
+  const { error } = await supabaseClient.rpc('admin_save_district', { target: null, dname: name });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast(`${name} added. Now choose it on each of its schools.`, 'success', 4000);
+  if (input) input.value = '';
+  await fetchDistricts();
+  renderAdminPanel();
+}
+async function adminRenameDistrict(did) {
+  const d = districtsCache.find(x => x.id === did);
+  const typed = prompt('New name for this district:', d?.name || '');
+  if (typed == null || !typed.trim() || typed.trim() === d?.name) return;
+  const { error } = await supabaseClient.rpc('admin_save_district', { target: did, dname: typed.trim() });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast('District renamed.', 'success');
+  await fetchDistricts();
+  renderAdminPanel();
+}
+async function adminDeleteDistrict(did) {
+  const d = districtsCache.find(x => x.id === did);
+  const n = schoolsCache.filter(x => x.district_id === did).length;
+  if (!confirm(`Delete ${d?.name || 'this district'}?\n\nIts ${n} school${n === 1 ? '' : 's'} stay (just without a district), and its district admins lose their admin tools for them.`)) return;
+  const { error } = await supabaseClient.rpc('admin_delete_district', { target: did });
+  if (error) return showToast(adminRpcError(error), 'error', 5500);
+  showToast(`${d?.name || 'District'} deleted.`, 'success');
+  await refreshSchoolsCache();
+  await afterAdminChange();
+}
+async function adminSetSchoolDistrict(sid, did) {
+  const { error } = await supabaseClient.rpc('admin_set_school_district', { target: sid, district: did || null });
+  if (error) { showToast(adminRpcError(error), 'error', 5500); return renderAdminPanel(); }
+  const school = schoolsCache.find(x => x.id === sid);
+  const d = districtsCache.find(x => x.id === did);
+  showToast(d ? `${school?.name || 'School'} is now in ${d.name}.` : `${school?.name || 'School'} is no longer in a district.`, 'success');
+  await refreshSchoolsCache();
+  await afterAdminChange();
 }
 
 function memberName(userId) {
@@ -3733,7 +4062,7 @@ async function adminToggleAdmin(userId, make) {
   const { error } = await supabaseClient.rpc('admin_set_admin', { target_user: userId, make });
   if (error) return showToast(adminRpcError(error), 'error', 5500);
   showToast(make ? `${name} is now an admin.` : `${name} is no longer an admin.`, 'success');
-  fetchAdminMembers();
+  await afterAdminChange();
 }
 
 async function adminRemoveMember(userId) {
@@ -3755,20 +4084,22 @@ async function adminAllowBack(userId) {
   fetchAdminMembers();
 }
 
-// Realtime: someone was promoted/demoted (maybe me), or a removal changed.
+// Realtime: someone was promoted/demoted (maybe me), a district changed,
+// or a removal changed.
 function onAdminsChanged() {
   clearTimeout(onAdminsChanged.t);
   onAdminsChanged.t = setTimeout(async () => {
-    const was = isAdmin;
+    const was = isAnyAdmin();
     await fetchAdminStatus();
+    refreshModerationUi();
     // (Being made an admin also arrives as a notification, which shows its own toast.)
-    if (!isAdmin && was) showToast('Your admin role was removed.', 'info', 6000);
+    if (!isAnyAdmin() && was) showToast('Your admin role was removed.', 'info', 6000);
   }, 300);
 }
 
 // Realtime: an admin sees new requests; a student gets let in when approved.
 async function onJoinRequestChanged(payload) {
-  if (isAdmin) fetchAdminJoinData();
+  if (isAnyAdmin()) fetchAdminJoinData();
   const row = payload?.new;
   if (!row || row.user_id !== currentUserId) return;
   myJoinRequests[row.school_id] = row.status;
@@ -3815,7 +4146,7 @@ async function adminDeleteSchool(id) {
 }
 
 async function adminDeleteTeacher() {
-  if (!isAdmin || !currentTeacher) return;
+  if (!currentTeacher || !canManageSchool(currentTeacher.school_id)) return;
   const n = teacherPosts.length;
   if (!confirm(`Delete ${currentTeacher.name}'s page and all ${n} post${n === 1 ? '' : 's'} on it? This can't be undone.`)) return;
   const { data, error } = await supabaseClient.from('teachers').delete().eq('id', currentTeacher.id).select('id');
@@ -4602,7 +4933,7 @@ function onTeacherSearchInput(value) {
 // ---------- Add teacher ----------
 
 function canEditTeacher() {
-  return !!(currentUserId && currentTeacher && (isAdmin || currentTeacher.created_by === currentUserId));
+  return !!(currentUserId && currentTeacher && (canManageSchool(currentTeacher.school_id) || currentTeacher.created_by === currentUserId));
 }
 
 function openAddTeacherModal(edit) {
@@ -4798,7 +5129,7 @@ function renderTeacherHero() {
     ${courses.length ? `<div class="teacher-courses"><i class="fa-solid fa-book"></i> ${courses.map(escapeHtml).join(' · ')}</div>` : ''}
     ${canPostOnTeacher() ? '' : `<div class="teacher-readonly"><i class="fa-solid fa-eye"></i> ${currentUserId
       ? `Only students at ${escapeHtml(schoolName(t.school_id))} can post here.` : 'Sign in to post.'}</div>`}
-    ${isAdmin ? `<button class="secondary-btn admin-inline-btn" onclick="adminDeleteTeacher()">
+    ${canManageSchool(t.school_id) ? `<button class="secondary-btn admin-inline-btn" onclick="adminDeleteTeacher()">
       <i class="fa-solid fa-shield-halved"></i> Delete teacher page</button>` : ''}
   `;
 }
@@ -5103,7 +5434,7 @@ function renderTeacherPosts() {
           <span class="tpost-actions-gap"></span>
           ${mine ? `
             <button class="text-btn" onclick="openTeacherPostModal('${escapeAttr(p.id)}')">Edit</button>` : ''}
-          ${mine || isAdmin ? `
+          ${mine || canManageSchool(currentTeacher?.school_id) ? `
             <button class="text-btn danger-text" onclick="deleteTeacherPost('${escapeAttr(p.id)}')">Delete</button>` : ''}
         </div>
         ${open ? tpCommentsHtml(p, comments) : ''}
@@ -5139,7 +5470,7 @@ function tpCommentsHtml(p, comments) {
           <div class="tpc-head">
             <strong>${nameLink(c.author_id, name, anon)}${me ? ' <em>(you)</em>' : ''}</strong>
             <small>${timeAgo(c.created_at)}</small>
-            ${me || isAdmin ? `<button class="tpc-del" onclick="deleteTeacherComment('${escapeAttr(c.id)}', '${pid}')" aria-label="Delete comment"><i class="fa-solid fa-xmark"></i></button>` : ''}
+            ${me || canManageSchool(currentTeacher?.school_id) ? `<button class="tpc-del" onclick="deleteTeacherComment('${escapeAttr(c.id)}', '${pid}')" aria-label="Delete comment"><i class="fa-solid fa-xmark"></i></button>` : ''}
           </div>
           <p class="tpc-text">${renderSafeMessage(c.body || '')}</p>
         </div>
