@@ -499,7 +499,7 @@ end $$;
 -- Anyone in the same school can see who's in a group (so member counts
 -- render); each user can only insert/delete their own row, and can't
 -- rejoin a group its host removed them from. (Hosts remove people with
--- group_remove_member() in 6n.)
+-- group_remove_member() in 6n; 6o adds invite-only groups to this rule.)
 create policy "group_members: same-school reads"
   on public.study_group_members for select
   using (
@@ -2206,6 +2206,114 @@ grant execute on function public.group_remove_member(uuid, uuid) to authenticate
 grant execute on function public.group_allow_back(uuid, uuid) to authenticated;
 
 -- ============================================================
+-- 6o. GROUP INVITES + PRIVATE GROUPS
+-- ============================================================
+-- Send a study group to someone privately: they get an invite that only
+-- they, whoever sent it and the group's host can see, and can join from it.
+-- A group can also be private: only its members, the people invited to it
+-- and the school's admins can find it, and only invited people can join.
+-- (Anyone in a public group can invite; for a private one, only the host.)
+alter table public.study_groups add column if not exists private boolean not null default false;
+
+create table if not exists public.study_group_invites (
+  group_id   uuid not null references public.study_groups(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,   -- who's invited
+  invited_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+alter table public.study_group_invites enable row level security;
+
+create or replace function public.is_group_invitee(gid uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.study_group_invites i where i.group_id = gid and i.user_id = auth.uid());
+$$;
+-- Can I join this group? (Private groups: only its host and people invited.)
+create or replace function public.group_join_allowed(gid uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.study_groups g where g.id = gid
+                 and (not g.private or g.creator_id = auth.uid() or public.is_group_invitee(gid)));
+$$;
+grant execute on function public.is_group_invitee(uuid) to authenticated;
+grant execute on function public.group_join_allowed(uuid) to authenticated;
+
+-- Private groups stay hidden from everyone else at the school.
+drop policy if exists "groups: same-school reads" on public.study_groups;
+create policy "groups: same-school reads"
+  on public.study_groups for select
+  using ((school_id is null or school_id = public.my_school_id())
+         and (not private or creator_id = auth.uid() or public.is_group_member(id)
+              or public.is_group_invitee(id) or public.can_manage_school(school_id)));
+
+-- Joining: yourself only, not after the host removed you, and only with an
+-- invite for a private group. (Replaces the rule from 6c.)
+drop policy if exists "group_members: user manages own membership" on public.study_group_members;
+create policy "group_members: user manages own membership"
+  on public.study_group_members for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id
+              and not exists (select 1 from public.study_group_bans b
+                              where b.group_id = study_group_members.group_id and b.user_id = auth.uid())
+              and public.group_join_allowed(group_id));
+
+drop policy if exists "group invites: invitee, sender and host read" on public.study_group_invites;
+create policy "group invites: invitee, sender and host read" on public.study_group_invites
+  for select using (user_id = auth.uid() or invited_by = auth.uid()
+                    or exists (select 1 from public.study_groups g where g.id = group_id and g.creator_id = auth.uid()));
+drop policy if exists "group invites: decline or cancel" on public.study_group_invites;
+create policy "group invites: decline or cancel" on public.study_group_invites
+  for delete using (user_id = auth.uid() or invited_by = auth.uid()
+                    or exists (select 1 from public.study_groups g where g.id = group_id and g.creator_id = auth.uid()));
+
+create or replace function public.group_invite(target_group uuid, target_user uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare g public.study_groups%rowtype; hosting boolean;
+begin
+  if auth.uid() is null then raise exception 'Sign in first'; end if;
+  select * into g from public.study_groups where id = target_group;
+  if not found then raise exception 'That group no longer exists'; end if;
+  hosting := g.creator_id = auth.uid() or public.can_manage_school(g.school_id);
+  if g.private and not hosting then
+    raise exception 'Only the host can invite people to a private group';
+  elsif not hosting and not public.is_group_member(target_group) then
+    raise exception 'Join the group first, then you can invite people';
+  end if;
+  if target_user = auth.uid() then raise exception 'You can''t invite yourself'; end if;
+  if not exists (select 1 from public.profiles p where p.user_id = target_user and p.school_id = g.school_id) then
+    raise exception 'They need to be at the same school as the group';
+  end if;
+  if exists (select 1 from public.study_group_members m where m.group_id = target_group and m.user_id = target_user) then
+    raise exception 'They''re already in this group';
+  end if;
+  if public.is_blocked_between(auth.uid(), target_user) then raise exception 'You can''t invite this person'; end if;
+  if exists (select 1 from public.study_group_bans b where b.group_id = target_group and b.user_id = target_user) then
+    if not hosting then raise exception 'The host removed them from this group'; end if;
+    -- The host inviting them again lets them back in.
+    delete from public.study_group_bans where group_id = target_group and user_id = target_user;
+  end if;
+  insert into public.study_group_invites (group_id, user_id, invited_by)
+  values (target_group, target_user, auth.uid())
+  on conflict (group_id, user_id) do update set invited_by = excluded.invited_by, created_at = now();
+  perform public.push_notification(target_user, auth.uid(),
+    coalesce(public.notif_name(auth.uid()), 'Someone'), 'group_invite', target_group::text, g.name);
+end $$;
+revoke all on function public.group_invite(uuid, uuid) from public, anon;
+grant execute on function public.group_invite(uuid, uuid) to authenticated;
+
+-- Joining uses up the invite (and its notification).
+create or replace function public.clear_group_invite()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.study_group_invites where group_id = new.group_id and user_id = new.user_id;
+  update public.notifications set read_at = now()
+   where user_id = new.user_id and kind = 'group_invite' and ref_id = new.group_id::text and read_at is null;
+  return null;
+end $$;
+drop trigger if exists clear_group_invite on public.study_group_members;
+create trigger clear_group_invite after insert on public.study_group_members
+  for each row execute function public.clear_group_invite();
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -2221,7 +2329,8 @@ begin
                            'campus_events','event_rsvps','school_join_requests','schools',
                            'feed_reactions','feed_comments','notifications','admins','school_bans',
                            'group_messages','teacher_post_comments',
-                           'districts','district_admins','school_admins','study_group_bans'] loop
+                           'districts','district_admins','school_admins','study_group_bans',
+                           'study_group_invites'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'

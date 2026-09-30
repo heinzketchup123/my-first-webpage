@@ -4432,3 +4432,48 @@ body.light-mode .admin-level-2 { color: #7c3aed; }
   font-size: 0.8rem;
   font-weight: 700;
 }
+
+/* ---------- Group invites + private groups ---------- */
+.group-badge.private { color: var(--anon); background: var(--anon-soft); }
+.group-badge.invited { color: var(--accent-color); background: var(--accent-muted); }
+.group-course .group-badge { margin-left: 6px; vertical-align: middle; }
+.group-chips .chip[hidden], #group-chips .chip[hidden] { display: none; }
+.group-invite-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--accent-soft-border);
+  background: var(--accent-muted);
+  font-size: 0.82rem;
+  color: var(--main-text-color);
+}
+.group-invite-banner > i { color: var(--accent-color); }
+.group-invite-banner span { flex: 1; min-width: 0; }
+.group-invite-banner .friend-btn-sm { flex-shrink: 0; }
+.group-member.invited .friend-btn-sm { margin-left: auto; flex-shrink: 0; }
+.invite-hint { margin: 0 0 10px; }
+.invite-by-handle { display: flex; gap: 8px; margin-bottom: 12px; }
+.invite-by-handle .auth-input { flex: 1; min-width: 0; margin: 0; }
+.invite-by-handle .primary-btn { flex-shrink: 0; margin: 0; width: auto; }
+.invite-state { margin-left: auto; flex-shrink: 0; font-size: 0.74rem; font-weight: 700; color: var(--sub-text-color); }
+.invite-state.sent { color: var(--success); }
+.group-private-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--card-border);
+  background: var(--input-bg);
+  cursor: pointer;
+  text-align: left;
+}
+.group-private-row input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent-color); flex-shrink: 0; }
+.group-private-row span { display: flex; flex-direction: column; gap: 2px; }
+.group-private-row strong { font-size: 0.86rem; color: var(--main-text-color); }
+.group-private-row strong i { color: var(--anon); font-size: 0.78rem; margin-right: 2px; }
+.group-private-row small { font-size: 0.74rem; color: var(--sub-text-color); line-height: 1.35; }

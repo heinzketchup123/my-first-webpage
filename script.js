@@ -354,6 +354,7 @@ function initSupabaseRealtime() {
   listen('study_groups', () => fetchGroups());
   listen('study_group_members', () => fetchGroups());
   listen('study_group_bans', () => fetchGroups());
+  listen('study_group_invites', () => fetchGroups());
   listen('teachers', () => onTeacherDataChanged());
   listen('teacher_posts', () => onTeacherDataChanged());
   listen('teacher_post_votes', () => onTeacherDataChanged());
@@ -409,12 +410,14 @@ async function fetchFeed() {
 }
 
 async function fetchGroups() {
-  const [{ data, error }, memRes, banRes] = await Promise.all([
+  const [{ data, error }, memRes, banRes, invRes] = await Promise.all([
     // Sorted client-side: older projects' study_groups table has no created_at.
     supabaseClient.from('study_groups').select('*'),
     supabaseClient.from('study_group_members').select('group_id, user_id'),
     // Only yours, and the ones in groups you host (none until SCHEMA.sql 6n is run).
-    supabaseClient.from('study_group_bans').select('group_id, user_id, created_at')
+    supabaseClient.from('study_group_bans').select('group_id, user_id, created_at'),
+    // Invites to you, ones you sent, and ones in groups you host (6o).
+    supabaseClient.from('study_group_invites').select('group_id, user_id, invited_by, created_at')
   ]);
   if (error) { showToast('Groups load failed: ' + error.message, 'error'); return; }
   if (memRes?.error) console.warn('group members load failed:', memRes.error.message);
@@ -427,6 +430,9 @@ async function fetchGroups() {
   const bans = {};
   (banRes?.error ? [] : banRes?.data || []).forEach(b => { (bans[b.group_id] = bans[b.group_id] || []).push(b); });
   groupBans = bans;
+  const invites = {};
+  (invRes?.error ? [] : invRes?.data || []).forEach(i => { (invites[i.group_id] = invites[i.group_id] || []).push(i); });
+  groupInvites = invites;
 
   studyGroups = (data || []).map(g => {
     const ids = members[g.id] || [];
@@ -434,6 +440,7 @@ async function fetchGroups() {
   }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   renderGroups();
   refreshOpenGroup();
+  refreshGroupInvitePicker();
   if (selectedGroupChatId) {
     const g = findGroup(selectedGroupChatId);
     if (!g || (!g.joined && !isAdmin)) { selectedGroupChatId = null; dmMessages = []; }
@@ -443,7 +450,8 @@ async function fetchGroups() {
 
   // Names for the faces and member lists (profiles are readable by everyone).
   const ids = [...new Set(Object.values(members).flat().concat(studyGroups.map(g => g.creator_id),
-    Object.values(bans).flat().map(b => b.user_id)))].filter(Boolean);
+    Object.values(bans).flat().map(b => b.user_id),
+    Object.values(invites).flat().flatMap(i => [i.user_id, i.invited_by])))].filter(Boolean);
   const before = Object.keys(profileMap).length;
   await fetchProfilesByIds(ids);
   if (Object.keys(profileMap).length !== before) { renderGroups(); refreshOpenGroup(); }
@@ -468,6 +476,8 @@ function openCreateGroupModal(editId) {
     set('group-max', g.max || 6); set('group-topics', (g.topics || []).join(', '));
     closeModalForce();
   }
+  const priv = document.getElementById('group-private');
+  if (priv) priv.checked = !!g?.private;
   document.getElementById('group-max').min = g ? Math.max(2, g.members) : 2;
   document.getElementById('group-modal-title').textContent = g ? 'Edit Study Group' : 'Create Study Group';
   document.getElementById('group-submit-btn').textContent = g ? 'Save Changes' : 'Create Group';
@@ -492,6 +502,13 @@ async function createGroup(event) {
   const topics   = document.getElementById('group-topics').value.split(',').map(s => s.trim())
     .filter(t => t && !seenTopics.has(t.toLowerCase()) && seenTopics.add(t.toLowerCase())).slice(0, 12);
   if (!name || !course) return showToast('Give the group a name and a course.', 'warn');
+  // Private: only sent when it's on or the group already has the setting,
+  // so groups still save before the database update adds it.
+  const isPrivate = !!document.getElementById('group-private')?.checked;
+  const editing = editingGroupId ? findGroup(editingGroupId) : null;
+  const privacy = isPrivate || (editing && 'private' in editing) ? { private: isPrivate } : {};
+  const privacyError = e => /private/.test(e?.message || '')
+    ? 'Private groups need a quick database update: run the updated SCHEMA.sql in Supabase.' : null;
 
   const btn = document.getElementById('group-submit-btn');
   if (btn) btn.disabled = true;
@@ -502,9 +519,9 @@ async function createGroup(event) {
         return showToast(`${g.members} people are already in this group, so the limit can't be lower than that.`, 'warn', 4500);
       }
       const { data, error } = await supabaseClient.from('study_groups')
-        .update({ name, course, schedule, location, max, topics })
+        .update({ name, course, schedule, location, max, topics, ...privacy })
         .eq('id', editingGroupId).select('id');
-      if (error || !data?.length) return showToast('Could not save: ' + (error?.message || 'only the host can edit this group'), 'error');
+      if (error || !data?.length) return showToast(privacyError(error) || 'Could not save: ' + (error?.message || 'only the host can edit this group'), 'error', 5000);
       const id = editingGroupId;
       showToast('Group updated.', 'success');
       closeCreateGroupModal();
@@ -521,15 +538,16 @@ async function createGroup(event) {
         topics, roster: [host],
         host,
         creator_id: currentUserId,
-        school_id: currentSchoolId
+        school_id: currentSchoolId,
+        ...privacy
       }])
       .select().single();
-    if (error) return showToast('Could not create group: ' + error.message, 'error');
+    if (error) return showToast(privacyError(error) || 'Could not create group: ' + error.message, 'error', 5000);
 
     // Auto-join the creator as the first member.
     await supabaseClient.from('study_group_members').insert([{ group_id: data.id, user_id: currentUserId }]);
 
-    showToast('Group created — you\'re in!', 'success');
+    showToast(isPrivate ? "Private group created. Tap Invite in its details to add people." : 'Group created — you\'re in!', 'success', 4000);
     closeCreateGroupModal();
     event.target.reset();
     fetchGroups();
@@ -1160,6 +1178,7 @@ function describeNotif(n) {
       sub: 'Admin tools are in Settings → Admin' };
     case 'removed_from_school': return { icon: 'fa-user-slash', html: `An admin removed you from <strong>${escapeHtml(n.body || 'your school')}</strong>`, sub: 'Tap to pick a school' };
     case 'removed_from_group': return { icon: 'fa-user-slash', html: `You were removed from the study group <strong>${escapeHtml(n.body || '')}</strong>` };
+    case 'group_invite':   return { icon: 'fa-envelope-open-text', html: `${who} invited you to the study group <strong>${escapeHtml(n.body || '')}</strong>`, sub: 'Tap to see it and join' };
     default:              return { icon: 'fa-bell',           html: escapeHtml(n.body || 'New activity') };
   }
 }
@@ -1205,6 +1224,13 @@ async function openNotification(id) {
     case 'promoted':    showAdminCard(); break;
     case 'removed_from_school': openSchoolPicker(!currentSchoolId); break;
     case 'removed_from_group': switchTab('groups-view'); break;
+    case 'group_invite':
+      switchTab('groups-view');
+      (findGroup(n.ref_id) ? Promise.resolve() : fetchGroups()).then(() => {
+        if (findGroup(n.ref_id)) openGroupDetailModal(n.ref_id);
+        else showToast('That invite is no longer available.', 'info');
+      });
+      break;
   }
 }
 
@@ -3008,6 +3034,7 @@ async function submitPost(event) {
 let groupFilter = 'all';       // 'all' | 'open' | 'mine', kept across live refreshes
 let groupMembers = {};         // group id -> [user ids]
 let groupBans = {};            // group id -> [{ user_id, created_at }] people its host removed
+let groupInvites = {};         // group id -> [{ user_id, invited_by, created_at }] (mine, ones I sent, ones in groups I host)
 const groupBusy = new Set();   // groups with a join / leave on the way
 let openGroupId = null;        // group whose details are showing
 
@@ -3017,6 +3044,10 @@ function canKickFromGroup(g) {
   return !!currentUserId && ((!!g.creator_id && g.creator_id === currentUserId) || canManageSchool(g.school_id || currentSchoolId));
 }
 function removedFromGroup(g) { return (groupBans[g.id] || []).some(b => b.user_id === currentUserId); }
+// Invites: send a group to someone privately. Private groups are invite-only.
+function myGroupInvite(g) { return (groupInvites[g.id] || []).find(i => i.user_id === currentUserId) || null; }
+function hostsGroup(g) { return !!currentUserId && ((!!g.creator_id && g.creator_id === currentUserId) || canManageSchool(g.school_id || currentSchoolId)); }
+function canInviteToGroup(g) { return !!currentUserId && (g.private ? hostsGroup(g) : (g.joined || hostsGroup(g))); }
 function groupIsFull(g) { return g.members >= (g.max || 0); }
 function memberLabel(uid) {
   if (uid === currentUserId) return 'You';
@@ -3035,12 +3066,16 @@ function renderGroups(filter) {
   const container = document.getElementById('groups-list');
   if (!container) return;
 
+  const invitedTo = g => !g.joined && !!myGroupInvite(g);
   const counts = {
     all: studyGroups.length,
     open: studyGroups.filter(g => !groupIsFull(g)).length,
-    mine: studyGroups.filter(g => g.joined).length
+    mine: studyGroups.filter(g => g.joined).length,
+    invited: studyGroups.filter(invitedTo).length
   };
+  if (groupFilter === 'invited' && !counts.invited) groupFilter = 'all';
   document.querySelectorAll('#group-chips .chip').forEach(c => {
+    if (c.dataset.filter === 'invited') c.hidden = !counts.invited;
     c.classList.toggle('active', c.dataset.filter === groupFilter);
     const n = c.querySelector('.chip-count');
     if (n) n.textContent = counts[c.dataset.filter] ? String(counts[c.dataset.filter]) : '';
@@ -3050,7 +3085,9 @@ function renderGroups(filter) {
   const matches = g => !q || [g.name, g.course, g.location, g.schedule, g.host, ...(g.topics || [])]
     .some(v => String(v || '').toLowerCase().includes(q));
   const list = studyGroups.filter(g =>
-    (groupFilter === 'open' ? !groupIsFull(g) : groupFilter === 'mine' ? g.joined : true) && matches(g));
+    (groupFilter === 'open' ? !groupIsFull(g) : groupFilter === 'mine' ? g.joined
+      : groupFilter === 'invited' ? invitedTo(g) : true) && matches(g))
+    .sort((a, b) => invitedTo(b) - invitedTo(a));   // invites first
 
   if (!list.length) {
     const msg = q ? `No groups match "${q}".`
@@ -3072,6 +3109,9 @@ function groupJoinButton(g) {
   const busy = groupBusy.has(String(g.id)) ? ' disabled' : '';
   if (g.joined) return `<button class="secondary-btn group-join-btn"${busy} onclick="toggleGroupJoin('${gid}')">Leave</button>`;
   if (removedFromGroup(g)) return `<button class="secondary-btn group-join-btn" disabled title="The host removed you from this group">Removed</button>`;
+  if (g.private && !myGroupInvite(g) && !(g.creator_id && g.creator_id === currentUserId)) {
+    return `<button class="secondary-btn group-join-btn" disabled title="Only people the host invites can join">Invite only</button>`;
+  }
   if (groupIsFull(g)) return `<button class="secondary-btn group-join-btn" disabled>Full</button>`;
   return `<button class="primary-btn group-join-btn"${busy} onclick="toggleGroupJoin('${gid}')">Join</button>`;
 }
@@ -3093,6 +3133,8 @@ function groupCardHtml(g) {
     + (topics.length > 3 ? `<span class="group-topic more">+${topics.length - 3}</span>` : '');
   const pct = max ? Math.min(100, Math.round(g.members / max * 100)) : 0;
   const badges = (host ? '<span class="group-badge host">Host</span>' : '')
+    + (g.private ? '<span class="group-badge private"><i class="fa-solid fa-lock"></i> Private</span>' : '')
+    + (!g.joined && myGroupInvite(g) ? '<span class="group-badge invited"><i class="fa-solid fa-envelope"></i> Invited</span>' : '')
     + (g.joined && !host ? '<span class="group-badge joined"><i class="fa-solid fa-check"></i> Joined</span>' : '')
     + (full ? '<span class="group-badge full">Full</span>' : '');
   return `
@@ -3143,6 +3185,24 @@ function groupDetailHtml(g) {
                          aria-label="Remove ${escapeAttr(n)} from the group">Remove</button>` : ''}
       </div>`;
   }).join('') || '<p class="friends-empty-inner">No one has joined yet. Be the first!</p>';
+  // Invites still waiting (the host sees all of them; others see the ones they sent).
+  const pending = (groupInvites[g.id] || []).filter(i => i.user_id !== currentUserId
+    && (hostsGroup(g) || i.invited_by === currentUserId)).map(i => {
+    const n = memberLabel(i.user_id);
+    return `
+      <div class="group-member invited">
+        <span class="friend-avatar sm">${escapeHtml(n[0].toUpperCase())}</span>
+        <span class="group-member-name"><strong>${escapeHtml(n)}</strong><small>Invited ${escapeHtml(timeAgo(i.created_at))}${i.invited_by && i.invited_by !== currentUserId ? ' by ' + escapeHtml(memberLabel(i.invited_by)) : ''}</small></span>
+        <button class="secondary-btn friend-btn-sm" onclick="cancelGroupInvite('${gid}', '${escapeAttr(i.user_id)}')">Cancel</button>
+      </div>`;
+  }).join('');
+  const invite = myGroupInvite(g);
+  const inviteBanner = invite && !g.joined ? `
+    <div class="group-invite-banner">
+      <i class="fa-solid fa-envelope-open-text"></i>
+      <span><strong>${escapeHtml(invite.invited_by ? memberLabel(invite.invited_by) : 'Someone')}</strong> invited you to this group${g.private ? ' (it\'s private)' : ''}.</span>
+      <button class="secondary-btn friend-btn-sm" onclick="declineGroupInvite('${gid}')">Decline</button>
+    </div>` : '';
   // Hosts see who they removed, and can let them back in.
   const removed = kick ? (groupBans[g.id] || []).map(b => {
     const n = memberLabel(b.user_id);
@@ -3158,7 +3218,8 @@ function groupDetailHtml(g) {
   const max = g.max || 0;
   return `
     <div class="group-detail">
-      <div class="group-course">${escapeHtml(g.course || 'Study group')}</div>
+      ${inviteBanner}
+      <div class="group-course">${escapeHtml(g.course || 'Study group')}${g.private ? ' <span class="group-badge private"><i class="fa-solid fa-lock"></i> Private</span>' : ''}</div>
       <div class="group-detail-rows">
         <div><i class="fa-solid fa-location-dot"></i><span>${escapeHtml(g.location || 'Place TBD')}</span></div>
         <div><i class="fa-regular fa-clock"></i><span>${escapeHtml(g.schedule || 'Time TBD')}</span></div>
@@ -3168,11 +3229,13 @@ function groupDetailHtml(g) {
       <div class="group-topics">${topics}</div>
       <div class="group-detail-label">Members · ${g.members}/${max}${groupIsFull(g) ? ' · full' : ''}</div>
       <div class="group-member-list">${people}</div>
+      ${pending ? `<div class="group-detail-label">Invited</div><div class="group-member-list">${pending}</div>` : ''}
       ${removed ? `<div class="group-detail-label">Removed</div><div class="group-member-list">${removed}</div>` : ''}
       ${removedFromGroup(g) ? '<p class="group-removed-note"><i class="fa-solid fa-user-slash"></i> The host removed you from this group.</p>' : ''}
       <div class="group-actions">
         ${g.joined ? `<button class="primary-btn" onclick="openGroupChatFromGroups('${gid}')"><i class="fa-solid fa-comments"></i> Group chat</button>` : ''}
         ${groupJoinButton(g)}
+        ${canInviteToGroup(g) ? `<button class="secondary-btn" onclick="openGroupInvitePicker('${gid}')"><i class="fa-solid fa-user-plus"></i> Invite</button>` : ''}
         ${host ? `<button class="secondary-btn" onclick="openCreateGroupModal('${gid}')"><i class="fa-solid fa-pen"></i> Edit</button>` : ''}
         ${canDelete ? `<button class="secondary-btn group-icon-btn danger-text" onclick="deleteGroup('${gid}')" aria-label="Delete group"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
@@ -3209,6 +3272,7 @@ async function toggleGroupJoin(id) {
   if (groupBusy.has(key)) return;             // a second tap while the first is on its way
   const leaving = g.joined;
   if (!leaving && removedFromGroup(g)) return showToast("The host removed you from this group, so you can't rejoin unless they let you back in.", 'warn', 5000);
+  if (!leaving && g.private && !myGroupInvite(g) && g.creator_id !== currentUserId) return showToast('This group is private: only people the host invites can join.', 'info', 4000);
   if (!leaving && groupIsFull(g)) return showToast('This group is full.', 'warn');
   if (leaving && g.creator_id === currentUserId
       && !confirm("You're the host. Leave anyway? The group stays up and you can still edit or delete it.")) return;
@@ -3236,8 +3300,90 @@ async function toggleGroupJoin(id) {
 
 function groupRpcError(error) {
   const msg = error?.message || 'Something went wrong';
-  return /group_(remove_member|allow_back)/.test(msg) && /(function|schema cache)/i.test(msg)
-    ? 'Removing members needs a quick database update: run the updated SCHEMA.sql in Supabase.' : msg;
+  return /group_(remove_member|allow_back|invite)/.test(msg) && /(function|schema cache)/i.test(msg)
+    ? 'This needs a quick database update: run the updated SCHEMA.sql in Supabase.' : msg;
+}
+
+// Pick who to send the group to: your friends at the school, or anyone by @username.
+let invitePickerGroupId = null;
+function groupInvitePickerHtml(g) {
+  const gid = escapeAttr(g.id);
+  const inGroup = new Set(groupMembers[g.id] || []);
+  const invited = new Set((groupInvites[g.id] || []).map(i => i.user_id));
+  const people = friends.filter(f => !isBlocked(f.friend_id)).map(f => {
+    const n = personName(f.friend_id, f.display_name || f.handle || 'Friend');
+    const state = inGroup.has(f.friend_id) ? '<span class="invite-state">In the group</span>'
+      : invited.has(f.friend_id) ? '<span class="invite-state sent"><i class="fa-solid fa-check"></i> Invited</span>'
+      : `<button class="primary-btn friend-btn-sm" onclick="sendGroupInvite('${gid}', '${escapeAttr(f.friend_id)}')">Invite</button>`;
+    return `
+      <div class="group-member">
+        <span class="friend-avatar sm">${escapeHtml(n[0].toUpperCase())}</span>
+        <span class="group-member-name"><strong>${escapeHtml(n)}</strong>${f.handle ? `<small>@${escapeHtml(f.handle)}</small>` : ''}</span>
+        ${state}
+      </div>`;
+  }).join('');
+  return `
+    <p class="admin-hint invite-hint">Only the person you invite sees it. They get a notification and can join from it${g.private ? ' (it\'s the only way into a private group)' : ''}.</p>
+    <form class="invite-by-handle" onsubmit="event.preventDefault(); inviteToGroupByHandle('${gid}');">
+      <input id="invite-handle" class="auth-input" autocomplete="off" placeholder="Invite by @username" aria-label="Their @username" />
+      <button type="submit" class="primary-btn friend-btn-sm">Invite</button>
+    </form>
+    <div class="group-detail-label">Your friends</div>
+    <div class="group-member-list">${people || '<p class="friends-empty-inner">No friends yet. Invite someone by their @username above.</p>'}</div>
+    <div class="group-actions"><button class="secondary-btn" onclick="openGroupDetailModal('${gid}')"><i class="fa-solid fa-arrow-left"></i> Back to the group</button></div>`;
+}
+function openGroupInvitePicker(groupId) {
+  const g = findGroup(groupId);
+  if (!g) return;
+  if (!canInviteToGroup(g)) return showToast(g.private ? 'Only the host can invite people to a private group.' : 'Join the group first, then you can invite people.', 'info');
+  openModal(`Invite to ${g.name || 'the group'}`, groupInvitePickerHtml(g));
+  invitePickerGroupId = String(g.id);
+  document.getElementById('detailModal').dataset.kind = 'group-invite';
+}
+function refreshGroupInvitePicker() {
+  const modal = document.getElementById('detailModal');
+  if (!invitePickerGroupId || modal?.style.display !== 'flex' || modal.dataset.kind !== 'group-invite') return;
+  const g = findGroup(invitePickerGroupId);
+  if (!g) return;
+  const typed = document.getElementById('invite-handle')?.value || '';
+  document.getElementById('modalBody').innerHTML = groupInvitePickerHtml(g);
+  const input = document.getElementById('invite-handle');
+  if (input) input.value = typed;
+}
+
+async function sendGroupInvite(groupId, userId) {
+  const g = findGroup(groupId);
+  if (!g) return;
+  const name = personName(userId, 'them');
+  const { error } = await supabaseClient.rpc('group_invite', { target_group: g.id, target_user: userId });
+  if (error) return showToast(groupRpcError(error), 'error', 5500);
+  showToast(`Invite sent to ${name}.`, 'success');
+  await fetchGroups();
+}
+async function inviteToGroupByHandle(groupId) {
+  const input = document.getElementById('invite-handle');
+  const typed = (input?.value || '').trim();
+  if (!typed) return;
+  const p = await findPersonByHandle(typed);
+  if (!p) return showToast(`No one has the username @${typed.replace(/^@/, '')}.`, 'warn');
+  if (input) input.value = '';
+  await sendGroupInvite(groupId, p.user_id);
+}
+async function declineGroupInvite(groupId) {
+  const g = findGroup(groupId);
+  const { error } = await supabaseClient.from('study_group_invites').delete()
+    .eq('group_id', groupId).eq('user_id', currentUserId);
+  if (error) return showToast('Could not decline: ' + error.message, 'error');
+  showToast('Invite declined.', 'info');
+  if (g?.private) closeModalForce();   // you can't see a private group without the invite
+  await fetchGroups();
+}
+async function cancelGroupInvite(groupId, userId) {
+  const { error } = await supabaseClient.from('study_group_invites').delete()
+    .eq('group_id', groupId).eq('user_id', userId);
+  if (error) return showToast('Could not cancel: ' + error.message, 'error');
+  showToast(`Invite to ${memberLabel(userId)} cancelled.`, 'info');
+  await fetchGroups();
 }
 
 async function removeFromGroup(groupId, userId) {

@@ -328,6 +328,7 @@
           <button class="chip active" data-filter="all" onclick="filterGroups('all')">All Groups <span class="chip-count"></span></button>
           <button class="chip" data-filter="open" onclick="filterGroups('open')">Open Seats <span class="chip-count"></span></button>
           <button class="chip" data-filter="mine" onclick="filterGroups('mine')">My Groups <span class="chip-count"></span></button>
+          <button class="chip" data-filter="invited" onclick="filterGroups('invited')" hidden><i class="fa-solid fa-envelope"></i> Invites <span class="chip-count"></span></button>
         </div>
 
         <div id="groups-list" class="stack-list">
@@ -965,6 +966,13 @@
           <input type="number" id="group-max" class="auth-input modal-input" placeholder="6" min="2" max="30" value="6" />
         </label>
         <input type="text" id="group-topics" class="auth-input modal-input" placeholder="Topics (comma-separated)" maxlength="200" />
+        <label class="group-private-row">
+          <input type="checkbox" id="group-private" />
+          <span>
+            <strong><i class="fa-solid fa-lock"></i> Private group</strong>
+            <small>Hidden from everyone else. Only people you invite can find and join it.</small>
+          </span>
+        </label>
         <div class="modal-actions">
           <button type="button" class="secondary-btn" onclick="closeCreateGroupModal()">Cancel</button>
           <button type="submit" class="primary-btn" id="group-submit-btn">Create Group</button>
