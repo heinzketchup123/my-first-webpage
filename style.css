@@ -4686,3 +4686,201 @@ html.layout-desktop .auth-form h2 { margin-top: 0; }
 }
 /* Counts inside a selected chip stay readable (light mode drew them white on white) */
 .chip.active .chip-count:not(:empty) { background: rgba(0, 0, 0, 0.2); color: inherit; }
+
+/* =====================================================================
+   TEACHER PAGE: a proper profile
+   Header with a cover in the teacher's colour, a rating ring and meters,
+   then overview cards, and similar teachers. Computers: two columns.
+   ===================================================================== */
+.teacher-side, .teacher-main { display: contents; }          /* phones: one column */
+.teacher-side > *, .teacher-main > * { flex-shrink: 0; }
+#teacher-related { order: 2; }                                /* phones: after the posts */
+
+.teacher-hero { position: relative; overflow: hidden; padding: 0 16px 16px; --av-h: 200; }
+.th-cover {
+  position: relative;
+  height: 88px;
+  margin: 0 -16px;
+  background:
+    radial-gradient(120% 160% at 0% 0%, hsl(var(--av-h) 75% 50% / 0.55), transparent 62%),
+    linear-gradient(135deg, hsl(var(--av-h) 55% 32% / 0.7), var(--accent-muted));
+}
+body.light-mode .th-cover {
+  background:
+    radial-gradient(120% 160% at 0% 0%, hsl(var(--av-h) 85% 70% / 0.7), transparent 62%),
+    linear-gradient(135deg, hsl(var(--av-h) 75% 85%), var(--accent-muted));
+}
+.th-cover::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  width: 200px;
+  height: 34px;
+  background: #fff;
+  opacity: 0.35;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 40'%3E%3Cpath d='M0 24h70l8-3 7-16 10 32 8-26 6 13h36l5-6 5 6h85' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right center / contain;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 40'%3E%3Cpath d='M0 24h70l8-3 7-16 10 32 8-26 6 13h36l5-6 5 6h85' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right center / contain;
+  animation: pulse-draw 1.4s cubic-bezier(0.3, 0.7, 0.2, 1) 0.15s both;
+}
+body.light-mode .th-cover::after { background: hsl(var(--av-h) 60% 30%); opacity: 0.3; }
+.th-head { position: relative; display: flex; align-items: flex-end; justify-content: space-between; margin: -36px 0 10px; }
+.teacher-hero .th-avatar {
+  width: 76px;
+  height: 76px;
+  font-size: 1.7rem;
+  border: 4px solid var(--card-bg-solid) !important;
+}
+.th-actions { display: flex; gap: 8px; padding-bottom: 2px; }
+.th-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg-solid);
+  color: var(--main-text-color);
+  font-size: 0.86rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.th-icon-btn:hover { border-color: var(--accent-soft-border); color: var(--accent-color); }
+.teacher-hero .teacher-hero-text h1 { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.03em; }
+.teacher-hero .teacher-hero-text p { font-size: 0.84rem; }
+.th-known { margin-top: 8px !important; font-size: 0.8rem !important; line-height: 1.45; }
+.th-known i { color: var(--accent-color); margin-right: 2px; }
+.th-known b { color: var(--main-text-color); font-weight: 700; }
+
+.th-score {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  margin: 14px 0;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--card-border);
+  background: var(--input-bg);
+}
+.th-ring { position: relative; width: 100px; height: 100px; }
+.th-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.th-ring-track { fill: none; stroke: var(--card-border); stroke-width: 7; }
+.th-ring-fill { fill: none; stroke: var(--accent-color); stroke-width: 7; stroke-linecap: round; animation: ring-in 1s cubic-bezier(0.3, 0.7, 0.2, 1) both; }
+.th-ring.r-good .th-ring-fill { stroke: var(--success); }
+.th-ring.r-ok .th-ring-fill { stroke: var(--warning); }
+.th-ring.r-bad .th-ring-fill { stroke: var(--danger); }
+@keyframes ring-in { from { stroke-dasharray: 0 214; } }
+.th-ring-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.th-ring-text strong { font-family: var(--font-display); font-size: 1.9rem; font-weight: 800; line-height: 1; color: var(--main-text-color); }
+.th-ring-text small { margin-top: 3px; font-size: 0.64rem; font-weight: 700; color: var(--sub-text-color); }
+.th-meters { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.th-meter { display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: 5px; align-items: baseline; }
+.th-meter span { font-size: 0.72rem; font-weight: 700; color: var(--sub-text-color); }
+.th-meter b { font-family: var(--font-display); font-size: 1rem; color: var(--main-text-color); }
+.th-meter > div { grid-column: 1 / -1; }
+.th-dots { display: flex; gap: 4px; }
+.th-dots i { flex: 1; height: 6px; border-radius: 3px; background: var(--card-border); }
+.th-dots i.on { background: var(--accent-color); }
+.th-bar { height: 6px; border-radius: 3px; background: var(--card-border); overflow: hidden; }
+.th-bar i { display: block; height: 100%; border-radius: 3px; background: var(--success); }
+.th-cta { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin: 0; }
+
+/* Overview cards */
+.teacher-overview { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.teacher-overview:empty { display: none; }
+.to-card { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.to-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.to-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--font-display); font-size: 1rem; font-weight: 800; color: var(--main-text-color); }
+.to-head h3 i { color: var(--accent-color); font-size: 0.84rem; }
+.to-head small { font-size: 0.74rem; font-weight: 700; color: var(--sub-text-color); }
+.to-card .rating-dist, .to-card .teacher-top-tags { margin: 0; }
+.to-quote blockquote {
+  margin: 0;
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--accent-soft-border);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--main-text-color);
+}
+.to-quote-foot { display: flex; justify-content: space-between; gap: 10px; font-size: 0.76rem; font-weight: 700; color: var(--sub-text-color); }
+.to-quote-foot i { color: var(--accent-color); }
+.to-more { align-self: flex-start; font-size: 0.8rem; }
+.to-courses { display: flex; flex-direction: column; gap: 6px; }
+.to-course {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--card-border);
+  background: var(--input-bg);
+  color: var(--main-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.to-course:hover { border-color: var(--accent-soft-border); }
+.to-course.active { border-color: var(--accent-soft-border); background: var(--accent-muted); }
+.to-course .rating-badge { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+.to-course-name { font-size: 0.86rem; font-weight: 700; }
+.to-course-meta { font-size: 0.72rem; color: var(--sub-text-color); }
+.to-empty { flex-direction: row; align-items: center; gap: 12px; }
+.to-empty > i { font-size: 1.3rem; color: var(--star, var(--warning)); }
+.to-empty strong { display: block; font-size: 0.9rem; }
+.to-empty small { font-size: 0.78rem; color: var(--sub-text-color); }
+.th-admin-delete { align-self: flex-start; font-size: 0.78rem; color: var(--warning) !important; }
+
+/* Similar teachers */
+.teacher-related { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+.teacher-related:empty { display: none; }
+.related-list { display: flex; flex-direction: column; gap: 8px; }
+.related-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--main-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.related-card:hover { border-color: var(--accent-soft-border); }
+.related-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.related-text strong { font-family: var(--font-display); font-size: 0.95rem; }
+.related-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.74rem; color: var(--sub-text-color); }
+
+/* Posts: anonymous gets the incognito face; reviews get a colour edge by rating */
+.friend-avatar.anon-avatar { background: var(--anon-soft) !important; color: var(--anon) !important; }
+.tpost-review.tpost-r-good { box-shadow: inset 3px 0 0 var(--success), var(--shadow-card); }
+.tpost-review.tpost-r-ok   { box-shadow: inset 3px 0 0 var(--warning), var(--shadow-card); }
+.tpost-review.tpost-r-bad  { box-shadow: inset 3px 0 0 var(--danger), var(--shadow-card); }
+.tpost .tpost-body { font-size: 0.9rem; line-height: 1.5; }
+
+/* Computer: the teacher on the left, reviews on the right */
+html.layout-desktop .content-container > #teacher-view { max-width: 1120px; }
+html.layout-desktop #teacher-view.active-view {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  grid-template-areas: "back back" "side main";
+  column-gap: 28px;
+  align-items: start;
+  height: auto;
+}
+html.layout-desktop #teacher-view > .teacher-back-btn { grid-area: back; }
+html.layout-desktop .teacher-side { grid-area: side; display: flex; flex-direction: column; min-width: 0; }
+html.layout-desktop .teacher-main { grid-area: main; display: flex; flex-direction: column; min-width: 0; }
+html.layout-desktop .teacher-related { margin-top: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .th-cover::after, .th-ring-fill { animation: none; }
+}

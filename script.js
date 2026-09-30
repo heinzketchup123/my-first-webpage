@@ -998,9 +998,49 @@ function savePlace() {
   try { localStorage.setItem(PLACE_KEY, JSON.stringify(place)); } catch (_) {}
 }
 
+// -------------------- Share links --------------------
+// A link ending in #teacher/<id> or #group/<id> opens that teacher page or
+// study group (after signing in, if needed). The link is tidied away once used.
+function linkPlace() {
+  const m = /^#(teacher|group)\/([0-9a-z-]{8,64})$/i.exec(location.hash || '');
+  if (!m) return null;
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+  return m[1].toLowerCase() === 'teacher' ? { view: 'teacher-view', teacher: m[2] } : { view: 'groups-view', group: m[2] };
+}
+function shareUrl(kind, id) { return `${location.origin}${location.pathname}#${kind}/${id}`; }
+async function shareLink(url, title) {
+  try {
+    // Phones: the share sheet (Messages, Snapchat, ...). Computers: copy.
+    if (navigator.share && matchMedia('(pointer: coarse)').matches) { await navigator.share({ title, url }); return; }
+  } catch (e) { if (e?.name === 'AbortError') return; }
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('Link copied. Paste it anywhere to share.', 'success');
+  } catch (_) {
+    prompt('Copy this link:', url);
+  }
+}
+function shareTeacher() {
+  if (currentTeacher) shareLink(shareUrl('teacher', currentTeacher.id), `${currentTeacher.name} on Campus Pulse`);
+}
+function shareGroup(groupId) {
+  const g = findGroup(groupId);
+  if (g) shareLink(shareUrl('group', g.id), `${g.name || 'Study group'} on Campus Pulse`);
+}
+window.addEventListener('hashchange', () => {
+  const place = linkPlace();
+  if (!place || !currentUserId) return;
+  if (place.teacher) openTeacherPage(place.teacher);
+  else {
+    switchTab('groups-view');
+    if (findGroup(place.group)) openGroupDetailModal(place.group);
+    else showToast("That group isn't available to you.", 'info');
+  }
+});
+
 // Straight away on load: show the page you were on (before any data arrives).
 function restorePlaceView() {
-  try { startPlace = JSON.parse(localStorage.getItem(PLACE_KEY) || 'null'); } catch (_) { startPlace = null; }
+  try { startPlace = linkPlace() || JSON.parse(localStorage.getItem(PLACE_KEY) || 'null'); } catch (_) { startPlace = null; }
   if (!startPlace || !startPlace.view) return;
   // A teacher page needs its data first; show the Teachers list until then.
   const view = startPlace.view === 'teacher-view' ? 'search-view' : startPlace.view;
@@ -1018,6 +1058,9 @@ function restorePlaceDetails() {
   if (!isViewActive(expected)) return;
   if (startPlace.view === 'teacher-view' && startPlace.teacher) {
     openTeacherPage(startPlace.teacher);
+  } else if (startPlace.view === 'groups-view' && startPlace.group) {
+    if (findGroup(startPlace.group)) openGroupDetailModal(startPlace.group);
+    else showToast("That group isn't available to you.", 'info');
   } else if (startPlace.view === 'chat-view' && startPlace.chat) {
     const id = startPlace.chat.slice(2);
     if (startPlace.chat.startsWith('d:') && friends.some(f => f.friend_id === id)) selectFriend(id);
@@ -1997,7 +2040,7 @@ function tintAvatar(el) {
   const nameEl = row && row.querySelector('.post-who strong, .friend-name, .group-member-name strong, .school-row-text strong, '
     + '.tpost-author strong, .chat-thread-who strong, .profile-name, .teacher-meta strong, .sidebar-user-text strong, .set-text strong, strong');
   const first = (nameEl?.textContent || '').trim().split(/[\s(@·]+/)[0].toLowerCase();
-  const hue = avatarHue(letters.toUpperCase() + '|' + (first || (el.getAttribute('title') || '').toLowerCase()));
+  const hue = avatarHue(el.dataset.seed || (letters.toUpperCase() + '|' + (first || (el.getAttribute('title') || '').toLowerCase())));
   if (el.dataset.tint !== String(hue)) {
     el.dataset.tint = String(hue);
     el.style.setProperty('--av-h', hue);
@@ -3294,6 +3337,7 @@ function groupDetailHtml(g) {
         ${g.joined ? `<button class="primary-btn" onclick="openGroupChatFromGroups('${gid}')"><i class="fa-solid fa-comments"></i> Group chat</button>` : ''}
         ${groupJoinButton(g)}
         ${canInviteToGroup(g) ? `<button class="secondary-btn" onclick="openGroupInvitePicker('${gid}')"><i class="fa-solid fa-user-plus"></i> Invite</button>` : ''}
+        ${g.private ? '' : `<button class="secondary-btn group-icon-btn" onclick="shareGroup('${gid}')" aria-label="Share group link" title="Share"><i class="fa-solid fa-share-nodes"></i></button>`}
         ${host ? `<button class="secondary-btn" onclick="openCreateGroupModal('${gid}')"><i class="fa-solid fa-pen"></i> Edit</button>` : ''}
         ${canDelete ? `<button class="secondary-btn group-icon-btn danger-text" onclick="deleteGroup('${gid}')" aria-label="Delete group"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
@@ -5174,7 +5218,7 @@ function renderTeacherDirectory() {
     return `
       <button class="teacher-card" onclick="openTeacherPage('${escapeAttr(t.id)}')">
         <div class="teacher-card-top">
-          <div class="teacher-avatar">${escapeHtml(teacherInitials(t.name))}</div>
+          <div class="teacher-avatar" data-seed="${escapeAttr(t.id)}">${escapeHtml(teacherInitials(t.name))}</div>
           <div class="teacher-meta">
             <strong>${escapeHtml(t.name)}</strong>
             <small>${t.subject ? escapeHtml(t.subject) : 'No subject yet'}</small>
@@ -5277,6 +5321,7 @@ async function openTeacherPage(id) {
   teacherPosts = [];
   document.getElementById('teacher-hero').innerHTML = '<div class="teacher-loading"><i class="fa-solid fa-spinner fa-spin"></i></div>';
   document.getElementById('teacher-posts').innerHTML = '';
+  ['teacher-overview', 'teacher-related'].forEach(x => { const el = document.getElementById(x); if (el) el.innerHTML = ''; });
   switchTab('teacher-view');
   await loadTeacherPage(id);
 }
@@ -5338,6 +5383,8 @@ function myReviewOnTeacher() {
 function renderTeacherPage() {
   if (!currentTeacher) return;
   renderTeacherHero();
+  renderTeacherOverview();
+  renderTeacherRelated();
   ['review', 'requirement', 'note', 'supplies'].forEach(k => {
     const el = document.getElementById(`tt-count-${k}`);
     if (el) el.textContent = teacherPosts.filter(p => p.kind === k).length;
@@ -5351,10 +5398,63 @@ function renderTeacherPage() {
 
 function renderTeacherHero() {
   const t = currentTeacher;
+  const hero = document.getElementById('teacher-hero');
   const reviews = teacherPosts.filter(p => p.kind === 'review');
   const avg = toNum(t.avg_rating);
   const diff = toNum(t.avg_difficulty);
   const again = toNum(t.take_again_pct);
+  const tagCounts = {};
+  reviews.forEach(r => (r.tags || []).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }));
+  const known = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([tag]) => tag);
+  const C = 2 * Math.PI * 34;                       // the rating ring's length
+  const frac = avg != null ? Math.max(0, Math.min(1, avg / 5)) : 0;
+  const diffDots = [1, 2, 3, 4, 5].map(n => `<i class="${diff != null && n <= Math.round(diff) ? 'on' : ''}"></i>`).join('');
+  const mine = myReviewOnTeacher();
+
+  hero.style.setProperty('--av-h', avatarHue(t.id));  // the cover matches their avatar colour
+  hero.innerHTML = `
+    <div class="th-cover" aria-hidden="true"></div>
+    <div class="th-head">
+      <div class="teacher-avatar th-avatar" data-seed="${escapeAttr(t.id)}">${escapeHtml(teacherInitials(t.name))}</div>
+      <div class="th-actions">
+        <button class="th-icon-btn" onclick="shareTeacher()" aria-label="Share ${escapeAttr(t.name)}" title="Share"><i class="fa-solid fa-share-nodes"></i></button>
+        ${canEditTeacher() ? `<button class="th-icon-btn" onclick="openAddTeacherModal(true)" aria-label="${t.subject ? 'Edit name and subjects' : 'Add subjects'}" title="Edit"><i class="fa-solid fa-pen"></i></button>` : ''}
+      </div>
+    </div>
+    <div class="teacher-hero-text">
+      <h1>${escapeHtml(t.name)}</h1>
+      <p>${[t.subject || 'No subject yet', schoolName(t.school_id)].filter(Boolean).map(escapeHtml).join(' · ')}</p>
+      ${known.length ? `<p class="th-known"><i class="fa-solid fa-bolt"></i> Known for ${known.map(k => `<b>${escapeHtml(k)}</b>`).join(', ')}</p>` : ''}
+    </div>
+    <div class="th-score">
+      <div class="th-ring ${ratingClass(avg)}" role="img" aria-label="${avg != null ? `Rated ${avg.toFixed(1)} out of 5` : 'No ratings yet'}">
+        <svg viewBox="0 0 80 80" aria-hidden="true">
+          <circle class="th-ring-track" cx="40" cy="40" r="34"></circle>
+          <circle class="th-ring-fill" cx="40" cy="40" r="34" style="stroke-dasharray:${(frac * C).toFixed(1)} ${C.toFixed(1)}"></circle>
+        </svg>
+        <div class="th-ring-text"><strong>${avg != null ? avg.toFixed(1) : '–'}</strong><small>${avg != null ? 'out of 5' : 'no ratings'}</small></div>
+      </div>
+      <div class="th-meters">
+        <div class="th-meter"><span>Difficulty</span><b>${diff != null ? diff.toFixed(1) : '–'}</b><div class="th-dots" aria-hidden="true">${diffDots}</div></div>
+        <div class="th-meter"><span>Would take again</span><b>${again != null ? Math.round(again) + '%' : '–'}</b>
+          <div class="th-bar" aria-hidden="true"><i style="width:${again != null ? Math.round(again) : 0}%"></i></div></div>
+        <div class="th-meter th-meter-plain"><span>Reviews</span><b>${t.review_count || 0}</b></div>
+      </div>
+    </div>
+    ${canPostOnTeacher()
+      ? `<button class="primary-btn th-cta" onclick="rateTeacher()"><i class="fa-solid fa-star"></i> ${mine ? 'Update your review' : `Rate ${escapeHtml(t.name)}`}</button>`
+      : `<div class="teacher-readonly"><i class="fa-solid fa-eye"></i> ${currentUserId
+          ? `Only students at ${escapeHtml(schoolName(t.school_id))} can post here.` : 'Sign in to post.'}</div>`}
+  `;
+}
+
+// Under the header: the star breakdown and tags, the review students liked
+// most, and how the teacher does in each course (tap one to see its posts).
+function renderTeacherOverview() {
+  const box = document.getElementById('teacher-overview');
+  const t = currentTeacher;
+  if (!box || !t) return;
+  const reviews = teacherPosts.filter(p => p.kind === 'review' && !isBlocked(p.author_id));
 
   const dist = [5, 4, 3, 2, 1].map(n => {
     const c = reviews.filter(r => r.rating === n).length;
@@ -5364,38 +5464,132 @@ function renderTeacherHero() {
               aria-pressed="${on}" aria-label="${on ? 'Show all reviews' : `Show ${n}-star reviews (${c})`}">
               <span>${n}★</span><div class="dist-bar"><div style="width:${pct}%"></div></div><span>${c}</span></button>`;
   }).join('');
-
   const tagCounts = {};
   reviews.forEach(r => (r.tags || []).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }));
   const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
-  const courses = [...new Set(teacherPosts.map(p => (p.course || '').trim()).filter(Boolean))];
+  const likes = p => teacherVotes[p.id]?.up || 0;
+  const score = p => likes(p) - (teacherVotes[p.id]?.down || 0);
+  const top = reviews.filter(p => likes(p) > 0 && (p.body || '').trim())
+    .sort((a, b) => score(b) - score(a) || new Date(b.created_at) - new Date(a.created_at))[0];
+  const topAnon = top && /^anonymous/i.test(top.author_name || ANON_AUTHOR);
+  const topWho = top ? (topAnon ? 'Anonymous student' : personName(top.author_id, top.author_name || 'Student')) : '';
+  const topText = top ? String(top.body).trim() : '';
 
-  document.getElementById('teacher-hero').innerHTML = `
-    <div class="teacher-hero-top">
-      <div class="teacher-avatar lg">${escapeHtml(teacherInitials(t.name))}</div>
-      <div class="teacher-hero-text">
-        <h1>${escapeHtml(t.name)}</h1>
-        <p>${[t.subject || 'No subject yet', schoolName(t.school_id)].filter(Boolean).map(escapeHtml).join(' · ')}</p>
-        ${canEditTeacher() ? `<button class="text-btn teacher-edit-btn" onclick="openAddTeacherModal(true)">
-          <i class="fa-solid fa-pen"></i> ${t.subject ? 'Edit name & subjects' : 'Add subjects'}</button>` : ''}
-      </div>
-    </div>
-    <div class="teacher-stat-grid">
-      <div class="tstat"><span class="tstat-num ${ratingClass(avg)}">${avg != null ? avg.toFixed(1) : '–'}</span><span class="tstat-label">Rating</span></div>
-      <div class="tstat"><span class="tstat-num">${diff != null ? diff.toFixed(1) : '–'}</span><span class="tstat-label">Difficulty</span></div>
-      <div class="tstat"><span class="tstat-num">${again != null ? Math.round(again) + '%' : '–'}</span><span class="tstat-label">Take again</span></div>
-      <div class="tstat"><span class="tstat-num">${t.review_count}</span><span class="tstat-label">Reviews</span></div>
-    </div>
-    ${reviews.length ? `<div class="rating-dist">${dist}</div>` : ''}
-    ${topTags.length ? `<div class="teacher-top-tags">${topTags.map(([tag, c]) =>
-      `<span class="tag-chip">${escapeHtml(tag)} <b>${c}</b></span>`).join('')}</div>` : ''}
-    ${courses.length ? `<div class="teacher-courses"><i class="fa-solid fa-book"></i> ${courses.map(escapeHtml).join(' · ')}</div>` : ''}
-    ${canPostOnTeacher() ? '' : `<div class="teacher-readonly"><i class="fa-solid fa-eye"></i> ${currentUserId
-      ? `Only students at ${escapeHtml(schoolName(t.school_id))} can post here.` : 'Sign in to post.'}</div>`}
-    ${canManageSchool(t.school_id) ? `<button class="secondary-btn admin-inline-btn" onclick="adminDeleteTeacher()">
-      <i class="fa-solid fa-shield-halved"></i> Delete teacher page</button>` : ''}
-  `;
+  const byCourse = {};
+  teacherPosts.forEach(p => {
+    const c = (p.course || '').trim();
+    if (!c) return;
+    const o = byCourse[c] = byCourse[c] || { course: c, posts: 0, reviews: 0, rating: 0, diff: 0, diffN: 0 };
+    o.posts += 1;
+    if (p.kind === 'review') {
+      o.reviews += 1; o.rating += p.rating || 0;
+      if (p.difficulty) { o.diff += p.difficulty; o.diffN += 1; }
+    }
+  });
+  const courses = Object.values(byCourse).sort((a, b) => b.reviews - a.reviews || b.posts - a.posts || a.course.localeCompare(b.course));
+  const activeCourse = document.getElementById('teacher-course-filter')?.value || 'all';
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+  box.innerHTML = [
+    reviews.length ? `
+      <div class="info-card to-card">
+        <div class="to-head"><h3><i class="fa-solid fa-chart-simple"></i> What students say</h3><small>${plural(reviews.length, 'review')}</small></div>
+        <div class="rating-dist">${dist}</div>
+        ${topTags.length ? `<div class="teacher-top-tags">${topTags.map(([tag, c]) => `<span class="tag-chip">${escapeHtml(tag)} <b>${c}</b></span>`).join('')}</div>` : ''}
+      </div>` : `
+      <div class="info-card to-card to-empty">
+        <i class="fa-regular fa-star"></i>
+        <div><strong>No reviews yet</strong><small>Be the first to say what ${escapeHtml(t.name)}'s class is like.</small></div>
+      </div>`,
+    top ? `
+      <div class="info-card to-card to-quote">
+        <div class="to-head"><h3><i class="fa-solid fa-quote-left"></i> Top review</h3><span class="rating-badge sm ${ratingClass(top.rating)}">${top.rating}</span></div>
+        <blockquote>${escapeHtml(topText.length > 240 ? topText.slice(0, 237).trimEnd() + '…' : topText)}</blockquote>
+        <div class="to-quote-foot">
+          <span>${escapeHtml(topWho)}${top.course ? ' · ' + escapeHtml(top.course) : ''}</span>
+          <span><i class="fa-solid fa-thumbs-up"></i> ${likes(top)}</span>
+        </div>
+        ${reviews.length > 1 ? `<button class="text-btn to-more" onclick="jumpToTeacherPosts('review')">Read all ${reviews.length} reviews <i class="fa-solid fa-arrow-down"></i></button>` : ''}
+      </div>` : '',
+    courses.length ? `
+      <div class="info-card to-card">
+        <div class="to-head"><h3><i class="fa-solid fa-book-open"></i> By course</h3>
+          ${activeCourse !== 'all' ? `<button class="text-btn" onclick="filterTeacherCourse('all')">Show all</button>` : ''}</div>
+        <div class="to-courses">${courses.map(c => `
+          <button type="button" class="to-course ${activeCourse === c.course ? 'active' : ''}" data-course="${escapeAttr(c.course)}"
+                  onclick="filterTeacherCourse(this.dataset.course)" aria-pressed="${activeCourse === c.course}">
+            <span class="to-course-name">${escapeHtml(c.course)}</span>
+            <span class="to-course-meta">${c.reviews ? plural(c.reviews, 'review') : plural(c.posts, 'post')}${c.diffN ? ` · difficulty ${(c.diff / c.diffN).toFixed(1)}` : ''}</span>
+            ${c.reviews ? `<span class="rating-badge sm ${ratingClass(c.rating / c.reviews)}">${(c.rating / c.reviews).toFixed(1)}</span>` : ''}
+          </button>`).join('')}
+        </div>
+      </div>` : '',
+    canManageSchool(t.school_id) ? `<button class="text-btn th-admin-delete" onclick="adminDeleteTeacher()">
+      <i class="fa-solid fa-shield-halved"></i> Admin: delete this teacher page</button>` : ''
+  ].join('');
+}
+
+// Other teachers of the same subject at the school (or just others there).
+function renderTeacherRelated() {
+  const box = document.getElementById('teacher-related');
+  const t = currentTeacher;
+  if (!box) return;
+  if (!t) { box.innerHTML = ''; return; }
+  const others = teacherDir.filter(x => String(x.id) !== String(t.id) && x.school_id === t.school_id);
+  if (!others.length && renderTeacherRelated.tried !== t.id && isSupabaseConnected) {
+    renderTeacherRelated.tried = t.id;               // the directory wasn't loaded yet: once
+    fetchTeacherDirectory().then(() => { if (currentTeacher?.id === t.id) renderTeacherRelated(); });
+  }
+  const mine = teacherSubjectGroups(t);
+  let list = others.filter(x => [...teacherSubjectGroups(x)].some(g => mine.has(g)));
+  let title = 'Similar teachers';
+  if (!list.length) { list = others; title = `More at ${schoolName(t.school_id)}`; }
+  list = list.slice().sort((a, b) => (toNum(b.avg_rating) ?? -1) - (toNum(a.avg_rating) ?? -1)
+    || (b.review_count || 0) - (a.review_count || 0)).slice(0, 4);
+  box.innerHTML = list.length ? `
+    <div class="to-head"><h3><i class="fa-solid fa-people-group"></i> ${escapeHtml(title)}</h3>
+      <button class="text-btn" onclick="switchTab('search-view')">See all</button></div>
+    <div class="related-list">${list.map(x => {
+      const avg = toNum(x.avg_rating);
+      const n = x.review_count || 0;
+      return `
+        <button type="button" class="related-card" onclick="openTeacherPage('${escapeAttr(x.id)}')">
+          <span class="teacher-avatar" data-seed="${escapeAttr(x.id)}">${escapeHtml(teacherInitials(x.name))}</span>
+          <span class="related-text"><strong>${escapeHtml(x.name)}</strong>
+            <small>${escapeHtml(x.subject || 'No subject yet')} · ${n ? `${n} review${n === 1 ? '' : 's'}` : 'No reviews yet'}</small></span>
+          <span class="rating-badge sm ${ratingClass(avg)}">${avg != null ? avg.toFixed(1) : '–'}</span>
+        </button>`;
+    }).join('')}</div>` : '';
+}
+
+// "Rate Ms. Lau": the review form (or your review, to update it).
+function rateTeacher() {
+  if (teacherTab !== 'review') { teacherTab = 'review'; renderTeacherPage(); }
+  openTeacherPostModal();
+}
+
+// Scroll down to the posts (switching tab first if asked).
+function jumpToTeacherPosts(kind) {
+  if (kind && teacherTab !== kind) { teacherTab = kind; renderTeacherPage(); }
+  document.getElementById('teacher-tabs')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+// A course in "By course": show its posts (on a tab that has some).
+function filterTeacherCourse(course) {
+  const has = kind => teacherPosts.some(p => p.kind === kind && (p.course || '').trim() === course);
+  if (course && course !== 'all' && !has(teacherTab)) {
+    teacherTab = ['review', 'requirement', 'note', 'supplies'].find(has) || teacherTab;
+  }
+  renderTeacherPage();                                // rebuilds the course menu for that tab
+  const sel = document.getElementById('teacher-course-filter');
+  if (sel) { sel.value = course; if (sel.value !== course) sel.value = 'all'; }
+  onTeacherCourseChange();
+  if (course !== 'all') jumpToTeacherPosts();
+}
+function onTeacherCourseChange() {
+  renderTeacherPosts();
+  renderTeacherOverview();
 }
 
 // Everyone's supply lists combined: each item once, with how many students
@@ -5666,9 +5860,9 @@ function renderTeacherPosts() {
         ${p.would_take_again != null ? `<span>Take again <b>${p.would_take_again ? 'Yes' : 'No'}</b></span>` : ''}
       </div>` : '';
     return `
-      <div class="info-card tpost ${mine ? 'tpost-mine' : ''}">
+      <div class="info-card tpost tpost-${p.kind} ${p.kind === 'review' ? 'tpost-' + ratingClass(p.rating) : ''} ${mine ? 'tpost-mine' : ''}">
         <div class="tpost-head">
-          <span class="friend-avatar sm">${escapeHtml(author[0].toUpperCase())}</span>
+          <span class="friend-avatar sm ${anonPost ? 'anon-avatar' : ''}">${anonPost ? '<i class="fa-solid fa-user-secret"></i>' : escapeHtml(author[0].toUpperCase())}</span>
           <div class="tpost-author">
             <strong>${nameLink(p.author_id, author, anonPost)}${mine ? ' <em>(you)</em>' : ''}</strong>
             <small>${sub}</small>

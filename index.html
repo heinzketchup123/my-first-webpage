@@ -294,8 +294,14 @@
           <i class="fa-solid fa-arrow-left"></i> All teachers
         </button>
 
-        <div id="teacher-hero" class="teacher-hero"></div>
+        <!-- Computer: the teacher on the left, their reviews on the right. Phone: one column. -->
+        <div class="teacher-side">
+          <div id="teacher-hero" class="teacher-hero"></div>
+          <div id="teacher-overview" class="teacher-overview"></div>
+          <div id="teacher-related" class="teacher-related"></div>
+        </div>
 
+        <div class="teacher-main">
         <div class="teacher-tabs" id="teacher-tabs">
           <button class="teacher-tab active" data-kind="review" onclick="setTeacherTab('review')">
             <i class="fa-solid fa-star"></i> Reviews <span class="tt-count" id="tt-count-review">0</span>
@@ -314,12 +320,13 @@
         <div class="filter-chips star-chips" id="teacher-star-chips" hidden></div>
 
         <div class="teacher-toolbar">
-          <select id="teacher-course-filter" class="mini-select flex-1" onchange="renderTeacherPosts()"></select>
+          <select id="teacher-course-filter" class="mini-select flex-1" onchange="onTeacherCourseChange()" aria-label="Course"></select>
           <select id="teacher-sort" class="mini-select" onchange="setTeacherPostSort(this.value)" aria-label="Sort"></select>
           <button id="teacher-compose-btn" class="primary-btn teacher-compose-btn" onclick="openTeacherPostModal()">+ Write</button>
         </div>
 
         <div id="teacher-posts" class="stack-list"></div>
+        </div>
       </section>
 
       <!-- Tab 3: Study Groups -->
