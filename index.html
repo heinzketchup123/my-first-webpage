@@ -27,7 +27,7 @@
   
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700;800;900&display=swap" />
   <link rel="stylesheet" href="style.css" />
   <!-- Pick phone vs computer layout before the first paint (no flash). -->
   <script>
@@ -66,6 +66,16 @@
     <div id="auth-screen" class="auth-overlay">
       <div class="auth-box">
         <span class="auth-logo" data-app-logo role="img" aria-label="Campus Pulse"><img src="icons/favicon.svg" alt="" /></span>
+        <div class="auth-hero">
+          <div class="auth-brand">Campus <span>Pulse</span></div>
+          <p class="auth-tagline">Your school's heartbeat: honest teacher reviews, study groups, events and chat with friends, all in one place.</p>
+          <div class="auth-features" aria-hidden="true">
+            <span><i class="fa-solid fa-chalkboard-user"></i> Teachers</span>
+            <span><i class="fa-solid fa-user-group"></i> Groups</span>
+            <span><i class="fa-solid fa-calendar-days"></i> Events</span>
+            <span><i class="fa-solid fa-comments"></i> Chat</span>
+          </div>
+        </div>
         <form id="login-form" class="auth-form" onsubmit="handleAuth(event)">
           <h2>Welcome Back</h2>
           <p class="auth-sub">Sign in to your school's Campus Pulse</p>
@@ -165,7 +175,7 @@
       <!-- Tab 1: Home / Feed -->
       <section id="home-view" class="view active-view">
         <div class="hero-card">
-          <span class="sub-heading">Academic Dashboard</span>
+          <span class="sub-heading" id="hero-kicker">Academic Dashboard</span>
           <h1 class="hero-title" id="user-welcome-title">Welcome Back, Student</h1>
           <p class="description">Track your courses, join study groups, and keep up with campus updates across all your devices.</p>
           

@@ -1488,14 +1488,20 @@ function joinRuleLabel(s) {
   }
 }
 
+// "Good evening, Luke" on the home screen.
+function greetingNow() {
+  const h = new Date().getHours();
+  return h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 22 ? 'Good evening' : 'Up late';
+}
+
 function updateSchoolChrome() {
   const welcome = document.getElementById('user-welcome-title');
   if (welcome && currentUser) {
     const name = personName(currentUserId, currentHandle || currentUser.split('@')[0]);
-    welcome.textContent = currentSchool
-      ? `${name} · ${currentSchool.name}`
-      : `Welcome Back, ${name}`;
+    welcome.textContent = `${greetingNow()}, ${String(name).split(/\s+/)[0]}`;
   }
+  const kicker = document.getElementById('hero-kicker');
+  if (kicker) kicker.textContent = currentSchool ? currentSchool.name : 'Academic Dashboard';
   const label = document.getElementById('current-school-label');
   if (label) label.textContent = currentSchool ? currentSchool.name : 'No school set';
 
@@ -1966,6 +1972,58 @@ document.addEventListener('wheel', e => {
 }, { passive: false });
 
 function escapeAttr(v) { return String(v).replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
+
+// -------------------- Avatar colours --------------------
+// Everyone gets their own colour (picked from their name, so it's the same
+// on every screen), which makes feeds, member lists and chats easier to scan.
+// Works on every avatar the app draws, whenever it's drawn.
+const AVATAR_HUES = [0, 18, 145, 165, 185, 200, 218, 236, 255, 275, 295, 320, 340];
+const AVATAR_SEL = '.friend-avatar, .post-avatar, .group-face, .teacher-avatar';
+function avatarHue(seed) {
+  let h = 7;
+  for (const ch of String(seed)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return AVATAR_HUES[h % AVATAR_HUES.length];
+}
+function tintAvatar(el) {
+  // Icons (anonymous, groups, "add") and "+3" counters keep their own look.
+  const letters = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
+  if (!letters || el.querySelector(':scope > i') || /^[+?]/.test(letters) || el.classList.contains('group-avatar')) {
+    el.removeAttribute('data-tint');
+    return;
+  }
+  // The name shown next to it (first word, so "Maya Chen (you)" and "Maya" match).
+  const row = el.closest('.post-head, .comment, .group-member, .friend-chip, .admin-row, .tpost-head, .chat-thread-head, '
+    + '.profile-card, .teacher-card, .sidebar-user, .set-profile, .side-item, .tpc, .notif-item');
+  const nameEl = row && row.querySelector('.post-who strong, .friend-name, .group-member-name strong, .school-row-text strong, '
+    + '.tpost-author strong, .chat-thread-who strong, .profile-name, .teacher-meta strong, .sidebar-user-text strong, .set-text strong, strong');
+  const first = (nameEl?.textContent || '').trim().split(/[\s(@·]+/)[0].toLowerCase();
+  const hue = avatarHue(letters.toUpperCase() + '|' + (first || (el.getAttribute('title') || '').toLowerCase()));
+  if (el.dataset.tint !== String(hue)) {
+    el.dataset.tint = String(hue);
+    el.style.setProperty('--av-h', hue);
+  }
+}
+function tintAvatars(root) {
+  if (!root || root.nodeType !== 1) return;
+  if (root.matches(AVATAR_SEL)) tintAvatar(root);
+  root.querySelectorAll(AVATAR_SEL).forEach(tintAvatar);
+}
+new MutationObserver(muts => {
+  const seen = new Set();
+  for (const m of muts) {
+    // A new avatar, a list of them, or an avatar whose letter just changed.
+    const els = m.type === 'childList' ? [m.target, ...m.addedNodes] : [m.target];
+    for (const n of els) {
+      const el = n.nodeType === 1 ? n : n.parentElement;
+      if (!el || seen.has(el)) continue;
+      seen.add(el);
+      const av = el.closest?.(AVATAR_SEL);
+      if (av) tintAvatar(av);
+      if (n.nodeType === 1 && n !== m.target) tintAvatars(n);
+    }
+  }
+}).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+document.addEventListener('DOMContentLoaded', () => tintAvatars(document.body));
 
 // -------------------- Names you can tap --------------------
 // Posts, comments and reviews that aren't anonymous show the person's name;
