@@ -4414,3 +4414,21 @@ body.light-mode .admin-level-2 { color: #7c3aed; }
 .admin-school:last-child { border-bottom: none; }
 .admin-district-pick { font-size: 0.74rem; }
 .admin-district-pick .mini-select { padding: 5px 8px; font-size: 0.76rem; }
+
+/* ---------- Group hosts remove members ---------- */
+.group-member .group-kick-btn { margin-left: auto; flex-shrink: 0; }
+.group-member .group-badge.host + .group-kick-btn { margin-left: 6px; }
+.group-member.removed { opacity: 0.8; }
+.group-member.removed .friend-btn-sm { margin-left: auto; flex-shrink: 0; }
+.group-removed-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 107, 107, 0.1);
+  color: var(--danger);
+  font-size: 0.8rem;
+  font-weight: 700;
+}

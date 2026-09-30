@@ -479,6 +479,17 @@ create table if not exists public.study_group_members (
 );
 alter table public.study_group_members enable row level security;
 
+-- People a group's host removed (see 6n). They can't rejoin that group
+-- until the host lets them back in. Written only by 6n's functions.
+create table if not exists public.study_group_bans (
+  group_id   uuid not null references public.study_groups(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  banned_by  uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+alter table public.study_group_bans enable row level security;
+
 do $$ declare p record; begin
   for p in select policyname from pg_policies where schemaname='public' and tablename='study_group_members' loop
     execute format('drop policy if exists %I on public.study_group_members', p.policyname);
@@ -486,7 +497,9 @@ do $$ declare p record; begin
 end $$;
 
 -- Anyone in the same school can see who's in a group (so member counts
--- render); each user can only insert/delete their own row.
+-- render); each user can only insert/delete their own row, and can't
+-- rejoin a group its host removed them from. (Hosts remove people with
+-- group_remove_member() in 6n.)
 create policy "group_members: same-school reads"
   on public.study_group_members for select
   using (
@@ -499,7 +512,9 @@ create policy "group_members: same-school reads"
 create policy "group_members: user manages own membership"
   on public.study_group_members for all
   using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  with check (auth.uid() = user_id
+              and not exists (select 1 from public.study_group_bans b
+                              where b.group_id = study_group_members.group_id and b.user_id = auth.uid()));
 
 -- Now that groups have a creator_id, extend the groups policies with
 -- INSERT / UPDATE / DELETE for the creator inside their school.
@@ -2141,6 +2156,56 @@ exception when duplicate_object then null;
 end $$;
 
 -- ============================================================
+-- 6n. GROUP HOSTS CAN REMOVE MEMBERS
+-- ============================================================
+-- A study group's host (its creator) can remove someone from the group;
+-- so can the school's admins. The person is told, loses the group chat,
+-- and can't rejoin until the host lets them back in.
+drop policy if exists "group bans: host, admins and the person read" on public.study_group_bans;
+create policy "group bans: host, admins and the person read" on public.study_group_bans
+  for select using (
+    user_id = auth.uid()
+    or exists (select 1 from public.study_groups g
+               where g.id = group_id
+                 and (g.creator_id = auth.uid() or public.can_manage_school(g.school_id))));
+
+create or replace function public.group_remove_member(target_group uuid, target_user uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare g public.study_groups%rowtype;
+begin
+  select * into g from public.study_groups where id = target_group;
+  if not found then raise exception 'That group no longer exists'; end if;
+  if not (g.creator_id = auth.uid() or public.can_manage_school(g.school_id)) then
+    raise exception 'Only the group''s host can remove members';
+  end if;
+  if target_user = auth.uid() then raise exception 'To leave the group, tap Leave'; end if;
+  if target_user = g.creator_id then raise exception 'The host can''t be removed from their own group'; end if;
+  delete from public.study_group_members where group_id = target_group and user_id = target_user;
+  insert into public.study_group_bans (group_id, user_id, banned_by)
+  values (target_group, target_user, auth.uid())
+  on conflict (group_id, user_id) do nothing;
+  perform public.push_notification(target_user, null, 'Group host', 'removed_from_group',
+                                   target_group::text, g.name);
+end $$;
+
+create or replace function public.group_allow_back(target_group uuid, target_user uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare g public.study_groups%rowtype;
+begin
+  select * into g from public.study_groups where id = target_group;
+  if not found then raise exception 'That group no longer exists'; end if;
+  if not (g.creator_id = auth.uid() or public.can_manage_school(g.school_id)) then
+    raise exception 'Only the group''s host can do that';
+  end if;
+  delete from public.study_group_bans where group_id = target_group and user_id = target_user;
+end $$;
+
+revoke all on function public.group_remove_member(uuid, uuid) from public, anon;
+revoke all on function public.group_allow_back(uuid, uuid) from public, anon;
+grant execute on function public.group_remove_member(uuid, uuid) to authenticated;
+grant execute on function public.group_allow_back(uuid, uuid) to authenticated;
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -2156,7 +2221,7 @@ begin
                            'campus_events','event_rsvps','school_join_requests','schools',
                            'feed_reactions','feed_comments','notifications','admins','school_bans',
                            'group_messages','teacher_post_comments',
-                           'districts','district_admins','school_admins'] loop
+                           'districts','district_admins','school_admins','study_group_bans'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'

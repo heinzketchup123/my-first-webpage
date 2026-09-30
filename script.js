@@ -353,6 +353,7 @@ function initSupabaseRealtime() {
   listen('notifications', p => onNotificationChanged(p));
   listen('study_groups', () => fetchGroups());
   listen('study_group_members', () => fetchGroups());
+  listen('study_group_bans', () => fetchGroups());
   listen('teachers', () => onTeacherDataChanged());
   listen('teacher_posts', () => onTeacherDataChanged());
   listen('teacher_post_votes', () => onTeacherDataChanged());
@@ -408,10 +409,12 @@ async function fetchFeed() {
 }
 
 async function fetchGroups() {
-  const [{ data, error }, memRes] = await Promise.all([
+  const [{ data, error }, memRes, banRes] = await Promise.all([
     // Sorted client-side: older projects' study_groups table has no created_at.
     supabaseClient.from('study_groups').select('*'),
-    supabaseClient.from('study_group_members').select('group_id, user_id')
+    supabaseClient.from('study_group_members').select('group_id, user_id'),
+    // Only yours, and the ones in groups you host (none until SCHEMA.sql 6n is run).
+    supabaseClient.from('study_group_bans').select('group_id, user_id, created_at')
   ]);
   if (error) { showToast('Groups load failed: ' + error.message, 'error'); return; }
   if (memRes?.error) console.warn('group members load failed:', memRes.error.message);
@@ -421,6 +424,9 @@ async function fetchGroups() {
   const members = {};
   (memRes?.data || []).forEach(m => { (members[m.group_id] = members[m.group_id] || []).push(m.user_id); });
   groupMembers = members;
+  const bans = {};
+  (banRes?.error ? [] : banRes?.data || []).forEach(b => { (bans[b.group_id] = bans[b.group_id] || []).push(b); });
+  groupBans = bans;
 
   studyGroups = (data || []).map(g => {
     const ids = members[g.id] || [];
@@ -436,7 +442,8 @@ async function fetchGroups() {
   renderFriendsStrip();
 
   // Names for the faces and member lists (profiles are readable by everyone).
-  const ids = [...new Set(Object.values(members).flat().concat(studyGroups.map(g => g.creator_id)))].filter(Boolean);
+  const ids = [...new Set(Object.values(members).flat().concat(studyGroups.map(g => g.creator_id),
+    Object.values(bans).flat().map(b => b.user_id)))].filter(Boolean);
   const before = Object.keys(profileMap).length;
   await fetchProfilesByIds(ids);
   if (Object.keys(profileMap).length !== before) { renderGroups(); refreshOpenGroup(); }
@@ -1152,6 +1159,7 @@ function describeNotif(n) {
           : `${who} made you an app admin`,
       sub: 'Admin tools are in Settings → Admin' };
     case 'removed_from_school': return { icon: 'fa-user-slash', html: `An admin removed you from <strong>${escapeHtml(n.body || 'your school')}</strong>`, sub: 'Tap to pick a school' };
+    case 'removed_from_group': return { icon: 'fa-user-slash', html: `You were removed from the study group <strong>${escapeHtml(n.body || '')}</strong>` };
     default:              return { icon: 'fa-bell',           html: escapeHtml(n.body || 'New activity') };
   }
 }
@@ -1196,6 +1204,7 @@ async function openNotification(id) {
     case 'review_comment': if (n.meta) openTeacherPostComments(n.meta, n.ref_id); break;
     case 'promoted':    showAdminCard(); break;
     case 'removed_from_school': openSchoolPicker(!currentSchoolId); break;
+    case 'removed_from_group': switchTab('groups-view'); break;
   }
 }
 
@@ -2998,10 +3007,16 @@ async function submitPost(event) {
 // Study Groups Engine
 let groupFilter = 'all';       // 'all' | 'open' | 'mine', kept across live refreshes
 let groupMembers = {};         // group id -> [user ids]
+let groupBans = {};            // group id -> [{ user_id, created_at }] people its host removed
 const groupBusy = new Set();   // groups with a join / leave on the way
 let openGroupId = null;        // group whose details are showing
 
 function findGroup(id) { return studyGroups.find(g => String(g.id) === String(id)); }
+// Hosts (and the school's admins) can remove members.
+function canKickFromGroup(g) {
+  return !!currentUserId && ((!!g.creator_id && g.creator_id === currentUserId) || canManageSchool(g.school_id || currentSchoolId));
+}
+function removedFromGroup(g) { return (groupBans[g.id] || []).some(b => b.user_id === currentUserId); }
 function groupIsFull(g) { return g.members >= (g.max || 0); }
 function memberLabel(uid) {
   if (uid === currentUserId) return 'You';
@@ -3056,6 +3071,7 @@ function groupJoinButton(g) {
   const gid = escapeAttr(g.id);
   const busy = groupBusy.has(String(g.id)) ? ' disabled' : '';
   if (g.joined) return `<button class="secondary-btn group-join-btn"${busy} onclick="toggleGroupJoin('${gid}')">Leave</button>`;
+  if (removedFromGroup(g)) return `<button class="secondary-btn group-join-btn" disabled title="The host removed you from this group">Removed</button>`;
   if (groupIsFull(g)) return `<button class="secondary-btn group-join-btn" disabled>Full</button>`;
   return `<button class="primary-btn group-join-btn"${busy} onclick="toggleGroupJoin('${gid}')">Join</button>`;
 }
@@ -3113,16 +3129,30 @@ function groupDetailHtml(g) {
   const ids = (groupMembers[g.id] || []).slice().sort((a, b) =>
     (b === g.creator_id) - (a === g.creator_id) || (b === currentUserId) - (a === currentUserId)
     || memberLabel(a).localeCompare(memberLabel(b)));
+  const kick = canKickFromGroup(g);
   const people = ids.map(uid => {
     const n = memberLabel(uid);
     const handle = uid !== currentUserId && profileMap[uid]?.handle ? `<small>@${escapeHtml(profileMap[uid].handle)}</small>` : '';
+    const removable = kick && uid !== g.creator_id && uid !== currentUserId;
     return `
       <div class="group-member">
         <span class="friend-avatar sm">${escapeHtml(n[0].toUpperCase())}</span>
         <span class="group-member-name"><strong>${nameLink(uid, n, false)}</strong>${handle}</span>
         ${uid === g.creator_id ? '<span class="group-badge host">Host</span>' : ''}
+        ${removable ? `<button class="secondary-btn friend-btn-sm danger-text group-kick-btn" onclick="removeFromGroup('${gid}', '${escapeAttr(uid)}')"
+                         aria-label="Remove ${escapeAttr(n)} from the group">Remove</button>` : ''}
       </div>`;
   }).join('') || '<p class="friends-empty-inner">No one has joined yet. Be the first!</p>';
+  // Hosts see who they removed, and can let them back in.
+  const removed = kick ? (groupBans[g.id] || []).map(b => {
+    const n = memberLabel(b.user_id);
+    return `
+      <div class="group-member removed">
+        <span class="friend-avatar sm">${escapeHtml(n[0].toUpperCase())}</span>
+        <span class="group-member-name"><strong>${escapeHtml(n)}</strong><small>Removed ${escapeHtml(timeAgo(b.created_at))}</small></span>
+        <button class="secondary-btn friend-btn-sm" onclick="letBackIntoGroup('${gid}', '${escapeAttr(b.user_id)}')">Let back in</button>
+      </div>`;
+  }).join('') : '';
   const topics = (g.topics || []).map(t => `<span class="group-topic">${escapeHtml(t)}</span>`).join('')
     || '<span class="group-topic">General study</span>';
   const max = g.max || 0;
@@ -3138,6 +3168,8 @@ function groupDetailHtml(g) {
       <div class="group-topics">${topics}</div>
       <div class="group-detail-label">Members · ${g.members}/${max}${groupIsFull(g) ? ' · full' : ''}</div>
       <div class="group-member-list">${people}</div>
+      ${removed ? `<div class="group-detail-label">Removed</div><div class="group-member-list">${removed}</div>` : ''}
+      ${removedFromGroup(g) ? '<p class="group-removed-note"><i class="fa-solid fa-user-slash"></i> The host removed you from this group.</p>' : ''}
       <div class="group-actions">
         ${g.joined ? `<button class="primary-btn" onclick="openGroupChatFromGroups('${gid}')"><i class="fa-solid fa-comments"></i> Group chat</button>` : ''}
         ${groupJoinButton(g)}
@@ -3176,6 +3208,7 @@ async function toggleGroupJoin(id) {
   const key = String(g.id);
   if (groupBusy.has(key)) return;             // a second tap while the first is on its way
   const leaving = g.joined;
+  if (!leaving && removedFromGroup(g)) return showToast("The host removed you from this group, so you can't rejoin unless they let you back in.", 'warn', 5000);
   if (!leaving && groupIsFull(g)) return showToast('This group is full.', 'warn');
   if (leaving && g.creator_id === currentUserId
       && !confirm("You're the host. Leave anyway? The group stays up and you can still edit or delete it.")) return;
@@ -3199,6 +3232,33 @@ async function toggleGroupJoin(id) {
     showToast(`You joined ${g.name || 'the group'}.`, 'success');
   }
   fetchGroups();
+}
+
+function groupRpcError(error) {
+  const msg = error?.message || 'Something went wrong';
+  return /group_(remove_member|allow_back)/.test(msg) && /(function|schema cache)/i.test(msg)
+    ? 'Removing members needs a quick database update: run the updated SCHEMA.sql in Supabase.' : msg;
+}
+
+async function removeFromGroup(groupId, userId) {
+  const g = findGroup(groupId);
+  if (!g) return;
+  const name = memberLabel(userId);
+  if (!confirm(`Remove ${name} from ${g.name || 'this group'}?\n\nThey'll lose the group chat and can't rejoin unless you let them back in. They'll be told they were removed.`)) return;
+  const { error } = await supabaseClient.rpc('group_remove_member', { target_group: g.id, target_user: userId });
+  if (error) return showToast(groupRpcError(error), 'error', 5500);
+  showToast(`${name} was removed from the group.`, 'success');
+  await fetchGroups();
+}
+
+async function letBackIntoGroup(groupId, userId) {
+  const g = findGroup(groupId);
+  if (!g) return;
+  const name = memberLabel(userId);
+  const { error } = await supabaseClient.rpc('group_allow_back', { target_group: g.id, target_user: userId });
+  if (error) return showToast(groupRpcError(error), 'error', 5500);
+  showToast(`${name} can join ${g.name || 'the group'} again.`, 'success');
+  await fetchGroups();
 }
 
 // ==================== Event calendar ====================
