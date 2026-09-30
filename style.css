@@ -5109,3 +5109,7 @@ html.layout-desktop #events-view > .cal-next { grid-area: next; }
 .tp-course-note[hidden] { display: none; }
 .tp-course-note i { color: var(--accent-color); }
 .tp-course-note .text-btn { font-size: 0.78rem; padding: 0; }
+
+/* "← All teachers / All groups / Calendar" is only as wide as its words (on a
+   computer the page grid stretched it across the top, over the empty space). */
+.teacher-back-btn { justify-self: start; width: auto; }
