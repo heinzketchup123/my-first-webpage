@@ -5715,8 +5715,24 @@ async function loadTeacherPage(id) {
 function canPostOnTeacher() {
   return !!(currentUserId && currentTeacher && currentTeacher.school_id === currentSchoolId);
 }
-function myReviewOnTeacher() {
-  return teacherPosts.find(p => p.kind === 'review' && p.author_id === currentUserId) || null;
+// You can review a teacher once per course (took CSP and Apps with them? review both).
+function courseKey(c) { return String(c || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+function myReviewsOnTeacher() {
+  return teacherPosts.filter(p => p.kind === 'review' && p.author_id === currentUserId);
+}
+function myReviewOnTeacher() { return myReviewsOnTeacher()[0] || null; }
+function myReviewForCourse(course) {
+  const k = courseKey(course);
+  return myReviewsOnTeacher().find(p => courseKey(p.course) === k) || null;
+}
+// Courses this teacher is known for: from posts on their page and the directory.
+function teacherKnownCourses() {
+  const seen = new Map();
+  [...teacherPosts.map(p => p.course), ...(teacherCourses[currentTeacher?.id] || [])].forEach(c => {
+    const name = String(c || '').replace(/\s+/g, ' ').trim();
+    if (name && !seen.has(courseKey(name))) seen.set(courseKey(name), name);
+  });
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
 function renderTeacherPage() {
@@ -5749,7 +5765,7 @@ function renderTeacherHero() {
   const C = 2 * Math.PI * 34;                       // the rating ring's length
   const frac = avg != null ? Math.max(0, Math.min(1, avg / 5)) : 0;
   const diffDots = [1, 2, 3, 4, 5].map(n => `<i class="${diff != null && n <= Math.round(diff) ? 'on' : ''}"></i>`).join('');
-  const mine = myReviewOnTeacher();
+  const mine = myReviewsOnTeacher();
 
   hero.style.setProperty('--av-h', avatarHue(t.id));  // the cover matches their avatar colour
   // The ring and heartbeat play when you open a teacher, not on every redraw (tabs, likes...).
@@ -5785,7 +5801,10 @@ function renderTeacherHero() {
       </div>
     </div>
     ${canPostOnTeacher()
-      ? `<button class="primary-btn th-cta" onclick="rateTeacher()"><i class="fa-solid fa-star"></i> ${mine ? 'Update your review' : `Rate ${escapeHtml(t.name)}`}</button>`
+      ? `<button class="primary-btn th-cta" onclick="rateTeacher()"><i class="fa-solid fa-star"></i> ${mine.length ? 'Review another course' : `Rate ${escapeHtml(t.name)}`}</button>
+         ${mine.length ? `<div class="th-my-reviews"><span>Your reviews:</span>${mine.map(p => `
+           <button type="button" class="tp-tag on" onclick="openTeacherPostModal('${escapeAttr(p.id)}')" title="Edit your review">
+             <i class="fa-solid fa-check"></i> ${escapeHtml(p.course || 'No course')} · ${p.rating}★</button>`).join('')}</div>` : ''}`
       : `<div class="teacher-readonly"><i class="fa-solid fa-eye"></i> ${currentUserId
           ? `Only students at ${escapeHtml(schoolName(t.school_id))} can post here.` : 'Sign in to post.'}</div>`}
   `;
@@ -5906,7 +5925,7 @@ function renderTeacherRelated() {
     }).join('')}</div>` : '';
 }
 
-// "Rate Ms. Lau": the review form (or your review, to update it).
+// "Rate Ms. Lau" / "Review another course": a new review (for a course you haven't reviewed yet).
 function rateTeacher() {
   if (teacherTab !== 'review') { teacherTab = 'review'; renderTeacherPage(); }
   openTeacherPostModal();
@@ -6136,8 +6155,8 @@ function renderTeacherCourseFilter() {
 
   const btn = document.getElementById('teacher-compose-btn');
   if (btn) {
-    const mine = teacherTab === 'review' && myReviewOnTeacher();
-    btn.textContent = mine ? 'Edit my review' : POST_KIND_META[teacherTab].cta;
+    const mine = teacherTab === 'review' && myReviewsOnTeacher().length > 0;
+    btn.textContent = mine ? '+ Review another course' : POST_KIND_META[teacherTab].cta;
     btn.disabled = !canPostOnTeacher();
   }
 }
@@ -6399,8 +6418,7 @@ function openTeacherPostModal(editId) {
     return showToast(`Only students at ${schoolName(currentTeacher.school_id)} can post here.`, 'warn');
   }
 
-  let post = editId ? teacherPosts.find(p => p.id === editId) : null;
-  if (!post && teacherTab === 'review') post = myReviewOnTeacher();
+  const post = editId ? teacherPosts.find(p => p.id === editId) : null;
   editingPostId = post?.id || null;
   composerKind = post?.kind || teacherTab;
   const meta = POST_KIND_META[composerKind];
@@ -6426,10 +6444,15 @@ function openTeacherPostModal(editId) {
   document.getElementById('tp-body-label').textContent = meta.bodyLabel;
 
   const courseInput = document.getElementById('tp-course');
-  courseInput.value = post?.course || '';
-  courseInput.placeholder = composerKind === 'requirement' ? 'Which course? (required)' : 'Course (optional)';
-  const courses = [...new Set(teacherPosts.map(p => (p.course || '').trim()).filter(Boolean))];
-  document.getElementById('tp-course-list').innerHTML = courses.map(c => `<option value="${escapeAttr(c)}"></option>`).join('');
+  const review = composerKind === 'review';
+  // A new review: start on a course you haven't reviewed yet (if the teacher only has one left).
+  const known = teacherKnownCourses();
+  const open = known.filter(c => !myReviewForCourse(c));
+  courseInput.value = post ? (post.course || '') : (review && known.length && open.length === 1 && myReviewsOnTeacher().length ? open[0] : '');
+  courseInput.placeholder = composerKind === 'requirement' ? 'Which course? (required)'
+    : review ? 'Which course did you take? (e.g. AP CSP)' : 'Course (optional)';
+  document.getElementById('tp-course-label').textContent = review ? 'Which course is this review for?' : 'Course';
+  document.getElementById('tp-course-list').innerHTML = known.map(c => `<option value="${escapeAttr(c)}"></option>`).join('');
 
   const body = document.getElementById('tp-body');
   // (A supply list with no note stores its lists as the text; don't show that twice.)
@@ -6443,11 +6466,48 @@ function openTeacherPostModal(editId) {
   syncTpAgain();
   renderTpTags();
   renderTpItems();
+  renderTpCoursePicks();
+  onTpCourseInput();
   updateTpCounter();
   document.getElementById('teacherPostModal').style.display = 'flex';
 }
 
 function closeTeacherPostModal() { document.getElementById('teacherPostModal').style.display = 'none'; }
+
+// Quick picks under the course box: the teacher's courses. For reviews, the
+// ones you've already reviewed are ticked and open that review to edit.
+function renderTpCoursePicks() {
+  const box = document.getElementById('tp-course-picks');
+  if (!box) return;
+  const known = teacherKnownCourses();
+  const review = composerKind === 'review';
+  box.innerHTML = known.length ? known.map(c => {
+    const done = review ? myReviewForCourse(c) : null;
+    if (done && done.id !== editingPostId) {
+      return `<button type="button" class="tp-tag reviewed" onclick="openTeacherPostModal('${escapeAttr(done.id)}')" title="You reviewed this. Tap to edit it">
+        <i class="fa-solid fa-check"></i> ${escapeHtml(c)}</button>`;
+    }
+    return `<button type="button" class="tp-tag ${courseKey(document.getElementById('tp-course')?.value) === courseKey(c) ? 'on' : ''}"
+      data-course="${escapeAttr(c)}" onclick="pickTpCourse(this.dataset.course)">${escapeHtml(c)}</button>`;
+  }).join('') : '';
+}
+function pickTpCourse(course) {
+  const input = document.getElementById('tp-course');
+  if (input) input.value = course;
+  onTpCourseInput();
+}
+// "You already reviewed AP CSP" (with a button to edit that one instead).
+function onTpCourseInput() {
+  const note = document.getElementById('tp-course-note');
+  if (!note) return;
+  const course = document.getElementById('tp-course')?.value || '';
+  const dupe = composerKind === 'review' && course.trim() ? myReviewForCourse(course) : null;
+  const show = !!dupe && dupe.id !== editingPostId;
+  note.hidden = !show;
+  note.innerHTML = show ? `<i class="fa-solid fa-circle-info"></i> You already reviewed ${escapeHtml(dupe.course)}.
+    <button type="button" class="text-btn" onclick="openTeacherPostModal('${escapeAttr(dupe.id)}')">Edit that review</button>` : '';
+  renderTpCoursePicks();
+}
 
 function renderTpScale(containerId, field, words) {
   const el = document.getElementById(containerId);
@@ -6498,6 +6558,15 @@ async function submitTeacherPost(event) {
   const course = document.getElementById('tp-course').value.replace(/\s+/g, ' ').trim() || null;
 
   if (kind === 'review' && !tpDraft.rating) return showToast('Pick an overall rating.', 'warn');
+  if (kind === 'review') {
+    // One review per course. (Old reviews saved without a course can stay that way.)
+    const editing = editingPostId ? teacherPosts.find(p => p.id === editingPostId) : null;
+    if (!course && !(editing && !editing.course)) return showToast('Which course is this review for?', 'warn');
+    const dupe = myReviewForCourse(course);
+    if (dupe && dupe.id !== editingPostId) {
+      return showToast(`You already reviewed ${dupe.course || 'this teacher'}. Edit that review instead.`, 'warn', 4500);
+    }
+  }
   if (kind === 'requirement' && !course) return showToast('Which course are these requirements for?', 'warn');
   // Something still typed in the item box counts too.
   if (kind === 'supplies' && document.getElementById('tp-item-input')?.value.trim()) addTpItem();
@@ -6529,7 +6598,11 @@ async function submitTeacherPost(event) {
   btn.disabled = false;
 
   if (error) {
-    if (error.code === '23505') return showToast('You already reviewed this teacher — edit that review instead.', 'warn', 4500);
+    if (error.code === '23505') {
+      return showToast(course
+        ? `You already reviewed ${course} with this teacher. Edit that review instead.`
+        : 'You already reviewed this teacher. Edit that review instead, or add a course to this one.', 'warn', 5000);
+    }
     if (kind === 'supplies' && /items|teacher_posts_kind_check|violates check/i.test(error.message || '')) {
       return showToast('Supply lists need a quick database update: run the updated SCHEMA.sql in Supabase.', 'warn', 5000);
     }

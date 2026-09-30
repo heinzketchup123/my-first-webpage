@@ -616,9 +616,13 @@ do $$ begin
     check (coalesce(array_length(items, 1), 0) <= 30);
 exception when duplicate_object then null;
 end $$;
--- One review per student per teacher (they can edit it instead).
-create unique index if not exists teacher_posts_one_review_per_user
-  on public.teacher_posts (teacher_id, author_id) where kind = 'review';
+-- One review per student per teacher per course: took two of their classes
+-- (say AP CSP and Apps)? Review each one. A review without a course counts as
+-- one "no course" review. (Replaces the older one-review-per-teacher rule.)
+drop index if exists public.teacher_posts_one_review_per_user;
+create unique index if not exists teacher_posts_one_review_per_course
+  on public.teacher_posts (teacher_id, author_id, lower(btrim(coalesce(course, ''))))
+  where kind = 'review';
 
 alter table public.teacher_posts enable row level security;
 do $$ declare p record; begin

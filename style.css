@@ -5085,3 +5085,27 @@ html.layout-desktop #events-view.active-view {
 html.layout-desktop #events-view > .cal-next { grid-area: next; }
 
 @media (prefers-reduced-motion: reduce) { .cal-next-dot { animation: none; } }
+
+/* ---------- Reviews per course ---------- */
+.th-my-reviews { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.th-my-reviews > span { font-size: 0.74rem; font-weight: 700; color: var(--sub-text-color); margin-right: 2px; }
+.th-my-reviews .tp-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 0.74rem; }
+.tp-course-picks { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 10px; }
+.tp-course-picks:empty { display: none; }
+.tp-course-picks .tp-tag.reviewed { display: inline-flex; align-items: center; gap: 5px; opacity: 0.75; border-style: dashed; }
+.tp-course-picks .tp-tag.reviewed i { color: var(--success); }
+.tp-course-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--accent-muted);
+  color: var(--main-text-color);
+  font-size: 0.78rem;
+}
+.tp-course-note[hidden] { display: none; }
+.tp-course-note i { color: var(--accent-color); }
+.tp-course-note .text-btn { font-size: 0.78rem; padding: 0; }

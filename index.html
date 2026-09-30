@@ -867,9 +867,12 @@
       </div>
       <p class="friends-hint" id="tp-modal-sub"></p>
       <form onsubmit="submitTeacherPost(event)">
-        <label class="tp-label" for="tp-course">Course</label>
-        <input type="text" id="tp-course" class="auth-input modal-input" list="tp-course-list" maxlength="60" placeholder="e.g. AP Biology" autocomplete="off" />
+        <label class="tp-label" for="tp-course" id="tp-course-label">Course</label>
+        <input type="text" id="tp-course" class="auth-input modal-input" list="tp-course-list" maxlength="60" placeholder="e.g. AP Biology"
+               autocomplete="off" oninput="onTpCourseInput()" />
         <datalist id="tp-course-list"></datalist>
+        <div class="tp-course-picks" id="tp-course-picks"></div>
+        <p class="tp-course-note" id="tp-course-note" hidden></p>
 
         <div id="tp-review-fields">
           <label class="tp-label">Overall rating</label>
