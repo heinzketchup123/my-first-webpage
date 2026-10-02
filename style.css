@@ -5301,3 +5301,101 @@ html.layout-phone .tpost-metrics .stars { display: none; }
 /* "Known for" under a teacher's name: the most-picked tags as chips with counts. */
 .th-known-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .th-known-label { margin-right: 2px; font-size: 0.78rem; font-weight: 600; color: var(--sub-text-color); }
+
+/* =====================================================================
+   ONE SYSTEM: the same size for the same kind of thing, on every page
+   The app grew a page at a time, so buttons came in five heights, labels
+   in six sizes, cards in four paddings. This sets one of each (the look -
+   glows, gradients, heartbeat, dots - stays exactly as it was):
+     corners   cards 16 · popups 20 · buttons and boxes 12 · tabs 10 · chips round
+     heights   big 44 (forms, popups, main actions) · normal 38 · small 32 · chips 30
+     text      card titles: display font 1rem · labels: one small-capitals style
+   ===================================================================== */
+:root {
+  --r-card: 16px; --r-pop: 20px; --r-ctl: 12px; --r-sm: 10px; --r-pill: 999px;
+  --h-lg: 44px; --h-md: 38px; --h-sm: 32px; --h-chip: 30px;
+}
+
+/* ---- Cards ---- */
+.hero-card, .info-card, .pref-card, .feed-post, .teacher-card, .group-card, .event-card, .cal-card,
+.gpa-dashboard-card, .side-panel, .settings-group, .chat-container, .teacher-hero, .cal-next-card,
+.admin-card, .tool-btn, .skel-card { border-radius: var(--r-card); }
+.hero-card, .gpa-dashboard-card { padding: 16px; }
+.modal-content { border-radius: var(--r-pop); }
+
+/* ---- Card and section titles: one style, each with an icon in the theme colour ---- */
+.section-header h3, .side-panel-head h3, .to-head h3, .group-title, .post-title,
+.teacher-card .teacher-meta strong {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+.section-header h3::before { content: none; display: none; }
+.section-header h3 i, .side-panel-head h3 i, .to-head h3 i { color: var(--accent-color); font-size: 0.84rem; }
+.section-header h3 { display: inline-flex; align-items: center; gap: 8px; color: var(--main-text-color); }
+
+/* ---- Labels (the small capitals above things): one style everywhere ---- */
+.sub-heading, .stat-label, .gpa-label, .gpa-stats small, .gpa-field span, .settings-group-title,
+.friends-subheading, .group-detail-label, .to-sec-head > span:first-child, .admin-section-head,
+.admin-people-label, .supply-group-head, .tp-label, .tstat-label, .cal-next-kicker, .group-course,
+html.layout-desktop .nav-section-label, html.layout-desktop #chat-view .strip-label {
+  font-family: var(--font);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  line-height: 1.3;
+}
+
+/* ---- Buttons: normal 38, big 44, small 32 ---- */
+.primary-btn, .secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: var(--h-md);
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border-radius: var(--r-ctl);
+  font-size: 0.84rem;
+  line-height: 1.25;
+}
+.primary-btn { border: 1px solid transparent; }
+.modal-content :is(.primary-btn, .secondary-btn), .auth-form .primary-btn, .google-btn,
+.settings-footer .logout-btn, .th-cta {
+  min-height: var(--h-lg);
+  font-size: 0.9rem;
+}
+:is(.primary-btn, .secondary-btn):is(.event-rsvp-btn, .set-btn, .friend-btn-sm, .admin-rule-btn, .admin-del-btn, .admin-refresh-btn) {
+  min-height: var(--h-sm);
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 0.78rem;
+}
+.display-name-form .primary-btn { padding-top: 7px; padding-bottom: 7px; }
+.review-trigger-btn { min-height: var(--h-sm); font-size: 0.8rem; }
+
+/* Chips, tabs, segmented buttons */
+.chip { min-height: var(--h-chip); border-radius: var(--r-pill); }
+.seg-btn, .teacher-tab { border-radius: var(--r-sm); }
+.segmented, .teacher-tabs { border-radius: var(--r-ctl); }
+
+/* ---- Text boxes and dropdowns: big 44, normal 38 ---- */
+.auth-input:not(textarea), .search-bar { min-height: var(--h-lg); border-radius: var(--r-ctl); }
+#search-view .search-input-wrapper .search-bar { padding-top: 11px; padding-bottom: 11px; border-radius: var(--r-ctl); }
+.mini-select { min-height: var(--h-md); border-radius: var(--r-ctl); }
+.gpa-field .auth-input, .display-name-form .auth-input { min-height: var(--h-md); padding-top: 8px; padding-bottom: 8px; }
+textarea.auth-input { border-radius: var(--r-ctl); }
+/* Home stats: the label stays on one line in its narrow box. */
+.stat-label { white-space: nowrap; letter-spacing: 0.04em; }
+/* Form field labels in Settings use the same small capitals as everywhere else. */
+.set-field > span {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+/* GPA "so far / goal" labels stay on one line so the three boxes line up. */
+.gpa-field span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.04em; }
