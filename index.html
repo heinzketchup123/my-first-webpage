@@ -274,16 +274,23 @@
         </div>
 
         <div class="teacher-dir-controls">
-          <select id="teacher-school-filter" class="mini-select flex-1" onchange="setTeacherDirSchool(this.value)"></select>
+          <select id="teacher-school-filter" class="mini-select flex-1" onchange="setTeacherDirSchool(this.value)" aria-label="School"></select>
+          <!-- Phones: sorting is a dropdown next to the school (the chips below are for computers) -->
+          <select id="teacher-sort-select" class="mini-select teacher-sort-select phone-only" onchange="setTeacherSort(this.value)" aria-label="Sort teachers">
+            <option value="top">Top Rated</option>
+            <option value="most">Most Reviewed</option>
+            <option value="easy">Easiest</option>
+            <option value="az">A–Z</option>
+          </select>
         </div>
 
         <div class="filter-chips subject-chips" id="teacher-subject-chips" hidden></div>
 
         <div class="filter-chips" id="teacher-sort-chips">
-          <button class="chip active" data-sort="top" onclick="setTeacherSort('top', this)">Top Rated</button>
-          <button class="chip" data-sort="most" onclick="setTeacherSort('most', this)">Most Reviewed</button>
-          <button class="chip" data-sort="easy" onclick="setTeacherSort('easy', this)">Easiest</button>
-          <button class="chip" data-sort="az" onclick="setTeacherSort('az', this)">A–Z</button>
+          <button class="chip active" data-sort="top" onclick="setTeacherSort('top')">Top Rated</button>
+          <button class="chip" data-sort="most" onclick="setTeacherSort('most')">Most Reviewed</button>
+          <button class="chip" data-sort="easy" onclick="setTeacherSort('easy')">Easiest</button>
+          <button class="chip" data-sort="az" onclick="setTeacherSort('az')">A–Z</button>
         </div>
 
         <p class="teacher-result-count" id="teacher-result-count" aria-live="polite"></p>

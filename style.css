@@ -5229,3 +5229,27 @@ body.light-mode .skel::after { background: linear-gradient(90deg, transparent, r
   .feed-post .post-delete-btn { opacity: 0.45; transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease; }
   .feed-post:hover .post-delete-btn, .feed-post .post-delete-btn:focus-visible { opacity: 1; }
 }
+
+/* ---------- Teachers page on phones: less to wade through ----------
+   - no description under the title (the page explains itself)
+   - school and sort side by side in one row; the sort chips are for computers
+   - cards: "subject · 12 reviews" under the name, then one line of facts
+     (no bubbles), and the classes line only while you're searching */
+html.layout-phone #search-view .page-header { margin-bottom: 12px; }
+html.layout-phone #search-view .page-header .description { display: none; }
+html.layout-phone #teacher-sort-chips { display: none; }
+.teacher-sort-select { flex: 0 0 auto; max-width: 42%; }
+html.layout-phone .teacher-dir-controls #teacher-school-filter { flex: 1 1 0; min-width: 0; }
+.tc-reviews { display: none; }
+
+html.layout-phone .teacher-card { gap: 8px; padding: 14px; margin: 0; }
+html.layout-phone .teacher-card .teacher-avatar { width: 46px; height: 46px; font-size: 0.98rem; }
+html.layout-phone .teacher-card .rating-badge { min-width: 44px; height: 44px; font-size: 1.05rem; border-radius: 13px; }
+html.layout-phone .tc-reviews { display: inline; }
+html.layout-phone .teacher-card .teacher-meta small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.layout-phone .teacher-card-stats { flex-wrap: nowrap; gap: 14px; padding-left: 58px; overflow: hidden; }
+html.layout-phone .teacher-card-stats span { padding: 0; background: none; white-space: nowrap; font-size: 0.74rem; }
+html.layout-phone .teacher-card-stats .ts-reviews,
+html.layout-phone .teacher-card-stats.only-reviews { display: none; }
+html.layout-phone #teacher-directory:not(.searching) .teacher-classes { display: none; }
+html.layout-phone #teacher-directory .teacher-card .teacher-classes { padding-left: 58px; }

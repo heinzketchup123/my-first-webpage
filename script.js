@@ -5668,9 +5668,12 @@ function setTeacherDirSchool(value) {
   fetchTeacherDirectory();
 }
 
-function setTeacherSort(mode, btn) {
+// From the chips (computer) or the dropdown (phone); both stay in step.
+function setTeacherSort(mode) {
   teacherSort = mode;
-  document.querySelectorAll('#teacher-sort-chips .chip').forEach(c => c.classList.toggle('active', c === btn));
+  document.querySelectorAll('#teacher-sort-chips .chip').forEach(c => c.classList.toggle('active', c.dataset.sort === mode));
+  const sel = document.getElementById('teacher-sort-select');
+  if (sel && sel.value !== mode) sel.value = mode;
   renderTeacherDirectory();
 }
 
@@ -5678,7 +5681,9 @@ function renderTeacherSchoolOptions() {
   const sel = document.getElementById('teacher-school-filter');
   if (!sel) return;
   sel.innerHTML = [
-    `<option value="mine">${currentSchool ? 'My school · ' + escapeHtml(currentSchool.name) : 'My school'}</option>`,
+    // (Phones: just the name, so it fits next to the sort dropdown.)
+    `<option value="mine">${!currentSchool ? 'My school'
+      : (document.documentElement.classList.contains('layout-phone') ? '' : 'My school · ') + escapeHtml(currentSchool.name)}</option>`,
     ...schoolsCache.filter(s => s.id !== currentSchoolId)
       .map(s => `<option value="${escapeAttr(s.id)}">${escapeHtml(s.name)}</option>`)
   ].join('');
@@ -5709,6 +5714,7 @@ function renderTeacherDirectory() {
   const q = (document.getElementById('teacher-search-input')?.value || '').trim();
   const list = teacherDir.filter(t => teacherMatchesSearch(t, q)
     && (teacherSubjectFilter === 'all' || teacherSubjectGroups(t).has(teacherSubjectFilter)));
+  container.classList.toggle('searching', !!q);
   const countEl = document.getElementById('teacher-result-count');
   if (countEl) {
     const total = teacherDir.length;
@@ -5743,11 +5749,13 @@ function renderTeacherDirectory() {
     const again = toNum(t.take_again_pct);
     const classes = teacherCourses[t.id] || [];
     const n = t.review_count || 0;
+    const reviews = n ? `${n} review${n === 1 ? '' : 's'}` : 'No reviews yet';
     const stats = [
-      `<span><i class="fa-solid fa-star"></i> ${n ? `${n} review${n === 1 ? '' : 's'}` : 'No reviews yet'}</span>`,
+      `<span class="ts-reviews"><i class="fa-solid fa-star"></i> ${reviews}</span>`,
       diff != null ? `<span><i class="fa-solid fa-gauge-high"></i> Difficulty ${diff.toFixed(1)}</span>` : '',
       again != null ? `<span><i class="fa-solid fa-rotate-right"></i> ${Math.round(again)}% would retake</span>` : ''
     ].join('');
+    const onlyReviews = diff == null && again == null;
     const teaches = classes.length
       ? `<div class="teacher-classes"><i class="fa-solid fa-book"></i> ${classes.slice(0, 3).map(escapeHtml).join(', ')}${classes.length > 3 ? ` +${classes.length - 3}` : ''}</div>` : '';
     return `
@@ -5756,11 +5764,11 @@ function renderTeacherDirectory() {
           <div class="teacher-avatar" data-seed="${escapeAttr(t.id)}">${escapeHtml(teacherInitials(t.name))}</div>
           <div class="teacher-meta">
             <strong>${escapeHtml(t.name)}</strong>
-            <small>${t.subject ? escapeHtml(t.subject) : 'No subject yet'}</small>
+            <small>${t.subject ? escapeHtml(t.subject) : 'No subject yet'}<span class="tc-reviews"> · ${reviews}</span></small>
           </div>
           <div class="rating-badge ${ratingClass(avg)}" title="Average rating">${avg != null ? avg.toFixed(1) : '–'}</div>
         </div>
-        <div class="teacher-card-stats">${stats}</div>
+        <div class="teacher-card-stats${onlyReviews ? ' only-reviews' : ''}">${stats}</div>
         ${teaches}
       </button>`;
   }).join('');
