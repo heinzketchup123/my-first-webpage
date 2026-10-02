@@ -306,17 +306,16 @@
         <!-- Computer: the teacher on the left, their reviews on the right. Phone: one column. -->
         <div class="teacher-side">
           <div id="teacher-hero" class="teacher-hero"></div>
-          <div id="teacher-overview" class="teacher-overview"></div>
           <div id="teacher-related" class="teacher-related"></div>
         </div>
 
         <div class="teacher-main">
         <div class="teacher-tabs" id="teacher-tabs">
-          <button class="teacher-tab active" data-kind="review" onclick="setTeacherTab('review')">
-            <i class="fa-solid fa-star"></i> Reviews <span class="tt-count" id="tt-count-review">0</span>
-          </button>
-          <button class="teacher-tab" data-kind="requirement" onclick="setTeacherTab('requirement')">
+          <button class="teacher-tab active" data-kind="requirement" onclick="setTeacherTab('requirement')">
             <i class="fa-solid fa-list-check"></i> Course Info <span class="tt-count" id="tt-count-requirement">0</span>
+          </button>
+          <button class="teacher-tab" data-kind="review" onclick="setTeacherTab('review')">
+            <i class="fa-solid fa-star"></i> Reviews <span class="tt-count" id="tt-count-review">0</span>
           </button>
           <button class="teacher-tab" data-kind="note" onclick="setTeacherTab('note')">
             <i class="fa-solid fa-note-sticky"></i> Notes <span class="tt-count" id="tt-count-note">0</span>
@@ -326,6 +325,8 @@
           </button>
         </div>
 
+        <!-- Course Info tab: the summary (ratings, top review, by course) above the course info posts -->
+        <div id="teacher-overview" class="teacher-overview"></div>
         <div class="filter-chips star-chips" id="teacher-star-chips" hidden></div>
 
         <div class="teacher-toolbar">

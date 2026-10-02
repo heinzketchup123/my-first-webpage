@@ -5255,13 +5255,12 @@ html.layout-phone #teacher-directory:not(.searching) .teacher-classes { display:
 html.layout-phone #teacher-directory .teacher-card .teacher-classes { padding-left: 58px; }
 
 /* ---------- A teacher's page on phones: straight to the reviews ----------
-   The summary cards repeat what's already on the page (the star buttons have
-   the counts, "Known for" has the top tags, Most liked puts the top review
-   first, and the course menu shows each course's rating), so phones skip
-   them; computers keep them in the side column. Admin delete moves next to
-   share/edit, the "+ Write" button hides on Reviews (the header has
-   "Rate …"), and reviews drop the star row (the coloured number says it). */
-html.layout-phone #teacher-overview { display: none; }
+   The summary cards (ratings, top review, by course) live in the Course Info
+   tab, which comes first. Admin delete sits next to share/edit, the "+ Write"
+   button hides on Reviews (the header has "Rate …"), and reviews drop the
+   star row (the coloured number says it). */
+.teacher-overview[hidden] { display: none; }
+.teacher-main > .teacher-overview { margin: 2px 0 14px; }
 html.layout-phone .teacher-hero .th-cover { height: 64px; }
 html.layout-phone .teacher-hero .th-head { margin-top: -30px; }
 html.layout-phone .teacher-compose-btn.on-reviews { display: none; }

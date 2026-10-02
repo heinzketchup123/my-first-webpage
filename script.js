@@ -5551,7 +5551,7 @@ let tpCommentsReady = null;       // false until SCHEMA.sql section 6k has been 
 let tpVotesHaveValue = true;      // false until the database knows about dislikes
 const openTpComments = new Set(); // posts whose comments are showing
 const tpBusy = new Set();         // posts with a vote on its way
-let teacherTab = 'review';
+let teacherTab = 'requirement';   // Course Info opens first
 let reviewStarFilter = 0;         // 1-5 = only reviews with that many stars, 0 = all
 let teacherPostSort = 'liked';    // 'liked' | 'new' | 'high' | 'low'
 let composerKind = 'review';
@@ -5864,7 +5864,7 @@ async function submitAddTeacher(event) {
 
 async function openTeacherPage(id) {
   lastTeacherId = id;
-  teacherTab = 'review';
+  teacherTab = 'requirement';
   if (String(id) !== String(currentTeacher?.id)) { openTpComments.clear(); reviewStarFilter = 0; }
   currentTeacher = null;
   teacherPosts = [];
@@ -5957,6 +5957,8 @@ function renderTeacherPage() {
   });
   document.querySelectorAll('#teacher-tabs .teacher-tab')
     .forEach(b => b.classList.toggle('active', b.dataset.kind === teacherTab));
+  const overview = document.getElementById('teacher-overview');
+  if (overview) overview.hidden = teacherTab !== 'requirement';   // the summary sits in Course Info
   renderTeacherCourseFilter();
   renderTeacherReviewControls();
   renderTeacherPosts();
@@ -5989,7 +5991,7 @@ function renderTeacherHero() {
       <div class="th-actions">
         <button class="th-icon-btn" onclick="shareTeacher()" aria-label="Share ${escapeAttr(t.name)}" title="Share"><i class="fa-solid fa-share-nodes"></i></button>
         ${canEditTeacher() ? `<button class="th-icon-btn" onclick="openAddTeacherModal(true)" aria-label="${t.subject ? 'Edit name and subjects' : 'Add subjects'}" title="Edit"><i class="fa-solid fa-pen"></i></button>` : ''}
-        ${canManageSchool(t.school_id) ? `<button class="th-icon-btn th-admin-icon phone-only" onclick="adminDeleteTeacher()" aria-label="Admin: delete this teacher page" title="Admin: delete this teacher page"><i class="fa-solid fa-trash"></i></button>` : ''}
+        ${canManageSchool(t.school_id) ? `<button class="th-icon-btn th-admin-icon" onclick="adminDeleteTeacher()" aria-label="Admin: delete this teacher page" title="Admin: delete this teacher page"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
     </div>
     <div class="teacher-hero-text">
@@ -6098,9 +6100,7 @@ function renderTeacherOverview() {
             ${c.reviews ? `<span class="rating-badge sm ${ratingClass(c.rating / c.reviews)}">${(c.rating / c.reviews).toFixed(1)}</span>` : ''}
           </button>`).join('')}
         </div>
-      </div>` : '',
-    canManageSchool(t.school_id) ? `<button class="text-btn th-admin-delete" onclick="adminDeleteTeacher()">
-      <i class="fa-solid fa-shield-halved"></i> Admin: delete this teacher page</button>` : ''
+      </div>` : ''
   ].join('');
 }
 
