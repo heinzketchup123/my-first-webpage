@@ -5130,3 +5130,102 @@ body:not(.light-mode) .gpa-score {
   color: var(--accent-color);
   text-shadow: 0 0 18px var(--accent-muted);
 }
+
+/* =====================================================================
+   PRO PASS: same look (glows, gradients, heartbeat and dots all stay),
+   tighter details
+   - page headers: title and button on one line, the description full width
+   - dropdowns drawn the same on every phone and computer
+   - headings and paragraphs wrap evenly (no single word left on a line)
+   - numbers line up (same-width digits)
+   - one corner size for cards
+   - grey placeholder cards while lists load, instead of "nothing here"
+   - admin delete actions are quieter
+   ===================================================================== */
+
+/* Page headers */
+.page-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; align-items: start; }
+.page-header-text { display: contents; }
+.page-header .page-title { grid-column: 1; grid-row: 1; }
+.page-header > button { grid-column: 2; grid-row: 1; align-self: start; margin-top: 4px; }
+.page-header .description { grid-column: 1 / -1; grid-row: 2; margin-top: 2px; max-width: 60ch; }
+
+/* Dropdowns: our own arrow, the same everywhere */
+select.mini-select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238a94a6' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 11px 8px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+.gpa-fields select.mini-select { padding-right: 24px; background-position: right 8px center; }
+select.mini-select::-ms-expand { display: none; }
+
+/* Even line breaks */
+.page-title, .hero-title, .post-title, .modal-title, .auth-form h2, .section-header h3,
+.teacher-hero-text h1, .group-title, .empty-state p { text-wrap: balance; }
+.description, .post-body, .auth-tagline, .admin-hint, .set-hint { text-wrap: pretty; }
+
+/* Numbers that line up */
+.stat-number, .chip-count, .tt-count, .rating-badge, .gpa-stats b, .gpa-pts, .timer-display,
+.th-ring-text strong, .th-meter b, .notif-badge, .reaction-chip, .post-actions, .cal-day,
+.event-countdown, .ev-countdown, .group-seats { font-variant-numeric: tabular-nums; }
+
+/* One corner size for cards */
+.hero-card, .info-card, .pref-card, .feed-post, .teacher-card, .group-card, .event-card, .cal-card,
+.gpa-dashboard-card, .side-panel, .settings-group, .cal-next-card { border-radius: 16px; }
+
+/* Loading placeholders */
+.skel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  text-align: left;
+}
+html.layout-desktop :is(#teacher-directory, #groups-list) > .skel-card { margin: 0; }
+.skel-side { display: flex; align-items: center; gap: 10px; padding: 8px 2px; }
+.skel { position: relative; display: block; overflow: hidden; border-radius: 6px; background: var(--input-bg); }
+.skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+  animation: skel-sweep 1.4s ease-in-out infinite;
+}
+body.light-mode .skel::after { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent); }
+@keyframes skel-sweep { to { transform: translateX(100%); } }
+.skel-line { height: 10px; }
+.skel-line.tall { height: 14px; }
+.skel-circle { width: 38px; height: 38px; flex-shrink: 0; border-radius: 50%; }
+.skel-square { width: 44px; height: 44px; flex-shrink: 0; border-radius: 12px; }
+.skel-square.sm { width: 34px; height: 34px; border-radius: 10px; }
+.skel-row { display: flex; align-items: center; gap: 12px; }
+.skel-col { display: flex; flex: 1; flex-direction: column; gap: 7px; min-width: 0; }
+@media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
+
+/* Admin actions: still there, less shouty */
+.th-admin-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
+  font-weight: 600;
+}
+@media (hover: hover) and (pointer: fine) {
+  .feed-post .post-delete-btn { opacity: 0.45; transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease; }
+  .feed-post:hover .post-delete-btn, .feed-post .post-delete-btn:focus-visible { opacity: 1; }
+}

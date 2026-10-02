@@ -147,7 +147,9 @@
                 aria-label="Anonymous mode is on. Open the setting." title="Anonymous mode is on">
           <i class="fa-solid fa-user-secret"></i><span>Anonymous</span>
         </button>
-        <button class="review-trigger-btn phone-only" onclick="switchTab('search-view')"><i class="fa-solid fa-chalkboard-user"></i> Teachers</button>
+        <button class="icon-header-btn phone-only" onclick="openTeacherSearch()" aria-label="Search teachers" title="Search teachers">
+          <i class="fa-solid fa-magnifying-glass"></i>
+        </button>
         <button class="icon-header-btn" onclick="toggleNotifications()" aria-label="Notifications">
           <i class="fa-solid fa-bell"></i>
           <span id="notif-badge" class="notif-badge" style="display:none;">0</span>

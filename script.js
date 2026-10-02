@@ -377,6 +377,7 @@ function initSupabaseRealtime() {
 }
 
 async function loadAllSupabaseData() {
+  showLoadingLists();
   await fetchBlocks();   // first, so nothing from people you've blocked flashes up
   await Promise.all([fetchFeed(), fetchGroups(), fetchFriendships(), fetchTeacherDirectory(),
                      fetchMyReviewCount(), fetchEvents(), fetchNotifications()]);
@@ -402,12 +403,36 @@ async function readSafe(table, build) {
   return build(supabaseClient.from(table), false);
 }
 
+// -------------------- Loading placeholders --------------------
+// Until a list's first load comes back it shows grey placeholder cards, not
+// "No posts yet" (which would be wrong for a moment every time you sign in).
+const listsLoaded = new Set();
+function listLoading(key) { return isSupabaseConnected && !!currentUserId && !listsLoaded.has(key); }
+function skeletonCards(kind, n = 3) {
+  const line = (w, cls = '') => `<span class="skel skel-line ${cls}" style="width:${w}%"></span>`;
+  const card = {
+    post: `<div class="skel-card" aria-hidden="true">
+      <div class="skel-row"><span class="skel skel-circle"></span><span class="skel-col">${line(38)}${line(22)}</span></div>
+      ${line(62, 'tall')}${line(96)}${line(80)}</div>`,
+    row: `<div class="skel-card" aria-hidden="true">
+      <div class="skel-row"><span class="skel skel-square"></span><span class="skel-col">${line(55, 'tall')}${line(35)}</span></div>
+      ${line(70)}</div>`,
+    side: `<div class="skel-side" aria-hidden="true"><span class="skel skel-square sm"></span><span class="skel-col">${line(70)}${line(45)}</span></div>`
+  }[kind] || '';
+  return card.repeat(n);
+}
+// Lists that were painted before signing in show placeholders while loading.
+function showLoadingLists() {
+  renderFeed(); renderGroups(); renderTeacherDirectory(); renderCalendar();
+}
+
 async function fetchFeed() {
   const { data, error } = await readSafe('campus_feed', q => q
     .select('*')
     .order('created_at', { ascending: false })
     .limit(50));
-  if (error) { showToast('Feed load failed: ' + error.message, 'error'); return; }
+  listsLoaded.add('feed');
+  if (error) { renderFeed(); showToast('Feed load failed: ' + error.message, 'error'); return; }
   campusFeed = data || [];
   await fetchFeedExtras();
   renderFeed();
@@ -424,7 +449,8 @@ async function fetchGroups() {
     // Invites to you, ones you sent, and ones in groups you host (6o).
     supabaseClient.from('study_group_invites').select('group_id, user_id, invited_by, created_at')
   ]);
-  if (error) { showToast('Groups load failed: ' + error.message, 'error'); return; }
+  listsLoaded.add('groups');
+  if (error) { renderGroups(); showToast('Groups load failed: ' + error.message, 'error'); return; }
   if (memRes?.error) console.warn('group members load failed:', memRes.error.message);
 
   // Who is in each group comes from the join table, so member counts, the
@@ -663,6 +689,7 @@ async function logout() {
   blockedIds = new Set(); blocksReady = null;
   gpaState = { mode: 'unweighted', input: 'letter', prevGpa: '', prevCredits: '', target: '' };
   clearTimeout(gpaSyncTimer); gpaSyncTimer = null; gpaEditedAt = 0; gpaCloudReady = false; gpaCloudOff = false;
+  listsLoaded.clear();
   ['gpa-prev', 'gpa-prev-credits', 'gpa-target'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   groupFilter = 'all'; groupMembers = {};
   selectedFriendId = null; selectedGroupChatId = null; groupChatReady = null; dmMessages = [];
@@ -1635,7 +1662,7 @@ function renderHomeSide() {
   if (up) {
     const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
     const next = calEvents.filter(e => new Date(e.starts_at) >= startOfToday).slice(0, 3);
-    up.innerHTML = next.length ? next.map(e => {
+    up.innerHTML = !next.length && listLoading('events') ? skeletonCards('side', 3) : next.length ? next.map(e => {
       const d = new Date(e.starts_at);
       const when = e.all_day ? 'All day' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       return `
@@ -1649,7 +1676,7 @@ function renderHomeSide() {
   const gr = document.getElementById('home-groups');
   if (gr) {
     const mine = studyGroups.filter(g => g.joined).slice(0, 3);
-    gr.innerHTML = mine.length ? mine.map(g => `
+    gr.innerHTML = !mine.length && listLoading('groups') ? skeletonCards('side', 2) : mine.length ? mine.map(g => `
       <button class="side-item" onclick="openGroupDetailModal('${escapeAttr(g.id)}')">
         <span class="side-icon"><i class="fa-solid fa-book-open"></i></span>
         <span class="side-text"><strong>${escapeHtml(g.name || '')}</strong>
@@ -2924,6 +2951,7 @@ function renderFeed() {
   container.innerHTML = '';
 
   const list = sortedFeed();
+  if (!list.length && listLoading('feed')) { container.innerHTML = skeletonCards('post', 3); return; }
   if (!list.length) {
     container.innerHTML = `<div class="empty-state">
       <i class="fa-solid fa-bullhorn"></i>
@@ -3201,6 +3229,7 @@ function renderGroups(filter) {
       : groupFilter === 'invited' ? invitedTo(g) : true) && matches(g))
     .sort((a, b) => invitedTo(b) - invitedTo(a));   // invites first
 
+  if (!list.length && !q && listLoading('groups')) { container.innerHTML = skeletonCards('row', 2); return; }
   if (!list.length) {
     const msg = q ? `No groups match "${q}".`
       : groupFilter === 'mine' ? "You haven't joined any groups yet."
@@ -3669,6 +3698,7 @@ async function fetchEvents() {
       .eq('school_id', currentSchoolId).order('starts_at', { ascending: true }).limit(1000),
     supabaseClient.from('event_rsvps').select('event_id, user_id')
   ]);
+  listsLoaded.add('events');
   if (evRes.error) {
     calEvents = []; renderCalendar();
     return showToast('Could not load events: ' + evRes.error.message, 'error');
@@ -3790,6 +3820,7 @@ function renderCalNext() {
   const box = document.getElementById('cal-next');
   if (!box) return;
   if (!currentUserId || !currentSchoolId) { box.innerHTML = ''; return; }
+  if (!calEvents.length && listLoading('events')) { box.innerHTML = skeletonCards('row', 1); return; }
   const next = calEvents.filter(e => !eventIsOver(e)).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at))[0];
   if (!next) {
     box.innerHTML = `
@@ -3845,6 +3876,7 @@ function renderEventList() {
     list = calEvents.filter(e => new Date(e.starts_at) >= startOfToday).slice(0, 30);
   }
 
+  if (!list.length && listLoading('events')) { container.innerHTML = skeletonCards('row', 2); return; }
   if (!list.length) {
     container.innerHTML = `<div class="empty-state"><i class="fa-solid fa-calendar-plus"></i>
       <p>${calSelectedDay ? 'Nothing on this day.' : 'No upcoming events yet.'}</p>
@@ -5562,7 +5594,8 @@ async function fetchTeacherDirectory() {
   if (!school) { teacherDir = []; return renderTeacherDirectory(); }
   const { data, error } = await supabaseClient
     .from('teacher_stats').select('*').eq('school_id', school).limit(500);
-  if (error) return showToast('Could not load teachers: ' + error.message, 'error');
+  listsLoaded.add('teachers:' + school);
+  if (error) { renderTeacherDirectory(); return showToast('Could not load teachers: ' + error.message, 'error'); }
   teacherDir = data || [];
   // The classes students listed on their reviews / notes, so those are searchable too.
   const ids = teacherDir.map(t => t.id);
@@ -5668,6 +5701,10 @@ function renderTeacherDirectory() {
     return;
   }
 
+  if (!teacherDir.length && listLoading('teachers:' + dirSchoolId())) {
+    container.innerHTML = skeletonCards('row', 4);
+    return;
+  }
   renderTeacherSubjectChips();
   const q = (document.getElementById('teacher-search-input')?.value || '').trim();
   const list = teacherDir.filter(t => teacherMatchesSearch(t, q)
@@ -5727,6 +5764,12 @@ function renderTeacherDirectory() {
         ${teaches}
       </button>`;
   }).join('');
+}
+
+// The search button in the phone's top bar: the Teachers page, ready to type.
+function openTeacherSearch() {
+  switchTab('search-view');
+  setTimeout(() => document.getElementById('teacher-search-input')?.focus(), 60);
 }
 
 // The Teachers page's own search box and the top bar's (on a computer) stay in step.
