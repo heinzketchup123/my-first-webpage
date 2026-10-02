@@ -5297,3 +5297,7 @@ html.layout-phone .tpost-metrics .stars { display: none; }
 }
 .to-summary .to-course:hover { background: var(--input-bg); }
 .to-summary .to-course.active { background: var(--accent-muted); }
+
+/* "Known for" under a teacher's name: the most-picked tags as chips with counts. */
+.th-known-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.th-known-label { margin-right: 2px; font-size: 0.78rem; font-weight: 600; color: var(--sub-text-color); }

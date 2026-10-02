@@ -5974,7 +5974,8 @@ function renderTeacherHero() {
   const again = toNum(t.take_again_pct);
   const tagCounts = {};
   reviews.forEach(r => (r.tags || []).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }));
-  const known = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([tag]) => tag);
+  // "Known for": the tags students picked most (up to six), with how many picked each.
+  const known = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const C = 2 * Math.PI * 34;                       // the rating ring's length
   const frac = avg != null ? Math.max(0, Math.min(1, avg / 5)) : 0;
   const diffDots = [1, 2, 3, 4, 5].map(n => `<i class="${diff != null && n <= Math.round(diff) ? 'on' : ''}"></i>`).join('');
@@ -5997,7 +5998,8 @@ function renderTeacherHero() {
     <div class="teacher-hero-text">
       <h1>${escapeHtml(t.name)}</h1>
       <p>${[t.subject || 'No subject yet', schoolName(t.school_id)].filter(Boolean).map(escapeHtml).join(' · ')}</p>
-      ${known.length ? `<p class="th-known"><i class="fa-solid fa-bolt"></i> Known for ${known.map(k => `<b>${escapeHtml(k)}</b>`).join(', ')}</p>` : ''}
+      ${known.length ? `<div class="th-known th-known-tags"><span class="th-known-label"><i class="fa-solid fa-bolt"></i> Known for</span>
+        ${known.map(([tag, c]) => `<span class="tag-chip">${escapeHtml(tag)} <b>${c}</b></span>`).join('')}</div>` : ''}
     </div>
     <div class="th-score">
       <div class="th-ring ${ratingClass(avg)}" role="img" aria-label="${avg != null ? `Rated ${avg.toFixed(1)} out of 5` : 'No ratings yet'}">
