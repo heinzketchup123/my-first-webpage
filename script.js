@@ -5989,6 +5989,7 @@ function renderTeacherHero() {
       <div class="th-actions">
         <button class="th-icon-btn" onclick="shareTeacher()" aria-label="Share ${escapeAttr(t.name)}" title="Share"><i class="fa-solid fa-share-nodes"></i></button>
         ${canEditTeacher() ? `<button class="th-icon-btn" onclick="openAddTeacherModal(true)" aria-label="${t.subject ? 'Edit name and subjects' : 'Add subjects'}" title="Edit"><i class="fa-solid fa-pen"></i></button>` : ''}
+        ${canManageSchool(t.school_id) ? `<button class="th-icon-btn th-admin-icon phone-only" onclick="adminDeleteTeacher()" aria-label="Admin: delete this teacher page" title="Admin: delete this teacher page"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
     </div>
     <div class="teacher-hero-text">
@@ -6359,8 +6360,13 @@ function renderTeacherCourseFilter() {
   const prev = sel.value;
   const courses = [...new Set(teacherPosts.filter(p => p.kind === teacherTab)
     .map(p => (p.course || '').trim()).filter(Boolean))].sort();
+  const courseLabel = c => {
+    if (teacherTab !== 'review') return escapeHtml(c);
+    const rs = teacherPosts.filter(p => p.kind === 'review' && p.rating && (p.course || '').trim() === c);
+    return rs.length ? `${escapeHtml(c)} · ${(rs.reduce((s, p) => s + p.rating, 0) / rs.length).toFixed(1)}★ (${rs.length})` : escapeHtml(c);
+  };
   sel.innerHTML = `<option value="all">All courses</option>` +
-    courses.map(c => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('');
+    courses.map(c => `<option value="${escapeAttr(c)}">${courseLabel(c)}</option>`).join('');
   sel.value = courses.includes(prev) ? prev : 'all';
   sel.style.visibility = courses.length ? 'visible' : 'hidden';
 
@@ -6369,6 +6375,7 @@ function renderTeacherCourseFilter() {
     const mine = teacherTab === 'review' && myReviewsOnTeacher().length > 0;
     btn.textContent = mine ? '+ Review another course' : POST_KIND_META[teacherTab].cta;
     btn.disabled = !canPostOnTeacher();
+    btn.classList.toggle('on-reviews', teacherTab === 'review');
   }
 }
 
