@@ -6040,9 +6040,6 @@ function renderTeacherOverview() {
               aria-pressed="${on}" aria-label="${on ? 'Show all reviews' : `Show ${n}-star reviews (${c})`}">
               <span>${n}★</span><div class="dist-bar"><div style="width:${pct}%"></div></div><span>${c}</span></button>`;
   }).join('');
-  const tagCounts = {};
-  reviews.forEach(r => (r.tags || []).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }));
-  const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
   const likes = p => teacherVotes[p.id]?.up || 0;
   const score = p => likes(p) - (teacherVotes[p.id]?.down || 0);
@@ -6067,41 +6064,39 @@ function renderTeacherOverview() {
   const activeCourse = document.getElementById('teacher-course-filter')?.value || 'all';
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-  box.innerHTML = [
-    reviews.length ? `
-      <div class="info-card to-card">
-        <div class="to-head"><h3><i class="fa-solid fa-chart-simple"></i> What students say</h3><small>${plural(reviews.length, 'review')}</small></div>
-        <div class="rating-dist">${dist}</div>
-        ${topTags.length ? `<div class="teacher-top-tags">${topTags.map(([tag, c]) => `<span class="tag-chip">${escapeHtml(tag)} <b>${c}</b></span>`).join('')}</div>` : ''}
-      </div>` : `
+  // One card in three parts (ratings, the top review, by course), split by
+  // thin lines, instead of three separate cards.
+  const part = (label, extra, body, cls = '') => `
+      <section class="to-sec ${cls}">
+        ${label ? `<div class="to-sec-head"><span>${label}</span>${extra || ''}</div>` : ''}
+        ${body}
+      </section>`;
+  box.innerHTML = !reviews.length && !courses.length ? `
       <div class="info-card to-card to-empty">
         <i class="fa-regular fa-star"></i>
         <div><strong>No reviews yet</strong><small>Be the first to say what ${escapeHtml(t.name)}'s class is like.</small></div>
-      </div>`,
-    top ? `
-      <div class="info-card to-card to-quote">
-        <div class="to-head"><h3><i class="fa-solid fa-quote-left"></i> Top review</h3><span class="rating-badge sm ${ratingClass(top.rating)}">${top.rating}</span></div>
-        <blockquote>${escapeHtml(topText.length > 240 ? topText.slice(0, 237).trimEnd() + '…' : topText)}</blockquote>
-        <div class="to-quote-foot">
-          <span>${escapeHtml(topWho)}${top.course ? ' · ' + escapeHtml(top.course) : ''}</span>
-          <span><i class="fa-solid fa-thumbs-up"></i> ${likes(top)}</span>
-        </div>
-        ${reviews.length > 1 ? `<button class="text-btn to-more" onclick="jumpToTeacherPosts('review')">Read all ${reviews.length} reviews <i class="fa-solid fa-arrow-down"></i></button>` : ''}
-      </div>` : '',
-    courses.length ? `
-      <div class="info-card to-card">
-        <div class="to-head"><h3><i class="fa-solid fa-book-open"></i> By course</h3>
-          ${activeCourse !== 'all' ? `<button class="text-btn" onclick="filterTeacherCourse('all')">Show all</button>` : ''}</div>
-        <div class="to-courses">${courses.map(c => `
-          <button type="button" class="to-course ${activeCourse === c.course ? 'active' : ''}" data-course="${escapeAttr(c.course)}"
-                  onclick="filterTeacherCourse(this.dataset.course)" aria-pressed="${activeCourse === c.course}">
-            <span class="to-course-name">${escapeHtml(c.course)}</span>
-            <span class="to-course-meta">${c.reviews ? plural(c.reviews, 'review') : plural(c.posts, 'post')}${c.diffN ? ` · difficulty ${(c.diff / c.diffN).toFixed(1)}` : ''}</span>
-            ${c.reviews ? `<span class="rating-badge sm ${ratingClass(c.rating / c.reviews)}">${(c.rating / c.reviews).toFixed(1)}</span>` : ''}
-          </button>`).join('')}
-        </div>
-      </div>` : ''
-  ].join('');
+      </div>` : `
+      <div class="info-card to-card to-summary">
+        <div class="to-head"><h3><i class="fa-solid fa-chart-simple"></i> What students say</h3>
+          <small>${reviews.length ? plural(reviews.length, 'review') : 'No reviews yet'}</small></div>
+        ${reviews.length ? part('', '', `<div class="rating-dist">${dist}</div>`) : ''}
+        ${top ? part('Top review', `<span class="rating-badge sm ${ratingClass(top.rating)}">${top.rating}</span>`, `
+          <blockquote>${escapeHtml(topText.length > 240 ? topText.slice(0, 237).trimEnd() + '…' : topText)}</blockquote>
+          <div class="to-quote-foot">
+            <span>${escapeHtml(topWho)}${top.course ? ' · ' + escapeHtml(top.course) : ''}</span>
+            <span><i class="fa-solid fa-thumbs-up"></i> ${likes(top)}</span>
+          </div>`, 'to-quote') : ''}
+        ${courses.length ? part('By course',
+          activeCourse !== 'all' ? `<button class="text-btn" onclick="filterTeacherCourse('all')">Show all</button>` : '', `
+          <div class="to-courses">${courses.map(c => `
+            <button type="button" class="to-course ${activeCourse === c.course ? 'active' : ''}" data-course="${escapeAttr(c.course)}"
+                    onclick="filterTeacherCourse(this.dataset.course)" aria-pressed="${activeCourse === c.course}">
+              <span class="to-course-name">${escapeHtml(c.course)}</span>
+              <span class="to-course-meta">${c.reviews ? plural(c.reviews, 'review') : plural(c.posts, 'post')}${c.diffN ? ` · difficulty ${(c.diff / c.diffN).toFixed(1)}` : ''}</span>
+              ${c.reviews ? `<span class="rating-badge sm ${ratingClass(c.rating / c.reviews)}">${(c.rating / c.reviews).toFixed(1)}</span>` : ''}
+            </button>`).join('')}
+          </div>`) : ''}
+      </div>`;
 }
 
 // Other teachers of the same subject at the school (or just others there).
