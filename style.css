@@ -5399,3 +5399,28 @@ textarea.auth-input { border-radius: var(--r-ctl); }
 }
 /* GPA "so far / goal" labels stay on one line so the three boxes line up. */
 .gpa-field span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.04em; }
+
+/* ---------- Private calendar events ----------
+   "Who can see it?" in the Add event form, and a small badge on events that
+   aren't for the whole school (Friends / Only you). */
+.ev-vis-seg { margin-bottom: 4px; }
+.ev-vis-seg .seg-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.ev-vis {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+.ev-vis i { font-size: 0.62rem; }
+.ev-vis-private { background: color-mix(in srgb, var(--anon, #a78bfa) 18%, transparent); color: var(--anon, #a78bfa); }
+.ev-vis-friends { background: var(--accent-muted); color: var(--accent-color); }
+.ev-vis-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 8px !important; font-size: 0.8rem; color: var(--sub-text-color); }
+.cal-next-foot .ev-vis { margin-right: 0; }

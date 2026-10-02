@@ -1669,7 +1669,7 @@ function renderHomeSide() {
         <button class="side-item" onclick="openEventPage('${escapeAttr(e.id)}')">
           <span class="side-date"><small>${d.toLocaleDateString([], { month: 'short' })}</small><b>${d.getDate()}</b></span>
           <span class="side-text"><strong>${escapeHtml(e.title)}</strong>
-            <small>${dayKey(d) === dayKey(new Date()) ? 'Today' : d.toLocaleDateString([], { weekday: 'short' })} · ${when}</small></span>
+            <small>${eventVis(e) === 'private' ? '<i class="fa-solid fa-lock" title="Only you"></i> ' : eventVis(e) === 'friends' ? '<i class="fa-solid fa-user-group" title="Friends"></i> ' : ''}${dayKey(d) === dayKey(new Date()) ? 'Today' : d.toLocaleDateString([], { weekday: 'short' })} · ${when}</small></span>
         </button>`;
     }).join('') : `<p class="side-empty">No upcoming events. <button class="text-btn" onclick="openEventModal()">Add one</button></p>`;
   }
@@ -3845,9 +3845,10 @@ function renderCalNext() {
         </div>
       </div>
       <div class="cal-next-foot">
-        ${goingFaces(r.who || [])}
+        ${eventVis(next) === 'private' ? `${eventVisBadge(next)}<span class="event-going">Only you can see this</span>` : `
+        ${eventVisBadge(next)}${goingFaces(r.who || [])}
         <span class="event-going">${r.count ? `${r.count} going` : 'Be the first to go'}</span>
-        <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} event-rsvp-btn" onclick="event.stopPropagation(); toggleRsvp('${id}')">${r.mine ? '✓ Going' : "I'm going"}</button>
+        <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} event-rsvp-btn" onclick="event.stopPropagation(); toggleRsvp('${id}')">${r.mine ? '✓ Going' : "I'm going"}</button>`}
       </div>
     </div>`;
 }
@@ -3894,25 +3895,49 @@ function renderEventList() {
   }).join('');
 }
 
+// ---- Who can see an event (SCHEMA.sql 6q) ----
+// Everyone at the school (the default), the creator's friends, or only the
+// creator. "Only me" events are personal: no RSVPs, no share link.
+const EVENT_VIS = {
+  school:  { icon: 'fa-school', badge: '' },
+  friends: { icon: 'fa-user-group', badge: 'Friends' },
+  private: { icon: 'fa-lock', badge: 'Only you' }
+};
+function eventVis(e) { return EVENT_VIS[e?.visibility] ? e.visibility : 'school'; }
+function eventVisBadge(e) {
+  const v = eventVis(e);
+  return v === 'school' ? '' : `<span class="ev-vis ev-vis-${v}"><i class="fa-solid ${EVENT_VIS[v].icon}"></i> ${EVENT_VIS[v].badge}</span>`;
+}
+let evVisibility = 'school';      // the form keeps your last choice while the app is open
+function setEventVisibility(v) {
+  evVisibility = EVENT_VIS[v] ? v : 'school';
+  document.querySelectorAll('#ev-vis-seg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.vis === evVisibility));
+  const sub = document.getElementById('ev-modal-sub');
+  if (sub) sub.textContent = evVisibility === 'private' ? 'Only you will see it: good for your own tests and reminders.'
+    : evVisibility === 'friends' ? 'Only your friends will see it, and they can say they’re going.'
+    : `Everyone at ${currentSchool?.name || 'your school'} will see it.`;
+}
+
 function eventCardHtml(e) {
   const d = new Date(e.starts_at);
   const r = calRsvps[e.id] || { count: 0, mine: false, who: [] };
   const past = eventIsOver(e);
   const id = escapeAttr(e.id);
+  const personal = eventVis(e) === 'private';
   return `
     <div class="info-card event-card ${past ? 'past' : ''}" role="button" tabindex="0" style="--av-h:${avatarHue(e.id)}"
          onclick="openEventPage('${id}')" onkeydown="pressOnEnter(event)" aria-label="${escapeAttr(e.title)}, ${escapeAttr(dayWords(d))}">
       ${eventDateBlock(e, 'sm')}
       <div class="event-body">
         <strong>${escapeHtml(e.title)}</strong>
-        <small>${escapeHtml(eventTime(e))}${e.location ? ` · <i class="fa-solid fa-location-dot"></i> ${escapeHtml(e.location)}` : ''}</small>
+        <small>${eventVisBadge(e)}${escapeHtml(eventTime(e))}${e.location ? ` · <i class="fa-solid fa-location-dot"></i> ${escapeHtml(e.location)}` : ''}</small>
         ${e.description ? `<p class="event-desc">${escapeHtml(e.description)}</p>` : ''}
-        <div class="event-actions">
+        ${personal ? '' : `<div class="event-actions">
           <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} event-rsvp-btn"
             onclick="event.stopPropagation(); toggleRsvp('${id}')" ${past ? 'disabled' : ''}>${r.mine ? '✓ Going' : "I'm going"}</button>
           ${goingFaces(r.who || [], 3)}
           <span class="event-going">${r.count} going</span>
-        </div>
+        </div>`}
       </div>
     </div>`;
 }
@@ -3941,6 +3966,7 @@ function renderEventPage() {
   const past = eventIsOver(e);
   const id = escapeAttr(e.id);
   const canDelete = canManageSchool(e.school_id || currentSchoolId) || (e.created_by && e.created_by === currentUserId);
+  const personal = eventVis(e) === 'private';
   const fullDate = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
 
   hero.style.setProperty('--av-h', avatarHue(e.id));
@@ -3950,7 +3976,7 @@ function renderEventPage() {
       ${eventDateBlock(e, 'lg')}
       <div class="th-actions">
         <button class="th-icon-btn" onclick="downloadEventIcs('${id}')" aria-label="Add to my calendar" title="Add to my calendar"><i class="fa-solid fa-calendar-plus"></i></button>
-        <button class="th-icon-btn" onclick="shareEvent('${id}')" aria-label="Share this event" title="Share"><i class="fa-solid fa-share-nodes"></i></button>
+        ${personal ? '' : `<button class="th-icon-btn" onclick="shareEvent('${id}')" aria-label="Share this event" title="Share"><i class="fa-solid fa-share-nodes"></i></button>`}
         ${canDelete ? `<button class="th-icon-btn danger" onclick="deleteEvent('${id}')" aria-label="Delete event" title="Delete"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
     </div>
@@ -3958,17 +3984,19 @@ function renderEventPage() {
       <h1>${escapeHtml(e.title)}</h1>
       <p>${escapeHtml(fullDate)} · ${escapeHtml(eventTime(e))}</p>
       ${e.location ? `<p class="th-known"><i class="fa-solid fa-location-dot"></i> <b>${escapeHtml(e.location)}</b></p>` : ''}
+      ${eventVis(e) === 'school' ? '' : `<p class="ev-vis-line">${eventVisBadge(e)} ${personal
+        ? 'Only you can see this.' : e.created_by === currentUserId ? 'Only your friends can see this.' : 'Shared with friends.'}</p>`}
     </div>
     <div class="ev-countdown ${past ? 'past' : ''}"><i class="fa-regular fa-clock"></i> ${escapeHtml(eventCountdown(e))}</div>
-    <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} th-cta" onclick="toggleRsvp('${id}')" ${past ? 'disabled' : ''}>
-      ${past ? 'This has already happened' : r.mine ? "<i class='fa-solid fa-check'></i> You're going" : "<i class='fa-solid fa-hand'></i> I'm going"}</button>
+    ${personal ? '' : `<button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} th-cta" onclick="toggleRsvp('${id}')" ${past ? 'disabled' : ''}>
+      ${past ? 'This has already happened' : r.mine ? "<i class='fa-solid fa-check'></i> You're going" : "<i class='fa-solid fa-hand'></i> I'm going"}</button>`}
   `;
 
   const going = (r.who || []).slice().sort((a, b) => (b === currentUserId) - (a === currentUserId));
   const creator = e.created_by ? (e.created_by === currentUserId ? 'you' : personName(e.created_by, 'a student')) : 'someone';
   const upNext = calEvents.filter(x => String(x.id) !== String(e.id) && !eventIsOver(x))
     .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)).slice(0, 3);
-  cards.innerHTML = `
+  cards.innerHTML = `${personal ? '' : `
     <div class="info-card to-card">
       <div class="to-head"><h3><i class="fa-solid fa-user-check"></i> Who's going</h3><small>${r.count} going</small></div>
       ${going.length ? `<div class="group-member-list">${going.map(uid => {
@@ -3976,7 +4004,7 @@ function renderEventPage() {
         return `<div class="group-member"><span class="friend-avatar sm">${escapeHtml(n[0].toUpperCase())}</span>
           <span class="group-member-name"><strong>${uid === currentUserId ? 'You' : nameLink(uid, n, false)}</strong></span></div>`;
       }).join('')}</div>` : `<p class="friends-empty-inner">${past ? 'No one said they were going.' : 'No one yet. Be the first!'}</p>`}
-    </div>
+    </div>`}
     <div class="info-card to-card">
       <div class="to-head"><h3><i class="fa-solid fa-align-left"></i> Details</h3></div>
       ${e.description ? `<p class="ev-desc-full">${renderSafeMessage(e.description)}</p>` : '<p class="friends-empty-inner">No details added.</p>'}
@@ -3997,7 +4025,7 @@ function renderEventPage() {
 }
 function shareEvent(id) {
   const e = calEvents.find(x => String(x.id) === String(id));
-  if (e) shareLink(shareUrl('event', e.id), `${e.title} on Campus Pulse`);
+  if (e && eventVis(e) !== 'private') shareLink(shareUrl('event', e.id), `${e.title} on Campus Pulse`);
 }
 // A calendar file (.ics) that phones and computers open in their own calendar app.
 function downloadEventIcs(id) {
@@ -4055,7 +4083,7 @@ async function deleteEvent(id) {
 function openEventModal() {
   if (!currentUserId) return showToast('Sign in to add events.', 'warn');
   if (!currentSchoolId) return openSchoolPicker(true);
-  document.getElementById('ev-modal-sub').textContent = `Everyone at ${currentSchool?.name || 'your school'} will see it.`;
+  setEventVisibility(evVisibility);
   document.getElementById('ev-date').value = calSelectedDay || dayKey(new Date());
   document.getElementById('eventModal').style.display = 'flex';
   setTimeout(() => document.getElementById('ev-title')?.focus(), 50);
@@ -4075,11 +4103,23 @@ async function submitEvent(event) {
 
   const btn = document.getElementById('ev-submit-btn');
   btn.disabled = true;
-  const { data, error } = await supabaseClient.from('campus_events').insert([{
+  const row = {
     title, description, location,
     starts_at: starts.toISOString(), all_day: !time,
     school_id: currentSchoolId, created_by: currentUserId
-  }]).select().single();
+  };
+  const vis = evVisibility;
+  const add = r => supabaseClient.from('campus_events').insert([r]).select().single();
+  let { data, error } = await add({ ...row, visibility: vis });
+  // Database not updated yet (no visibility column): school-wide events still
+  // work; a private one is never posted for everyone to see.
+  if (error && /visibility/i.test(error.message || '')) {
+    if (vis !== 'school') {
+      btn.disabled = false;
+      return showToast('Friends-only and private events need a database update first (SCHEMA.sql section 6q).', 'error', 6000);
+    }
+    ({ data, error } = await add(row));
+  }
   btn.disabled = false;
   if (error) return showToast('Could not add event: ' + error.message, 'error');
 
@@ -4089,7 +4129,8 @@ async function submitEvent(event) {
   renderCalendar();
   closeEventModal();
   event.target.reset();
-  showToast('Event added to the calendar.', 'success');
+  showToast(vis === 'private' ? 'Added to your calendar. Only you can see it.'
+    : vis === 'friends' ? 'Event added. Only your friends can see it.' : 'Event added to the calendar.', 'success');
 }
 
 // ==================== Admin ====================

@@ -2352,6 +2352,52 @@ create trigger touch_gpa_save before insert or update on public.gpa_saves
   for each row execute function public.touch_gpa_save();
 
 -- ============================================================
+-- 6q. PRIVATE CALENDAR EVENTS
+-- ============================================================
+-- Each event says who can see it: everyone at the school (as before), the
+-- creator's friends, or only the creator. RSVPs follow the same rule.
+-- Admins see school-wide events as before, not friends-only or private ones.
+alter table public.campus_events add column if not exists visibility text not null default 'school';
+do $$ begin
+  alter table public.campus_events add constraint campus_events_visibility_ok
+    check (visibility in ('school', 'friends', 'private'));
+exception when duplicate_object then null;
+end $$;
+
+-- Can the signed-in user see this event? (Security definer so the RSVP
+-- rules can ask about events; it only ever answers yes or no.)
+create or replace function public.can_see_event(eid uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.campus_events e
+     where e.id = eid
+       and (e.created_by = auth.uid()
+            or (e.school_id = public.my_school_id()
+                and (e.visibility = 'school'
+                     or (e.visibility = 'friends' and public.are_friends(auth.uid(), e.created_by))))));
+$$;
+revoke all on function public.can_see_event(uuid) from public;
+grant execute on function public.can_see_event(uuid) to authenticated;
+
+drop policy if exists "events: same-school reads" on public.campus_events;
+create policy "events: same-school reads" on public.campus_events for select
+  using (created_by = auth.uid()
+         or (school_id = public.my_school_id()
+             and (visibility = 'school'
+                  or (visibility = 'friends' and public.are_friends(auth.uid(), created_by)))));
+
+drop policy if exists "rsvps: same-school reads" on public.event_rsvps;
+create policy "rsvps: same-school reads" on public.event_rsvps for select
+  using (user_id = auth.uid() or public.can_see_event(event_id));
+drop policy if exists "rsvps: user manages own" on public.event_rsvps;
+drop policy if exists "rsvps: add your own" on public.event_rsvps;
+drop policy if exists "rsvps: remove your own" on public.event_rsvps;
+create policy "rsvps: add your own" on public.event_rsvps for insert
+  with check (auth.uid() = user_id and public.can_see_event(event_id));
+create policy "rsvps: remove your own" on public.event_rsvps for delete
+  using (auth.uid() = user_id);
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.

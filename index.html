@@ -947,6 +947,12 @@
         <p class="ev-hint">Leave the time empty for an all-day event or deadline.</p>
         <input type="text" id="ev-location" class="auth-input modal-input" placeholder="Where (optional)" maxlength="100" autocomplete="off" />
         <textarea id="ev-desc" class="auth-input textarea-input modal-input" placeholder="Details (optional)" maxlength="1000"></textarea>
+        <span class="tp-label">Who can see it?</span>
+        <div class="segmented ev-vis-seg" id="ev-vis-seg" role="group" aria-label="Who can see it">
+          <button type="button" class="seg-btn active" data-vis="school" onclick="setEventVisibility('school')"><i class="fa-solid fa-school"></i><span>School</span></button>
+          <button type="button" class="seg-btn" data-vis="friends" onclick="setEventVisibility('friends')"><i class="fa-solid fa-user-group"></i><span>Friends</span></button>
+          <button type="button" class="seg-btn" data-vis="private" onclick="setEventVisibility('private')"><i class="fa-solid fa-lock"></i><span>Only me</span></button>
+        </div>
         <div class="modal-actions">
           <button type="button" class="secondary-btn" onclick="closeEventModal()">Cancel</button>
           <button type="submit" class="primary-btn" id="ev-submit-btn">Add event</button>
