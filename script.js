@@ -85,10 +85,10 @@ function buildPalette(themeName, customAccent, light) {
       '--accent-light': mixHex(accent, '#ffffff', 0.18),
       '--accent-muted': rgbaOf(accent, 0.1),
       '--accent-soft-border': rgbaOf(accent, 0.35),
-      '--glow-shadow': '0 0 0 0 transparent',      // no coloured glow under buttons
+      '--glow-shadow': `0 6px 18px -8px ${rgbaOf(accent, 0.5)}`,
       '--shadow-card': '0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -14px rgba(15, 23, 42, 0.16)',
       '--shadow-pop': '0 24px 60px -20px rgba(15, 23, 42, 0.35)',
-      '--bg-glow': 'transparent',
+      '--bg-glow': rgbaOf(accent, 0.08),
       '--overlay-bg': 'rgba(15, 23, 42, 0.35)',
       '--danger': '#dc2626', '--success': '#15803d', '--warning': '#b45309', '--star': '#d97706'
     };
@@ -105,10 +105,10 @@ function buildPalette(themeName, customAccent, light) {
     '--accent-light': mixHex(accent, '#ffffff', 0.25),
     '--accent-muted': rgbaOf(accent, 0.14),
     '--accent-soft-border': rgbaOf(accent, 0.4),
-    '--glow-shadow': '0 0 0 0 transparent',
+    '--glow-shadow': `0 8px 22px -10px ${rgbaOf(accent, 0.6)}`,
     '--shadow-card': '0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 28px -18px rgba(0, 0, 0, 0.7)',
     '--shadow-pop': '0 30px 70px -20px rgba(0, 0, 0, 0.75)',
-    '--bg-glow': 'transparent',
+    '--bg-glow': rgbaOf(accent, 0.12),
     '--overlay-bg': 'rgba(2, 4, 8, 0.6)',
     '--danger': '#ff6b6b', '--success': '#34d399', '--warning': '#fbbf24', '--star': '#fbbf24'
   };
@@ -484,8 +484,8 @@ function openCreateGroupModal(editId) {
   const priv = document.getElementById('group-private');
   if (priv) priv.checked = !!g?.private;
   document.getElementById('group-max').min = g ? Math.max(2, g.members) : 2;
-  document.getElementById('group-modal-title').textContent = g ? 'Edit study group' : 'New study group';
-  document.getElementById('group-submit-btn').textContent = g ? 'Save changes' : 'Create group';
+  document.getElementById('group-modal-title').textContent = g ? 'Edit Study Group' : 'Create Study Group';
+  document.getElementById('group-submit-btn').textContent = g ? 'Save Changes' : 'Create Group';
   document.getElementById('groupModal').style.display = 'flex';
   document.getElementById('group-name')?.focus();
 }
@@ -1555,7 +1555,7 @@ function updateSchoolChrome() {
     welcome.textContent = `${greetingNow()}, ${String(name).split(/\s+/)[0]}`;
   }
   const kicker = document.getElementById('hero-kicker');
-  if (kicker) kicker.textContent = currentSchool ? currentSchool.name : '';
+  if (kicker) kicker.textContent = currentSchool ? currentSchool.name : 'Academic Dashboard';
   const label = document.getElementById('current-school-label');
   if (label) label.textContent = currentSchool ? currentSchool.name : 'No school set';
 
@@ -1950,7 +1950,7 @@ function renderFriendsStrip() {
         <i class="fa-solid fa-user-plus"></i>
         <div class="friends-empty-text">
           <span>${currentUserId ? 'No chats yet — add a friend, or join a study group to get its group chat.' : 'Sign in to message your friends.'}</span>
-          ${currentUserId ? '<button class="primary-btn friends-empty-btn" onclick="openFriendsModal()">+ Add friend</button>' : ''}
+          ${currentUserId ? '<button class="primary-btn friends-empty-btn" onclick="openFriendsModal()">+ Add Friend</button>' : ''}
         </div>
       </div>`;
     return;
@@ -2928,7 +2928,7 @@ function renderFeed() {
     container.innerHTML = `<div class="empty-state">
       <i class="fa-solid fa-bullhorn"></i>
       <p>No posts yet. Be the first to share something!</p>
-      <button class="primary-btn" onclick="openNewPostModal()">+ New post</button>
+      <button class="primary-btn" onclick="openNewPostModal()">+ Create Post</button>
     </div>`;
     return;
   }
@@ -3848,7 +3848,7 @@ function renderEventList() {
   if (!list.length) {
     container.innerHTML = `<div class="empty-state"><i class="fa-solid fa-calendar-plus"></i>
       <p>${calSelectedDay ? 'Nothing on this day.' : 'No upcoming events yet.'}</p>
-      <button class="primary-btn" onclick="openEventModal()">+ Add event</button></div>`;
+      <button class="primary-btn" onclick="openEventModal()">+ Add Event</button></div>`;
     return;
   }
   if (calSelectedDay) { container.innerHTML = list.map(eventCardHtml).join(''); return; }
@@ -5021,7 +5021,7 @@ function renderGpaRows() {
     container.innerHTML = `<div class="empty-state">
       <i class="fa-solid fa-calculator"></i>
       <p>No courses added yet. Add your classes for this term to see your GPA.</p>
-      <button class="primary-btn" onclick="addGpaRow()">+ Add course</button>
+      <button class="primary-btn" onclick="addGpaRow()">+ Add Course</button>
     </div>`;
     calculateGPA();
     return;
@@ -5374,7 +5374,7 @@ function renderTimer() {
     : 'Break — stretch, drink water, look away from the screen.';
 
   const label = document.getElementById('pomo-tool-label');
-  if (label) label.textContent = inProgress ? `${pomo.running ? '' : '⏸ '}${fmtClock(ms)}` : 'Focus timer';
+  if (label) label.textContent = inProgress ? `${pomo.running ? '' : '⏸ '}${fmtClock(ms)}` : 'Pomodoro';
   document.getElementById('pomo-tool-btn')?.classList.toggle('pomo-live', pomo.running);
 }
 
