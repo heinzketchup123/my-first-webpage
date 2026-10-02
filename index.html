@@ -597,78 +597,6 @@
           </div>
         </div>
 
-        <!-- Admin tools (only shown to admins) -->
-        <!-- Tap the header to fold the whole card; each section folds too. -->
-        <div class="pref-card admin-card" id="admin-card" style="display:none;">
-          <div class="pref-header collapsible admin-card-head" role="button" tabindex="0"
-               aria-expanded="true" aria-controls="admin-card-body"
-               onclick="toggleAdminSection('card')" onkeydown="pressOnEnter(event)">
-            <i class="fa-solid fa-shield-halved"></i>
-            <h3>Admin</h3>
-            <span class="admin-waiting-pill" id="admin-waiting-pill" hidden></span>
-            <span class="admin-badge" id="admin-level-badge">ADMIN</span>
-            <i class="fa-solid fa-chevron-down pref-chevron"></i>
-          </div>
-          <div class="admin-collapse" id="admin-card-body">
-            <div class="admin-collapse-inner">
-              <p class="admin-hint" id="admin-card-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Manage who can join each school below.</p>
-
-              <div class="admin-section" data-section="requests">
-                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-requests-body"
-                        onclick="toggleAdminSection('requests')">
-                  <span>Join requests</span><span class="admin-count" id="admin-requests-count"></span>
-                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
-                </button>
-                <div class="admin-collapse" id="admin-requests-body">
-                  <div class="admin-collapse-inner"><div id="admin-request-list"></div></div>
-                </div>
-              </div>
-
-              <div class="admin-section" data-section="students">
-                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-students-body"
-                        onclick="toggleAdminSection('students')">
-                  <span>Students</span><span class="admin-count" id="admin-students-count"></span>
-                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
-                </button>
-                <div class="admin-collapse" id="admin-students-body">
-                  <div class="admin-collapse-inner">
-                    <div class="admin-members-controls">
-                      <select id="admin-members-school" class="mini-select" onchange="setAdminMembersSchool(this.value)" aria-label="School"></select>
-                      <input id="admin-members-search" class="auth-input" type="search" autocomplete="off"
-                             placeholder="Search name or @handle" oninput="renderAdminMembers()" />
-                      <button class="secondary-btn admin-refresh-btn" type="button" onclick="fetchAdminMembers()" aria-label="Refresh student list"><i class="fa-solid fa-rotate"></i></button>
-                    </div>
-                    <div id="admin-member-list"></div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="admin-section" data-section="schools">
-                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-schools-body"
-                        onclick="toggleAdminSection('schools')">
-                  <span>Schools</span><span class="admin-count" id="admin-schools-count"></span>
-                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
-                </button>
-                <div class="admin-collapse" id="admin-schools-body">
-                  <div class="admin-collapse-inner"><div id="admin-school-list"></div></div>
-                </div>
-              </div>
-
-              <!-- Districts: app admins manage them; district admins see theirs -->
-              <div class="admin-section" data-section="districts" hidden>
-                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-districts-body"
-                        onclick="toggleAdminSection('districts')">
-                  <span>Districts</span><span class="admin-count" id="admin-districts-count"></span>
-                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
-                </button>
-                <div class="admin-collapse" id="admin-districts-body">
-                  <div class="admin-collapse-inner"><div id="admin-district-list"></div></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- Appearance (right column on a computer) -->
         <div class="settings-col settings-col-side">
           <h2 class="settings-group-title">Appearance</h2>
@@ -760,6 +688,78 @@
               <i class="set-icon fa-solid fa-rotate-left"></i>
               <span class="set-text"><strong>Reset appearance</strong></span>
             </button>
+          </div>
+        </div>
+
+        <!-- Admin tools (only shown to admins): last, under Appearance, on phones and computers.
+             Starts folded; tap the header to open it. Each section folds too. -->
+        <div class="pref-card admin-card collapsed" id="admin-card" style="display:none;">
+          <div class="pref-header collapsible admin-card-head" role="button" tabindex="0"
+               aria-expanded="false" aria-controls="admin-card-body"
+               onclick="toggleAdminSection('card')" onkeydown="pressOnEnter(event)">
+            <i class="fa-solid fa-shield-halved"></i>
+            <h3>Admin</h3>
+            <span class="admin-waiting-pill" id="admin-waiting-pill" hidden></span>
+            <span class="admin-badge" id="admin-level-badge">ADMIN</span>
+            <i class="fa-solid fa-chevron-down pref-chevron"></i>
+          </div>
+          <div class="admin-collapse" id="admin-card-body">
+            <div class="admin-collapse-inner">
+              <p class="admin-hint" id="admin-card-hint">Delete buttons appear on every teacher page, review, note, feed post, study group and event. Manage who can join each school below.</p>
+
+              <div class="admin-section" data-section="requests">
+                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-requests-body"
+                        onclick="toggleAdminSection('requests')">
+                  <span>Join requests</span><span class="admin-count" id="admin-requests-count"></span>
+                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
+                </button>
+                <div class="admin-collapse" id="admin-requests-body">
+                  <div class="admin-collapse-inner"><div id="admin-request-list"></div></div>
+                </div>
+              </div>
+
+              <div class="admin-section" data-section="students">
+                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-students-body"
+                        onclick="toggleAdminSection('students')">
+                  <span>Students</span><span class="admin-count" id="admin-students-count"></span>
+                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
+                </button>
+                <div class="admin-collapse" id="admin-students-body">
+                  <div class="admin-collapse-inner">
+                    <div class="admin-members-controls">
+                      <select id="admin-members-school" class="mini-select" onchange="setAdminMembersSchool(this.value)" aria-label="School"></select>
+                      <input id="admin-members-search" class="auth-input" type="search" autocomplete="off"
+                             placeholder="Search name or @handle" oninput="renderAdminMembers()" />
+                      <button class="secondary-btn admin-refresh-btn" type="button" onclick="fetchAdminMembers()" aria-label="Refresh student list"><i class="fa-solid fa-rotate"></i></button>
+                    </div>
+                    <div id="admin-member-list"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="admin-section" data-section="schools">
+                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-schools-body"
+                        onclick="toggleAdminSection('schools')">
+                  <span>Schools</span><span class="admin-count" id="admin-schools-count"></span>
+                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
+                </button>
+                <div class="admin-collapse" id="admin-schools-body">
+                  <div class="admin-collapse-inner"><div id="admin-school-list"></div></div>
+                </div>
+              </div>
+
+              <!-- Districts: app admins manage them; district admins see theirs -->
+              <div class="admin-section" data-section="districts" hidden>
+                <button class="admin-section-head" type="button" aria-expanded="true" aria-controls="admin-districts-body"
+                        onclick="toggleAdminSection('districts')">
+                  <span>Districts</span><span class="admin-count" id="admin-districts-count"></span>
+                  <i class="fa-solid fa-chevron-down admin-chevron"></i>
+                </button>
+                <div class="admin-collapse" id="admin-districts-body">
+                  <div class="admin-collapse-inner"><div id="admin-district-list"></div></div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

@@ -4168,10 +4168,13 @@ async function fetchAdminJoinData() {
 
 // -------------------- Admin card folding --------------------
 // Tap the Admin header to fold the whole card, or a section's header to fold
-// just that section. What you left open or closed is remembered on this device.
+// just that section. The card starts folded every time the app opens, on every
+// device; how you left each section inside it is remembered on this device.
 const ADMIN_FOLD_KEY = 'adminFolded';
 let adminFolded = (() => {
-  try { return JSON.parse(localStorage.getItem(ADMIN_FOLD_KEY)) || {}; } catch (_) { return {}; }
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(ADMIN_FOLD_KEY)) || {}; } catch (_) {}
+  return { ...saved, card: true };
 })();
 
 function applyAdminFolds() {
