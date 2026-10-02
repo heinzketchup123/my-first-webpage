@@ -525,6 +525,8 @@ button:active {
 .gpa-ring-fill {
   stroke: var(--accent-color);
   stroke-linecap: round;
+  stroke-dasharray: 326.73;       /* starts empty (not full) until the app fills it */
+  stroke-dashoffset: 326.73;
   transition: stroke-dashoffset 0.6s cubic-bezier(0.2, 0.8, 0.3, 1);
   filter: drop-shadow(0 0 6px var(--accent-color));
 }
@@ -5113,3 +5115,13 @@ html.layout-desktop #events-view > .cal-next { grid-area: next; }
 /* "← All teachers / All groups / Calendar" is only as wide as its words (on a
    computer the page grid stretched it across the top, over the empty space). */
 .teacher-back-btn { justify-self: start; width: auto; }
+
+/* GPA number: a solid colour (the gradient text didn't repaint cleanly on some
+   phones while the number counts up), with a soft glow in dark mode. */
+body:not(.light-mode) .gpa-score {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--accent-color);
+  text-shadow: 0 0 18px var(--accent-muted);
+}

@@ -2318,6 +2318,40 @@ create trigger clear_group_invite after insert on public.study_group_members
   for each row execute function public.clear_group_invite();
 
 -- ============================================================
+-- 6p. GPA CALCULATOR, SAVED WITH YOUR ACCOUNT
+-- ============================================================
+-- Your GPA calculator (courses, grades, GPA so far and goal) is kept with
+-- your account, so it's the same on every device you sign in on. Only you
+-- can read or change it: not other students, not admins.
+create table if not exists public.gpa_saves (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  data       jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  constraint gpa_saves_size check (octet_length(data::text) <= 100000)
+);
+alter table public.gpa_saves enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='gpa_saves' loop
+    execute format('drop policy if exists %I on public.gpa_saves', p.policyname);
+  end loop;
+end $$;
+create policy "gpa: read your own"   on public.gpa_saves for select using (user_id = auth.uid());
+create policy "gpa: save your own"   on public.gpa_saves for insert with check (user_id = auth.uid());
+create policy "gpa: update your own" on public.gpa_saves for update
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "gpa: clear your own"  on public.gpa_saves for delete using (user_id = auth.uid());
+
+create or replace function public.touch_gpa_save()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists touch_gpa_save on public.gpa_saves;
+create trigger touch_gpa_save before insert or update on public.gpa_saves
+  for each row execute function public.touch_gpa_save();
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -2334,7 +2368,7 @@ begin
                            'feed_reactions','feed_comments','notifications','admins','school_bans',
                            'group_messages','teacher_post_comments',
                            'districts','district_admins','school_admins','study_group_bans',
-                           'study_group_invites'] loop
+                           'study_group_invites','gpa_saves'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'

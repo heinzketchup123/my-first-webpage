@@ -223,7 +223,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener('visibilitychange', () => {
     // Back in the app with a chat open: pick up messages sent while away.
     if (!document.hidden && chatKey() && isViewActive('chat-view')) fetchThread({ quiet: true });
+    // GPA: save a change still waiting to go up; catch up with other devices.
+    if (document.hidden) { if (gpaSyncTimer) pushGpa(); }
+    else if (currentUserId) syncGpaFromCloud();
   });
+  window.addEventListener('pagehide', () => { if (gpaSyncTimer) pushGpa(); });
   let layoutTimer = null;
   try { localStorage.removeItem('iosFillScreen'); } catch (_) {}   // retired "fill the whole screen" test
   detectShortViewport();
@@ -368,6 +372,7 @@ function initSupabaseRealtime() {
   listen('districts', () => onAdminsChanged());
   listen('district_admins', () => onAdminsChanged());
   listen('school_admins', () => onAdminsChanged());
+  listen('gpa_saves', p => onGpaRemote(p));
   startDmPolling();
 }
 
@@ -645,6 +650,7 @@ async function handleAuth(event) {
 async function logout() {
   ['login-email','login-password','signup-name','signup-email','signup-password']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  if (gpaSyncTimer) { try { await pushGpa(); } catch (_) {} }
 
   if (isSupabaseConnected) {
     try { await supabaseClient.auth.signOut(); } catch (_) {}
@@ -656,6 +662,7 @@ async function logout() {
   appSettings.anonymous = false; renderAnonymous();
   blockedIds = new Set(); blocksReady = null;
   gpaState = { mode: 'unweighted', input: 'letter', prevGpa: '', prevCredits: '', target: '' };
+  clearTimeout(gpaSyncTimer); gpaSyncTimer = null; gpaEditedAt = 0; gpaCloudReady = false; gpaCloudOff = false;
   ['gpa-prev', 'gpa-prev-credits', 'gpa-target'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   groupFilter = 'all'; groupMembers = {};
   selectedFriendId = null; selectedGroupChatId = null; groupChatReady = null; dmMessages = [];
@@ -975,6 +982,7 @@ function switchTab(viewId, element) {
   }
   if (viewId === 'groups-view') { renderGroups(); }
   if (viewId === 'events-view') { fetchEvents(); }
+  if (viewId === 'gpa-view') { playGpaIntro(); syncGpaFromCloud(); }
   if (viewId === 'settings-view') { renderAdminPanel(); if (isAnyAdmin()) fetchAdminMembers(); }
   savePlace();
 }
@@ -4825,7 +4833,9 @@ async function deleteGroup(id) {
 
 // ==================== GPA calculator ====================
 // Courses for this term, plus an optional GPA/credits you already have
-// (for an overall GPA) and a goal. Saved per account on this device.
+// (for an overall GPA) and a goal. Saved with your account (SCHEMA.sql 6p),
+// so it's the same on every device, and on this device too so it opens
+// instantly and keeps working offline.
 const GPA_GRADES = [
   ['A+', 4.0], ['A', 4.0], ['A-', 3.7], ['B+', 3.3], ['B', 3.0], ['B-', 2.7],
   ['C+', 2.3], ['C', 2.0], ['C-', 1.7], ['D+', 1.3], ['D', 1.0], ['D-', 0.7], ['F', 0.0]
@@ -4859,8 +4869,19 @@ function courseGrade(c) {
 function gpaKey() { return currentUserId ? `gpa_${currentUserId}` : null; }
 
 function loadGpa() {
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(gpaKey()) || 'null'); } catch (_) {}
+  const saved = readLocalGpa();
+  gpaEditedAt = +saved?.t || 0;
+  applyGpa(saved);
+  syncGpaFromCloud();
+}
+
+function readLocalGpa() {
+  const key = gpaKey();
+  if (!key) return null;
+  try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; }
+}
+
+function applyGpa(saved) {
   // Older versions saved just the list of courses.
   const raw = Array.isArray(saved) ? { courses: saved } : (saved || {});
   gpaCourses = (raw.courses || []).map(c => ({
@@ -4881,10 +4902,109 @@ function loadGpa() {
   renderGpaRows();
 }
 
+// Every change: saved on this device right away, and to your account a
+// moment later (one save for a burst of typing).
 function saveGpaLocal() {
+  if (!gpaKey()) return;
+  gpaEditedAt = Date.now();
+  writeLocalGpa(true);
+  clearTimeout(gpaSyncTimer);
+  gpaSyncTimer = setTimeout(pushGpa, 800);
+}
+
+function gpaSnapshot() { return { v: 2, courses: gpaCourses, ...gpaState }; }
+function hasGpaContent(d) {
+  return !!d && ((Array.isArray(d) ? d : d.courses || []).length > 0 ||
+                 ['prevGpa', 'prevCredits', 'target'].some(k => String(d[k] ?? '').trim() !== ''));
+}
+// "dirty" = changed here but not saved to the account yet.
+function writeLocalGpa(dirty) {
   const key = gpaKey();
   if (!key) return;
-  try { localStorage.setItem(key, JSON.stringify({ v: 2, courses: gpaCourses, ...gpaState })); } catch (_) {}
+  try { localStorage.setItem(key, JSON.stringify({ ...gpaSnapshot(), t: gpaEditedAt, dirty })); } catch (_) {}
+}
+
+// -------------------- GPA: the copy saved with your account --------------------
+let gpaEditedAt = 0;        // when the calculator was last changed (on any device)
+let gpaSyncTimer = null;
+let gpaCloudReady = false;  // compared with the account copy since signing in
+let gpaCloudOff = false;    // the gpa_saves table isn't there (SCHEMA.sql not re-run yet)
+
+function gpaCloudError(error) {
+  // Missing table: keep it on this device only until the database is updated.
+  if (error && (error.code === '42P01' || error.code === 'PGRST205' || error.status === 404)) gpaCloudOff = true;
+  else console.warn('GPA not saved to your account yet:', error?.message || error);
+}
+
+async function pushGpa() {
+  clearTimeout(gpaSyncTimer); gpaSyncTimer = null;
+  if (!isSupabaseConnected || !currentUserId || gpaCloudOff || !gpaCloudReady) return;
+  const uid = currentUserId, t = gpaEditedAt;
+  const { error } = await supabaseClient.from('gpa_saves')
+    .upsert({ user_id: uid, data: { ...gpaSnapshot(), t } }, { onConflict: 'user_id' });
+  if (error) { gpaCloudError(error); return; }
+  if (uid === currentUserId && t === gpaEditedAt) writeLocalGpa(false);
+}
+
+// Compare with the account copy: the newer one wins. Run after signing in,
+// when the app comes back to the front, and when the calculator is opened.
+let gpaSyncing = null;
+function syncGpaFromCloud() {
+  if (!isSupabaseConnected || !currentUserId || gpaCloudOff) return Promise.resolve();
+  if (!gpaSyncing) gpaSyncing = doGpaSync().finally(() => { gpaSyncing = null; });
+  return gpaSyncing;
+}
+async function doGpaSync() {
+  const uid = currentUserId;
+  const { data, error } = await supabaseClient.from('gpa_saves')
+    .select('data').eq('user_id', uid).maybeSingle();
+  if (uid !== currentUserId) return;
+  if (error) { gpaCloudError(error); return; }
+  gpaCloudReady = true;
+  const local = readLocalGpa();
+  const cloud = data?.data && typeof data.data === 'object' ? data.data : null;
+  // Nothing saved to the account yet: this device's calculator goes up.
+  if (!cloud) {
+    if (hasGpaContent(local)) { gpaEditedAt = gpaEditedAt || Date.now(); pushGpa(); }
+    return;
+  }
+  // Changed here (say, offline) after the account copy was saved: keep this one.
+  if (local?.dirty && (+local.t || 0) > (+cloud.t || 0)) { pushGpa(); return; }
+  if (gpaSyncTimer) return;   // still typing; that save goes up in a moment
+  takeGpa(cloud);
+}
+
+// Show the account copy (unless it's what's already here).
+function takeGpa(cloud) {
+  const same = JSON.stringify(gpaSnapshot()) === JSON.stringify({ ...gpaSnapshot(), ...pickGpa(cloud) });
+  if (!same) {
+    // Don't yank a box out from under someone typing in it: try again in a
+    // moment, unless they've changed something here by then (theirs wins).
+    const typing = document.activeElement?.closest?.('#gpa-view') && /^(INPUT|SELECT)$/.test(document.activeElement.tagName);
+    if (typing) {
+      const at = gpaEditedAt;
+      setTimeout(() => { if (gpaEditedAt === at && !gpaSyncTimer) takeGpa(cloud); }, 1500);
+      return;
+    }
+    applyGpa(cloud);
+  }
+  gpaEditedAt = +cloud.t || 0;
+  writeLocalGpa(false);
+}
+function pickGpa(d) {
+  return { courses: d.courses || [], mode: d.mode, input: d.input,
+           prevGpa: d.prevGpa ?? '', prevCredits: d.prevCredits ?? '', target: d.target ?? '' };
+}
+
+// Saved on another device while this one is open.
+function onGpaRemote(payload) {
+  const row = payload.new;
+  if (!row || row.user_id !== currentUserId || !row.data) return;
+  const t = +row.data.t || 0;
+  if (t === gpaEditedAt || gpaSyncTimer) return;   // our own save coming back, or about to be replaced
+  // Changed here and not saved yet (say, offline), after that: keep this one.
+  if (readLocalGpa()?.dirty && gpaEditedAt > t) { pushGpa(); return; }
+  takeGpa(row.data);
 }
 
 function gpaId() { return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
@@ -5050,7 +5170,8 @@ function calculateGPA() {
   const fmt = v => v === null || !Number.isFinite(v) ? '–' : v.toFixed(2);
 
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  setText('calculated-gpa', fmt(overall ?? 0));
+  gpaValue = Number.isFinite(overall) ? overall : 0;
+  setGpaNumber(gpaValue);
   setText('gpa-hero-label', `${weighted ? 'Weighted' : 'Unweighted'} · out of ${scaleMax.toFixed(1)}`);
   setText('gpa-letter', overall === null ? '' : `≈ ${gpaLetter(Math.min(4, overall))} average${hasPrev ? ' overall' : ''}`);
   setText('gpa-term-val', fmt(term));
@@ -5079,6 +5200,42 @@ function calculateGPA() {
   });
 
   renderGpaGoal({ weighted, scaleMax, credits, hasPrev, prevGpa, prevCr, overall });
+}
+
+// The big number glides to its new value along with the ring.
+let gpaValue = 0, gpaShown = 0, gpaTween = 0;
+function gpaStill() { return matchMedia('(prefers-reduced-motion: reduce)').matches; }
+function setGpaNumber(to, from = gpaShown, ms = 600) {
+  const el = document.getElementById('calculated-gpa');
+  if (!el) return;
+  cancelAnimationFrame(gpaTween);
+  if (gpaStill() || document.hidden || !isViewActive('gpa-view') || Math.abs(to - from) < 0.005) {
+    gpaShown = to; el.textContent = to.toFixed(2); return;
+  }
+  const start = performance.now();
+  const step = now => {
+    const k = Math.min(1, (now - start) / ms);
+    gpaShown = from + (to - from) * (1 - Math.pow(1 - k, 3));
+    el.textContent = (k < 1 ? gpaShown : to).toFixed(2);
+    if (k < 1) gpaTween = requestAnimationFrame(step);
+    else gpaShown = to;
+  };
+  gpaShown = from;
+  el.textContent = from.toFixed(2);
+  gpaTween = requestAnimationFrame(step);
+}
+
+// Opening the calculator: the ring fills up and the number counts up to it.
+function playGpaIntro() {
+  const ring = document.getElementById('gpa-ring-fill');
+  if (!ring || gpaStill()) return;
+  const len = 2 * Math.PI * 52;
+  const to = parseFloat(ring.style.strokeDashoffset);
+  if (!Number.isFinite(to) || to >= len - 0.5) return;   // nothing to fill
+  ring.getAnimations?.().forEach(a => a.cancel());
+  ring.animate?.([{ strokeDashoffset: `${len}px` }, { strokeDashoffset: `${to}px` }],
+                 { duration: 900, easing: 'cubic-bezier(0.3, 0.7, 0.2, 1)' });
+  setGpaNumber(gpaValue, 0, 900);
 }
 
 // "What do I need this term?" from the goal and the GPA so far.
