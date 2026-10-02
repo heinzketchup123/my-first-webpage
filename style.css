@@ -528,8 +528,13 @@ button:active {
   stroke-dasharray: 326.73;       /* starts empty (not full) until the app fills it */
   stroke-dashoffset: 326.73;
   transition: stroke-dashoffset 0.6s cubic-bezier(0.2, 0.8, 0.3, 1);
-  filter: drop-shadow(0 0 6px var(--accent-color));
 }
+/* The glow goes on the coloured ring's own layer, not on the circle inside it:
+   that way it spreads out fully instead of stopping at the ring's square box
+   (and it shows on iPhones too). */
+.gpa-ring { position: relative; }
+.gpa-ring svg { overflow: visible; }
+.gpa-ring .gpa-ring-glow { position: absolute; inset: 0; filter: drop-shadow(0 0 6px var(--accent-color)); }
 .gpa-hero-text {
   position: absolute;
   inset: 0;

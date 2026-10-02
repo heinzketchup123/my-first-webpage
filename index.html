@@ -454,6 +454,9 @@
             <div class="gpa-ring" aria-hidden="true">
               <svg viewBox="0 0 120 120">
                 <circle class="gpa-ring-track" cx="60" cy="60" r="52" />
+              </svg>
+              <!-- The coloured part has its own layer so its glow isn't cut off at the ring's edge. -->
+              <svg viewBox="0 0 120 120" class="gpa-ring-glow">
                 <circle class="gpa-ring-fill" id="gpa-ring-fill" cx="60" cy="60" r="52" />
               </svg>
             </div>
