@@ -2398,6 +2398,67 @@ create policy "rsvps: remove your own" on public.event_rsvps for delete
   using (auth.uid() = user_id);
 
 -- ============================================================
+-- 6r. ANY EMOJI AS A REACTION (feed and chat)
+-- ============================================================
+-- Press and hold a reaction (or a chat message) to react with any emoji.
+-- A reaction is one emoji: no letters, digits, spaces or other ASCII.
+create or replace function public.is_reaction_emoji(e text)
+returns boolean language sql immutable as $$
+  select e is not null and char_length(e) between 1 and 16
+     and e !~ '[\x01-\x7f]' and e !~ '[[:alpha:][:space:]]';
+$$;
+grant execute on function public.is_reaction_emoji(text) to anon, authenticated;
+
+-- Feed: the five original reactions plus any emoji.
+alter table public.feed_reactions drop constraint if exists feed_reactions_emoji_check;
+do $$ begin
+  alter table public.feed_reactions add constraint feed_reactions_emoji_ok
+    check (emoji in ('like', 'thumbs', 'heart', 'laugh', 'party', 'fire') or public.is_reaction_emoji(emoji));
+exception when duplicate_object then null;
+end $$;
+
+-- Chat: reactions on direct messages and group chat messages. Only people
+-- who can read the message see its reactions; only people in the chat react.
+create table if not exists public.message_reactions (
+  id               uuid primary key default gen_random_uuid(),
+  dm_id            uuid references public.campus_chat(id) on delete cascade,
+  group_message_id uuid references public.group_messages(id) on delete cascade,
+  user_id          uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  emoji            text not null check (public.is_reaction_emoji(emoji)),
+  created_at       timestamptz not null default now(),
+  constraint message_reactions_one_message check ((dm_id is null) <> (group_message_id is null))
+);
+create unique index if not exists message_reactions_dm_once
+  on public.message_reactions (dm_id, user_id, emoji) where dm_id is not null;
+create unique index if not exists message_reactions_group_once
+  on public.message_reactions (group_message_id, user_id, emoji) where group_message_id is not null;
+create index if not exists message_reactions_dm_idx on public.message_reactions (dm_id);
+create index if not exists message_reactions_group_idx on public.message_reactions (group_message_id);
+
+alter table public.message_reactions enable row level security;
+do $$ declare p record; begin
+  for p in select policyname from pg_policies where schemaname='public' and tablename='message_reactions' loop
+    execute format('drop policy if exists %I on public.message_reactions', p.policyname);
+  end loop;
+end $$;
+create policy "message reactions: see on messages you can read"
+  on public.message_reactions for select
+  using ((dm_id is not null and exists (select 1 from public.campus_chat c
+                                         where c.id = dm_id and auth.uid() in (c.sender_id, c.recipient_id)))
+      or (group_message_id is not null and exists (select 1 from public.group_messages g
+                                         where g.id = group_message_id
+                                           and (public.is_group_member(g.group_id) or public.is_admin()))));
+create policy "message reactions: react in your chats"
+  on public.message_reactions for insert
+  with check (user_id = auth.uid()
+    and ((dm_id is not null and exists (select 1 from public.campus_chat c
+                                         where c.id = dm_id and auth.uid() in (c.sender_id, c.recipient_id)))
+      or (group_message_id is not null and exists (select 1 from public.group_messages g
+                                         where g.id = group_message_id and public.is_group_member(g.group_id)))));
+create policy "message reactions: take yours back"
+  on public.message_reactions for delete using (user_id = auth.uid());
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.
@@ -2414,7 +2475,7 @@ begin
                            'feed_reactions','feed_comments','notifications','admins','school_bans',
                            'group_messages','teacher_post_comments',
                            'districts','district_admins','school_admins','study_group_bans',
-                           'study_group_invites','gpa_saves'] loop
+                           'study_group_invites','gpa_saves','message_reactions'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'

@@ -5606,3 +5606,58 @@ body.light-mode .th-cover { background: color-mix(in srgb, var(--accent-color) 1
 .teacher-card-stats i, .teacher-card .teacher-classes i { display: none; }
 .teacher-card-stats span:not(.ts-reviews) + span::before { content: '\00B7'; margin-right: 8px; opacity: 0.7; }
 :is(html.layout-phone, html.layout-desktop) .teacher-card-stats { gap: 8px; }
+
+/* ---------- Reactions: hold for any emoji ---------- */
+[data-hold-react] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.react-picker-overlay { position: absolute; inset: 0; z-index: 400; background: var(--overlay-bg); }
+.react-picker-overlay[hidden] { display: none; }
+.react-picker {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-pop, 20px);
+  background: var(--card-bg-solid);
+  box-shadow: var(--shadow-pop);
+  animation: modalPop 0.18s ease-out;
+}
+html.layout-desktop .react-picker { right: auto; bottom: auto; width: 340px; }
+.react-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 2px; }
+.react-pick {
+  height: 40px;
+  border: none;
+  border-radius: var(--r-sm, 10px);
+  background: transparent;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.react-pick:hover { background: var(--input-bg); }
+.react-pick.mine { background: var(--accent-muted); box-shadow: inset 0 0 0 1px var(--accent-soft-border); }
+.react-picker-own { display: flex; gap: 8px; }
+.react-picker-own .auth-input { flex: 1; min-width: 0; margin: 0; }
+.react-picker-own .primary-btn { flex-shrink: 0; margin: 0; padding-left: 16px; padding-right: 16px; }
+.react-picker-copy { align-self: center; font-size: 0.82rem; }
+
+/* Reactions on a chat message */
+.msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.msg-react-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--card-bg-solid);
+  color: var(--main-text-color);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.msg-react-chip span { font-size: 0.7rem; font-weight: 700; }
+.msg-react-chip.mine { border-color: var(--accent-soft-border); background: var(--accent-muted); }

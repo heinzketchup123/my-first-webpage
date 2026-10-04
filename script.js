@@ -373,6 +373,7 @@ function initSupabaseRealtime() {
   listen('district_admins', () => onAdminsChanged());
   listen('school_admins', () => onAdminsChanged());
   listen('gpa_saves', p => onGpaRemote(p));
+  listen('message_reactions', () => onMessageReactionsChanged());
   startDmPolling();
 }
 
@@ -1235,7 +1236,7 @@ function describeNotif(n) {
     ? `<strong>${times} people</strong>`
     : `<strong>${escapeHtml(n.actor_name || 'Someone')}</strong>`;
   const post = (t) => t ? `your post “${escapeHtml(t)}”` : 'your post';
-  const em = REACTIONS.find(r => r.key === n.meta)?.em || '';
+  const em = n.meta ? reactionEmoji(n.meta) : '';
   switch (n.kind) {
     case 'dm':             return { icon: 'fa-comment',        html: `${who} sent you ${times > 1 ? times + ' messages' : 'a message'}`, sub: n.body };
     case 'group_msg':      return { icon: 'fa-users',          html: `${who} ${times > 1 ? `sent ${times} messages` : 'sent a message'} in <strong>${escapeHtml(n.meta || 'your study group')}</strong>`, sub: n.body };
@@ -2431,7 +2432,7 @@ function inThread(msg, key) { return !!key && msgKey(msg) === key; }
 function openGroupChat() { return selectedGroupChatId ? findGroup(selectedGroupChatId) : null; }
 
 async function selectFriend(friendId) {
-  if (friendId !== selectedFriendId) dmMessages = [];
+  if (friendId !== selectedFriendId) { dmMessages = []; msgReactions = {}; }
   selectedFriendId = friendId;
   selectedGroupChatId = null;
   renderFriendsStrip();
@@ -2445,7 +2446,7 @@ async function selectGroupChat(groupId) {
   if (!g) return showToast('That group is no longer available.', 'info');
   if (!g.joined && !isAdmin) return showToast('Join the group to see its chat.', 'info');
   const id = String(g.id);
-  if (id !== selectedGroupChatId) dmMessages = [];
+  if (id !== selectedGroupChatId) { dmMessages = []; msgReactions = {}; }
   selectedGroupChatId = id;
   selectedFriendId = null;
   renderFriendsStrip();
@@ -2530,10 +2531,202 @@ async function fetchThread(opts = {}) {
   // Names for who said what in a group (only fetch people we don't know yet).
   const unknown = isGroup ? [...new Set(dmMessages.map(m => m.sender_id))].filter(u => u && !profileMap[u]) : [];
   if (unknown.length) fetchProfilesByIds(unknown).then(() => { if (key === chatKey()) renderDMThread(); });
-  if (dmMessages.map(m => m.id).join() !== before || dmRenderedFor !== key) renderDMThread();
+  const changed = dmMessages.map(m => m.id).join() !== before;
+  if (changed || dmRenderedFor !== key) renderDMThread();
+  if (changed || !opts.quiet || Date.now() - msgReactFetchedAt > 20000) fetchMessageReactions();
 }
 // Older name, still used in a few places.
 function fetchDMs(_friendId, opts) { return fetchThread(opts); }
+
+// -------------------- Reactions on chat messages --------------------
+// SCHEMA.sql 6r: message_reactions, one row per person per emoji per message.
+let msgReactions = {};          // messageId -> { emoji: { count, mine } }
+let msgReactReady = null;       // false until the database has message_reactions
+let msgReactFetchedAt = 0;
+let msgReactTimer = null;
+const msgReactBusy = new Set();
+
+function messageReactionsHtml(msg) {
+  const r = msgReactions[String(msg.id)];
+  if (!r) return '';
+  const chips = Object.entries(r).filter(([, v]) => v.count > 0).sort((a, b) => b[1].count - a[1].count);
+  if (!chips.length) return '';
+  const id = escapeAttr(msg.id);
+  return `<div class="msg-reactions">${chips.map(([em, v]) => `
+    <button type="button" class="msg-react-chip ${v.mine ? 'mine' : ''}" aria-pressed="${v.mine}"
+            onclick="event.stopPropagation(); toggleMessageReaction('${id}', '${escapeAttr(em)}')"
+            aria-label="${v.mine ? 'Remove' : 'Add'} ${escapeAttr(em)} reaction">${escapeHtml(em)}${v.count > 1 ? ` <span>${v.count}</span>` : ''}</button>`).join('')}</div>`;
+}
+
+async function fetchMessageReactions() {
+  const key = chatKey();
+  if (!key || !currentUserId || !isSupabaseConnected || msgReactReady === false) return;
+  const ids = dmMessages.filter(m => !m.pending && m.id).map(m => m.id);
+  msgReactFetchedAt = Date.now();
+  if (!ids.length) { msgReactions = {}; return; }
+  const col = key.startsWith('g:') ? 'group_message_id' : 'dm_id';
+  const { data, error } = await supabaseClient.from('message_reactions')
+    .select('dm_id, group_message_id, user_id, emoji').in(col, ids.slice(-200));
+  if (key !== chatKey()) return;
+  if (error) { if (missingTable(error)) msgReactReady = false; return; }
+  msgReactReady = true;
+  const next = {};
+  (data || []).forEach(row => {
+    const mid = String(row.dm_id || row.group_message_id);
+    const e = (next[mid] ||= {})[row.emoji] ||= { count: 0, mine: false };
+    e.count += 1;
+    if (row.user_id === currentUserId) e.mine = true;
+  });
+  // Keep taps that are still saving.
+  msgReactBusy.forEach(tag => { const [mid, em] = tag.split('|'); const cur = msgReactions[mid]?.[em];
+    if (cur) (next[mid] ||= {})[em] = cur; });
+  if (JSON.stringify(next) !== JSON.stringify(msgReactions)) { msgReactions = next; renderDMThread(); }
+}
+function onMessageReactionsChanged() {
+  clearTimeout(msgReactTimer);
+  msgReactTimer = setTimeout(fetchMessageReactions, 250);
+}
+
+async function toggleMessageReaction(msgId, emoji) {
+  if (!currentUserId) return;
+  if (msgReactReady === false) return showToast('Reactions in chat need a database update first (SCHEMA.sql section 6r).', 'warn', 6000);
+  const key = chatKey();
+  if (!key) return;
+  const mid = String(msgId), tag = `${mid}|${emoji}`;
+  if (msgReactBusy.has(tag)) return;
+  const col = key.startsWith('g:') ? 'group_message_id' : 'dm_id';
+  const cur = msgReactions[mid]?.[emoji] || { count: 0, mine: false };
+  const had = cur.mine;
+  const set = mine => {
+    const e = (msgReactions[mid] ||= {})[emoji] ||= { count: 0, mine: false };
+    e.count = Math.max(0, cur.count + (mine === had ? 0 : mine ? 1 : -1));
+    e.mine = mine;
+  };
+  msgReactBusy.add(tag);
+  set(!had);
+  renderDMThread();
+  const { error } = had
+    ? await supabaseClient.from('message_reactions').delete().match({ [col]: msgId, user_id: currentUserId, emoji })
+    : await supabaseClient.from('message_reactions').insert([{ [col]: msgId, user_id: currentUserId, emoji }]);
+  msgReactBusy.delete(tag);
+  if (error && error.code !== '23505') {
+    set(had);
+    renderDMThread();
+    if (missingTable(error)) { msgReactReady = false; return showToast('Reactions in chat need a database update first (SCHEMA.sql section 6r).', 'warn', 6000); }
+    showToast('Could not save that: ' + error.message, 'error');
+  }
+}
+
+// -------------------- Hold to pick any emoji --------------------
+let holdTimer = null, holdStart = null, holdFired = false, pickerFor = null;
+function reactPickerEl() {
+  let el = document.getElementById('react-picker');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'react-picker';
+  el.className = 'react-picker-overlay';
+  el.hidden = true;
+  el.innerHTML = `
+    <div class="react-picker" role="dialog" aria-label="React with any emoji">
+      <div class="react-picker-grid">${REACT_PICKS.map(em =>
+        `<button type="button" class="react-pick" data-em="${em}" aria-label="React ${em}">${em}</button>`).join('')}</div>
+      <form class="react-picker-own" onsubmit="event.preventDefault(); pickTypedReaction();">
+        <input id="react-picker-input" class="auth-input" placeholder="Or type any emoji" maxlength="16" autocomplete="off" aria-label="Type any emoji" />
+        <button type="submit" class="primary-btn">React</button>
+      </form>
+      <button type="button" class="text-btn react-picker-copy" hidden onclick="copyPickedMessage()"><i class="fa-regular fa-copy"></i> Copy message</button>
+    </div>`;
+  el.addEventListener('click', e => {
+    const b = e.target.closest('.react-pick');
+    if (b) return pickReaction(b.dataset.em);
+    if (e.target === el) closeReactPicker();
+  });
+  (document.querySelector('.mobile-frame') || document.body).append(el);
+  return el;
+}
+function openReactPicker(target) {
+  const kind = target.dataset.holdReact;
+  const id = kind === 'post' ? target.dataset.post : target.dataset.msg;
+  if (!id || !currentUserId) return;
+  if (kind === 'msg' && msgReactReady === false) return showToast('Reactions in chat need a database update first (SCHEMA.sql section 6r).', 'warn', 6000);
+  const el = reactPickerEl();
+  if (!el.hidden && pickerFor && pickerFor.kind === kind && pickerFor.id === id) return;
+  pickerFor = { kind, id };
+  // Show which ones you've already used.
+  const mineSet = new Set(kind === 'post'
+    ? [...myFeedReactions].filter(t => t.startsWith(id + '|')).map(t => reactionEmoji(t.slice(id.length + 1)))
+    : Object.entries(msgReactions[id] || {}).filter(([, v]) => v.mine).map(([em]) => em));
+  const bare = s => String(s).replace(/\ufe0f/g, '');
+  el.querySelectorAll('.react-pick').forEach(b =>
+    b.classList.toggle('mine', [...mineSet].some(m => bare(m) === bare(b.dataset.em))));
+  el.querySelector('.react-picker-copy').hidden = kind !== 'msg';
+  el.querySelector('#react-picker-input').value = '';
+  el.hidden = false;
+  // Next to what you held (computers); a sheet at the bottom (phones).
+  const card = el.querySelector('.react-picker');
+  card.style.left = card.style.top = '';
+  if (document.documentElement.classList.contains('layout-desktop')) {
+    const frame = el.parentElement.getBoundingClientRect();
+    const r = target.getBoundingClientRect();
+    const w = card.offsetWidth, h = card.offsetHeight;
+    const left = Math.max(8, Math.min(r.left - frame.left, frame.width - w - 8));
+    const above = r.top - frame.top - h - 8;
+    card.style.left = left + 'px';
+    card.style.top = (above > 8 ? above : Math.min(r.bottom - frame.top + 8, frame.height - h - 8)) + 'px';
+  }
+  if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(10);   // a little buzz on phones
+}
+function closeReactPicker() {
+  const el = document.getElementById('react-picker');
+  if (el) el.hidden = true;
+  pickerFor = null;
+}
+function pickReaction(em) {
+  const p = pickerFor;
+  closeReactPicker();
+  if (!p || !em) return;
+  if (p.kind === 'post') toggleFeedReaction(p.id, emojiReactionKey(em));
+  else toggleMessageReaction(p.id, em);
+}
+function pickTypedReaction() {
+  const em = cleanEmoji(document.getElementById('react-picker-input')?.value);
+  if (!em) return showToast('Type one emoji (letters and numbers can’t be reactions).', 'warn');
+  pickReaction(em);
+}
+function copyPickedMessage() {
+  const p = pickerFor;
+  closeReactPicker();
+  const m = p && dmMessages.find(x => String(x.id) === String(p.id));
+  if (!m) return;
+  navigator.clipboard?.writeText(String(m.text || '')).then(
+    () => showToast('Message copied.', 'success', 2000),
+    () => showToast('Could not copy that.', 'error'));
+}
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest?.('[data-hold-react]');
+  if (!el || e.button > 0) return;
+  holdFired = false;
+  holdStart = { x: e.clientX, y: e.clientY };
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => { holdFired = true; openReactPicker(el); }, 450);
+});
+document.addEventListener('pointermove', e => {
+  if (holdStart && Math.hypot(e.clientX - holdStart.x, e.clientY - holdStart.y) > 10) { clearTimeout(holdTimer); holdStart = null; }
+});
+['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, () => { clearTimeout(holdTimer); holdStart = null; }));
+// A hold isn't also a tap.
+document.addEventListener('click', e => {
+  if (holdFired && e.target.closest?.('[data-hold-react]')) { e.preventDefault(); e.stopPropagation(); }
+  holdFired = false;
+}, true);
+document.addEventListener('contextmenu', e => {
+  const el = e.target.closest?.('[data-hold-react]');
+  if (!el) return;
+  e.preventDefault();
+  clearTimeout(holdTimer);
+  openReactPicker(el);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeReactPicker(); });
 
 // Live update from the database (direct messages or group chats).
 function onChatChanged(payload) {
@@ -2689,10 +2882,12 @@ function renderDMThread(opts = {}) {
     // already showing as "Sending…" just fades up instead of popping in again.
     const motion = !onScreen || dmShown.has(msg.id) ? ''
       : (msg._was && dmShown.has(msg._was)) ? ' settled' : ' anim-in';
+    const holdable = !msg.pending && msg.id ? ` data-hold-react="msg" data-msg="${escapeAttr(msg.id)}"` : '';
     html += `
-      <div class="chat-bubble ${mine ? 'chat-bubble-mine' : 'chat-bubble-other'}${withPrev ? ' grouped' : ''}${withNext ? ' has-next' : ''}${msg.pending ? ' pending' : ''}${motion}">
+      <div class="chat-bubble ${mine ? 'chat-bubble-mine' : 'chat-bubble-other'}${withPrev ? ' grouped' : ''}${withNext ? ' has-next' : ''}${msg.pending ? ' pending' : ''}${motion}"${holdable}>
         ${sender}
         <div class="chat-text">${renderSafeMessage(String(msg.text || '').slice(0, CHAT_MAX_LEN))}</div>
+        ${messageReactionsHtml(msg)}
         ${withNext && !msg.pending ? '' : `<span class="chat-time">${time}</span>`}
       </div>`;
   });
@@ -2785,6 +2980,28 @@ const REACTIONS = [
   { key: 'thumbs', em: '👍' }, { key: 'heart', em: '❤️' }, { key: 'laugh', em: '😂' },
   { key: 'party',  em: '🎉' }, { key: 'fire',  em: '🔥' }
 ];
+// Tap a reaction to add or take back yours. Press and hold one (or right-
+// click it), or hold a chat message, to react with any emoji.
+const REACT_PICKS = ['👍', '❤️', '😂', '🎉', '🔥', '😮', '😢', '😡', '👏', '🙏', '💯', '👀',
+  '🤔', '😍', '🥳', '😭', '🤯', '💀', '🙌', '✅', '❌', '⭐', '🤝', '💪',
+  '😎', '🥲', '😅', '🤣', '😊', '🤩', '😴', '🤓', '📚', '✏️', '🧪', '🏀',
+  '⚽', '🍕', '☕', '🎵', '💡', '🫡'];
+// The emoji for a reaction key ('thumbs' → 👍); any other key is the emoji itself.
+function reactionEmoji(key) { return REACTIONS.find(r => r.key === key)?.em || (key === 'like' ? '❤️' : key); }
+// The key to save for an emoji: the original five keep their names.
+function emojiReactionKey(em) {
+  const bare = s => String(s).replace(/\ufe0f/g, '');
+  return REACTIONS.find(r => bare(r.em) === bare(em))?.key || em;
+}
+// One emoji, or null: the first one typed, no letters, digits or spaces.
+function cleanEmoji(text) {
+  let t = String(text || '').trim();
+  if (!t) return null;
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) t = [...new Intl.Segmenter().segment(t)][0]?.segment || '';
+  if (t.length > 16 || /[\u0000-\u007f]/.test(t) || /[\p{L}\s]/u.test(t) || !/\p{Extended_Pictographic}/u.test(t)) return null;
+  return t;
+}
+
 let feedReactions   = {};          // postId -> { key: count }
 let myFeedReactions = new Set();   // "postId|key" for my own reactions
 let feedComments    = {};          // postId -> [comment rows]
@@ -2981,12 +3198,17 @@ function renderFeed() {
     const commentCount = postComments(post).length;
     const likeCount = postReactionCount(post, 'like');
     const liked = iReacted(post, 'like');
-    const reactionRow = REACTIONS.map(r => {
-      const n = postReactionCount(post, r.key);
-      const on = iReacted(post, r.key);
+    const extraKeys = Object.entries(feedReactions[String(post.id)] || {})
+      .filter(([k, n]) => n > 0 && k !== 'like' && !REACTIONS.some(r => r.key === k))
+      .sort((a, b) => b[1] - a[1]).map(([k]) => k);
+    const reactionRow = REACTIONS.map(r => r.key).concat(extraKeys).map(key => {
+      const em = reactionEmoji(key);
+      const n = postReactionCount(post, key);
+      const on = iReacted(post, key);
       return `<button class="reaction-chip ${n ? 'has-count' : ''} ${on ? 'mine' : ''}" aria-pressed="${on}"
-                onclick="reactToPost('${pid}','${r.key}')" aria-label="${on ? 'Remove' : 'Add'} ${r.em} reaction">
-                ${r.em} <span>${n || ''}</span>
+                data-hold-react="post" data-post="${pid}" title="Hold for more reactions"
+                onclick="reactToPost('${pid}','${escapeAttr(key)}')" aria-label="${on ? 'Remove' : 'Add'} ${escapeAttr(em)} reaction">
+                ${escapeHtml(em)} <span>${n || ''}</span>
               </button>`;
     }).join('');
 
@@ -3074,7 +3296,9 @@ async function toggleFeedReaction(id, key) {
   if (error && error.code !== '23505') {       // 23505 = it was already saved
     setLocalReaction(post.id, key, had);
     renderFeed();
-    showToast('Could not save that: ' + error.message, 'error');
+    showToast(error.code === '23514'               // the database only knows the original five
+      ? 'Reacting with any emoji needs a database update first (SCHEMA.sql section 6r).'
+      : 'Could not save that: ' + error.message, 'error', 6000);
   }
 }
 
