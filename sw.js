@@ -1,7 +1,7 @@
 // Network-first: when online, always load the latest app files so updates
 // show up on the next reload. The cache is only a fallback for offline use.
 // (The old cache-first version kept serving outdated CSS/JS indefinitely.)
-const CACHE_NAME = 'campus-pulse-v83';
+const CACHE_NAME = 'campus-pulse-v86';
 const ASSETS = [
   './',
   './index.html',

@@ -5424,3 +5424,42 @@ textarea.auth-input { border-radius: var(--r-ctl); }
 .ev-vis-friends { background: var(--accent-muted); color: var(--accent-color); }
 .ev-vis-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 8px !important; font-size: 0.8rem; color: var(--sub-text-color); }
 .cal-next-foot .ev-vis { margin-right: 0; }
+
+/* ---------- Fewer generated-looking bits, same personality ----------
+   Home card: "Next up" from your calendar under the greeting (instead of a
+   description). Shortcuts only for things the phone's tab bar doesn't have
+   (computers have them all in the sidebar). Teacher cards on computers get
+   the same one line of facts as on phones. */
+.hero-next {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 8px 0 2px;
+  padding: 9px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-ctl, 12px);
+  background: var(--input-bg);
+  color: var(--sub-text-color);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+.hero-next[hidden] { display: none; }
+.hero-next > i:first-child { color: var(--accent-color); }
+.hero-next span { flex: 1; min-width: 0; line-height: 1.35; }
+.hero-next b { color: var(--main-text-color); }
+.hero-next-go { font-size: 0.7rem; opacity: 0.6; }
+.hero-next:hover { border-color: var(--accent-soft-border); }
+html.layout-desktop .hero-next { display: none; }        /* "Coming up" is right below on computers */
+
+.quick-tools-bar { grid-template-columns: repeat(3, 1fr); }
+html.layout-desktop #home-view .quick-tools-bar { display: none; }
+
+html.layout-desktop .tc-reviews { display: inline; }
+html.layout-desktop .teacher-card-stats { flex-wrap: nowrap; gap: 14px; overflow: hidden; }
+html.layout-desktop .teacher-card .teacher-meta small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.layout-desktop .teacher-card-stats span { padding: 0; background: none; white-space: nowrap; font-size: 0.76rem; }
+html.layout-desktop .teacher-card-stats .ts-reviews,
+html.layout-desktop .teacher-card-stats.only-reviews { display: none; }

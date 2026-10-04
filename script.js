@@ -10,7 +10,7 @@ if (SUPABASE_URL !== "YOUR_SUPABASE_URL" && typeof supabase !== 'undefined') {
   try {
     supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     isSupabaseConnected = true;
-    console.log("⚡ Supabase Engine successfully initialized!");
+    console.log("Supabase connected.");
   } catch (err) {
     console.error("Supabase init failed, running in local mode:", err);
   }
@@ -171,13 +171,13 @@ const WIDE_MIN_WIDTH = 700;      // below this (phones) only the phone layout is
 
 // Human-facing metadata for the theme swatch grid.
 const THEME_META = [
-  { key: 'cyber',      label: 'Cyber' },
-  { key: 'synthwave',  label: 'Synth' },
-  { key: 'matrix',     label: 'Matrix' },
-  { key: 'dracula',    label: 'Dracula' },
-  { key: 'nordic',     label: 'Nordic' },
-  { key: 'orange',     label: 'Solar' },
-  { key: 'crimson',    label: 'Ruby' },
+  { key: 'cyber',      label: 'Cyan' },
+  { key: 'synthwave',  label: 'Pink' },
+  { key: 'matrix',     label: 'Green' },
+  { key: 'dracula',    label: 'Purple' },
+  { key: 'nordic',     label: 'Blue' },
+  { key: 'orange',     label: 'Orange' },
+  { key: 'crimson',    label: 'Red' },
   { key: 'gold',       label: 'Gold' },
   { key: 'emerald',    label: 'Mint' },
   { key: 'monochrome', label: 'Mono' }
@@ -238,7 +238,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (!isSupabaseConnected) {
     // Supabase misconfigured — surface it instead of silently degrading.
-    showToast('Supabase not configured — sign-in disabled.', 'error', 6000);
+    showToast("Supabase isn't set up, so signing in is off.", 'error', 6000);
     document.getElementById('auth-screen').style.display = 'flex';
     return;
   }
@@ -578,7 +578,7 @@ async function createGroup(event) {
     // Auto-join the creator as the first member.
     await supabaseClient.from('study_group_members').insert([{ group_id: data.id, user_id: currentUserId }]);
 
-    showToast(isPrivate ? "Private group created. Tap Invite in its details to add people." : 'Group created — you\'re in!', 'success', 4000);
+    showToast(isPrivate ? "Private group created. Tap Invite in its details to add people." : "Group created. You're in.", 'success', 4000);
     closeCreateGroupModal();
     event.target.reset();
     fetchGroups();
@@ -659,7 +659,7 @@ async function handleAuth(event) {
         // if that fails, tell the user to confirm and try again.
         const { error: signInErr } = await supabaseClient.auth.signInWithPassword({ email, password });
         if (signInErr) {
-          showToast('Account created — check your inbox to confirm, then sign in.', 'info', 6000);
+          showToast('Account created. Check your inbox to confirm, then sign in.', 'info', 6000);
         }
       }
     } else {
@@ -1352,11 +1352,11 @@ async function toggleDeviceAlerts() {
   const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
   if (perm !== 'granted') {
     syncDeviceAlertsToggle();
-    return showToast('Alerts are blocked — allow notifications for this site in your browser settings.', 'warn', 6000);
+    return showToast('Alerts are blocked. Allow notifications for this site in your browser settings.', 'warn', 6000);
   }
   try { localStorage.setItem('deviceAlerts', 'on'); } catch (_) {}
   syncDeviceAlertsToggle();
-  showToast("Device alerts on — you'll get a pop-up while the app is open in the background.", 'success', 5000);
+  showToast("Device alerts on. You'll get a pop-up while the app is open in the background.", 'success', 5000);
 }
 
 function showDeviceAlert(n, text) {
@@ -1582,7 +1582,7 @@ function updateSchoolChrome() {
     welcome.textContent = `${greetingNow()}, ${String(name).split(/\s+/)[0]}`;
   }
   const kicker = document.getElementById('hero-kicker');
-  if (kicker) kicker.textContent = currentSchool ? currentSchool.name : 'Academic Dashboard';
+  if (kicker) kicker.textContent = currentSchool ? currentSchool.name : '';
   const label = document.getElementById('current-school-label');
   if (label) label.textContent = currentSchool ? currentSchool.name : 'No school set';
 
@@ -1658,6 +1658,7 @@ function fitSidebarGroups() {
 // Home side panels (computer layout): next few events + my study groups.
 function renderHomeSide() {
   renderSidebarGroups();
+  renderHeroNext();
   const up = document.getElementById('home-upcoming');
   if (up) {
     const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
@@ -1684,6 +1685,20 @@ function renderHomeSide() {
       </button>`).join('')
       : `<p class="side-empty">You're not in any groups yet. <button class="text-btn" onclick="switchTab('groups-view')">Find one</button></p>`;
   }
+}
+
+// Home card: what's next on your calendar, under the greeting.
+function renderHeroNext() {
+  const el = document.getElementById('hero-next');
+  if (!el) return;
+  const n = calEvents.filter(e => !eventIsOver(e)).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at))[0];
+  el.hidden = !n;
+  if (!n) { el.innerHTML = ''; el.onclick = null; return; }
+  const d = new Date(n.starts_at);
+  el.innerHTML = `<i class="fa-solid fa-calendar-day"></i>
+    <span>Next up: <b>${escapeHtml(n.title)}</b> · ${escapeHtml(dayWords(d))}${n.all_day ? '' : ' at ' + escapeHtml(eventTime(n))}</span>
+    <i class="fa-solid fa-chevron-right hero-next-go"></i>`;
+  el.onclick = () => openEventPage(n.id);
 }
 
 // -------------------- School picker --------------------
@@ -1751,7 +1766,7 @@ function renderSchoolPicker() {
     const req = myJoinRequests[s.id];
     const note = current ? 'Your school'
       : req === 'pending' ? 'Request pending'
-      : req === 'denied' && s.join_mode === 'approval' ? 'Request denied — ask an admin'
+      : req === 'denied' && s.join_mode === 'approval' ? 'Request denied, ask an admin'
       : rule.text;
     const codeBox = pickerCodeSchoolId === s.id ? `
       <div class="school-code-row">
@@ -1810,7 +1825,7 @@ async function joinSchool(schoolId, code = null) {
   } else if (data === 'pending') {
     myJoinRequests[schoolId] = 'pending';
     renderSchoolPicker();
-    setPickerStatus(`Request sent to join ${s?.name}. An admin will review it — you'll get in automatically once approved.`, 'ok');
+    setPickerStatus(`Request sent to join ${s?.name}. An admin will review it, and you'll get in automatically once approved.`, 'ok');
     return;
   }
 
@@ -1838,7 +1853,7 @@ async function createSchoolFromInput() {
 
   const existing = schoolsCache.find(s => s.name.toLowerCase() === name.toLowerCase() || s.slug === slug);
   if (existing) {
-    setPickerStatus(`${existing.name} already exists — tap it above to join.`, 'err');
+    setPickerStatus(`${existing.name} already exists. Tap it above to join.`, 'err');
     return;
   }
   const { data, error } = await supabaseClient
@@ -1976,7 +1991,7 @@ function renderFriendsStrip() {
       <div class="friends-empty">
         <i class="fa-solid fa-user-plus"></i>
         <div class="friends-empty-text">
-          <span>${currentUserId ? 'No chats yet — add a friend, or join a study group to get its group chat.' : 'Sign in to message your friends.'}</span>
+          <span>${currentUserId ? 'No chats yet. Add a friend, or join a study group to get its group chat.' : 'Sign in to message your friends.'}</span>
           ${currentUserId ? '<button class="primary-btn friends-empty-btn" onclick="openFriendsModal()">+ Add Friend</button>' : ''}
         </div>
       </div>`;
@@ -2363,7 +2378,7 @@ function renderFriendsModalIfOpen() {
             </div>
             <button class="secondary-btn friend-btn-sm" onclick="unfriend('${escapeAttr(f.friend_id)}')">Unfriend</button>
           </div>`).join('')
-      : emptyMsg(currentUserId ? "No friends yet — send a request from the Add tab." : "Sign in to see your friends.");
+      : emptyMsg(currentUserId ? "No friends yet. Send a request from the Add tab." : "Sign in to see your friends.");
   }
   if (rin) {
     rin.innerHTML = pendingIncoming.length
@@ -2714,7 +2729,7 @@ async function sendDM(event) {
   chatSendTimestamps = chatSendTimestamps.filter(t => now - t < CHAT_RATE_WINDOW_MS);
   if (chatSendTimestamps.length >= CHAT_RATE_MAX) {
     const waitMs = CHAT_RATE_WINDOW_MS - (now - chatSendTimestamps[0]);
-    showToast(`Slow down — ${Math.ceil(waitMs/1000)}s until you can message again.`, 'warn', 3000);
+    showToast(`Wait ${Math.ceil(waitMs/1000)}s before sending another message.`, 'warn', 3000);
     return;
   }
 
@@ -2746,7 +2761,7 @@ async function sendDM(event) {
       if (!input.value) { input.value = text; updateChatCounter(); }   // give the text back to retry
     }
     if (group && missingTable(error)) { groupChatReady = false; renderDMThread(); return; }
-    return showToast(group ? "Couldn't send — you need to be in this group." : 'Message blocked — make sure you two are friends.', 'error', 4500);
+    return showToast(group ? "Couldn't send. You need to be in this group." : 'Message blocked. Make sure you two are friends.', 'error', 4500);
   }
   if (chatKey() !== key) return;
   if (!data) return fetchThread({ quiet: true });
@@ -3021,7 +3036,7 @@ function updateNotifBadge() {
 
 function needsFeedUpdate() {
   if (feedExtrasReady !== false) return false;
-  showToast('Reactions and comments need the latest database update — run SCHEMA.sql in Supabase.', 'warn', 6000);
+  showToast('Reactions and comments need the latest database update. Run SCHEMA.sql in Supabase.', 'warn', 6000);
   return true;
 }
 
@@ -3848,7 +3863,7 @@ function renderCalNext() {
         ${eventVis(next) === 'private' ? `${eventVisBadge(next)}<span class="event-going">Only you can see this</span>` : `
         ${eventVisBadge(next)}${goingFaces(r.who || [])}
         <span class="event-going">${r.count ? `${r.count} going` : 'Be the first to go'}</span>
-        <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} event-rsvp-btn" onclick="event.stopPropagation(); toggleRsvp('${id}')">${r.mine ? '✓ Going' : "I'm going"}</button>`}
+        <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} event-rsvp-btn" onclick="event.stopPropagation(); toggleRsvp('${id}')">${r.mine ? '<i class="fa-solid fa-check"></i> Going' : "I'm going"}</button>`}
       </div>
     </div>`;
 }
@@ -3934,7 +3949,7 @@ function eventCardHtml(e) {
         ${e.description ? `<p class="event-desc">${escapeHtml(e.description)}</p>` : ''}
         ${personal ? '' : `<div class="event-actions">
           <button class="${r.mine ? 'secondary-btn active-state' : 'primary-btn'} event-rsvp-btn"
-            onclick="event.stopPropagation(); toggleRsvp('${id}')" ${past ? 'disabled' : ''}>${r.mine ? '✓ Going' : "I'm going"}</button>
+            onclick="event.stopPropagation(); toggleRsvp('${id}')" ${past ? 'disabled' : ''}>${r.mine ? '<i class="fa-solid fa-check"></i> Going' : "I'm going"}</button>
           ${goingFaces(r.who || [], 3)}
           <span class="event-going">${r.count} going</span>
         </div>`}
@@ -4498,7 +4513,7 @@ async function saveJoinRules(id) {
 async function reviewJoinRequest(requestId, approve) {
   const { error } = await supabaseClient.rpc('admin_review_join_request', { request: requestId, approve });
   if (error) return showToast('Could not update request: ' + error.message, 'error');
-  showToast(approve ? 'Approved — they\'re in.' : 'Request denied.', approve ? 'success' : 'info');
+  showToast(approve ? "Approved. They're in." : 'Request denied.', approve ? 'success' : 'info');
   fetchAdminJoinData();
   fetchAdminMembers();
 }
@@ -4783,7 +4798,7 @@ function memberName(userId) {
 async function adminToggleAdmin(userId, make) {
   const name = memberName(userId);
   const ok = confirm(make
-    ? `Make ${name} an admin?\n\nAdmins can delete posts, reviews, teachers, groups, events and schools, change join rules, and remove or promote students — at every school.`
+    ? `Make ${name} an admin?\n\nAdmins can delete posts, reviews, teachers, groups, events and schools, change join rules, and remove or promote students, at every school.`
     : `Remove ${name}'s admin role?`);
   if (!ok) return;
   const { error } = await supabaseClient.rpc('admin_set_admin', { target_user: userId, make });
@@ -4857,7 +4872,7 @@ async function adminDeleteSchool(id) {
     `Type the school name to confirm:`);
   if (typed == null) return;
   if (typed.trim().toLowerCase() !== s.name.toLowerCase()) {
-    return showToast("Name didn't match — nothing was deleted.", 'info');
+    return showToast("Name didn't match, so nothing was deleted.", 'info');
   }
   const { error } = await supabaseClient.rpc('admin_delete_school', { target: id });
   if (error) return showToast('Could not delete school: ' + error.message, 'error');
@@ -5249,7 +5264,7 @@ function calculateGPA() {
   gpaValue = Number.isFinite(overall) ? overall : 0;
   setGpaNumber(gpaValue);
   setText('gpa-hero-label', `${weighted ? 'Weighted' : 'Unweighted'} · out of ${scaleMax.toFixed(1)}`);
-  setText('gpa-letter', overall === null ? '' : `≈ ${gpaLetter(Math.min(4, overall))} average${hasPrev ? ' overall' : ''}`);
+  setText('gpa-letter', overall === null ? '' : `${gpaLetter(Math.min(4, overall))} average${hasPrev ? ' overall' : ''}`);
   setText('gpa-term-val', fmt(term));
   setText('gpa-cum-val', hasPrev ? fmt(overall) : '–');
   setText('gpa-credits-val', String(totalCr));
@@ -5383,7 +5398,7 @@ function finishPomo() {
   pomo.remaining = POMO_DURATIONS[pomo.mode];
   savePomo();
   renderTimer();
-  showToast(wasFocus ? '🍅 Focus done — take a 5-minute break.' : 'Break over — ready for another round?', 'success', 6000);
+  showToast(wasFocus ? 'Focus session done. Take a 5-minute break.' : 'Break over. Ready for another round?', 'success', 6000);
   if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
 }
 
@@ -5443,11 +5458,11 @@ function renderTimer() {
     .forEach(b => b.classList.toggle('active', b.dataset.mode === pomo.mode));
   const hint = document.getElementById('timer-hint');
   if (hint) hint.textContent = pomo.mode === 'focus'
-    ? 'Focus session — keeps running if you close this.'
-    : 'Break — stretch, drink water, look away from the screen.';
+    ? 'Focus session. It keeps running if you close this.'
+    : 'Break time. Stretch, drink some water, look away from the screen.';
 
   const label = document.getElementById('pomo-tool-label');
-  if (label) label.textContent = inProgress ? `${pomo.running ? '' : '⏸ '}${fmtClock(ms)}` : 'Pomodoro';
+  if (label) label.innerHTML = inProgress ? `${pomo.running ? '' : '<i class="fa-solid fa-pause"></i> '}${fmtClock(ms)}` : 'Focus timer';
   document.getElementById('pomo-tool-btn')?.classList.toggle('pomo-live', pomo.running);
 }
 
@@ -5700,7 +5715,7 @@ function renderTeacherSubjectChips() {
     <button class="chip ${teacherSubjectFilter === 'all' ? 'active' : ''}" onclick="setTeacherSubject('all')">All subjects</button>
     ${groups.map(g => `
       <button class="chip ${teacherSubjectFilter === g.key ? 'active' : ''}" onclick="setTeacherSubject('${g.key}')">
-        <i class="fa-solid ${g.icon}"></i> ${escapeHtml(g.label)} <span class="chip-count">${counts[g.key]}</span>
+        <i class="fa-solid ${g.icon}"></i> ${escapeHtml(g.label)}
       </button>`).join('')}` : '';
 }
 
@@ -5892,7 +5907,7 @@ async function submitAddTeacher(event) {
       .maybeSingle();
     if (!existing) return showToast('That teacher already exists.', 'warn');
     teacherId = existing.id;
-    showToast(`${name} already has a page — opening it.`, 'info');
+    showToast(`${name} already has a page. Opening it.`, 'info');
   } else {
     showToast(`Page created for ${name}.`, 'success');
   }
@@ -6864,7 +6879,7 @@ async function submitTeacherPost(event) {
     }
     return showToast('Could not post: ' + error.message, 'error');
   }
-  showToast(editingPostId ? 'Saved.' : 'Posted — thanks for helping other students!', 'success');
+  showToast(editingPostId ? 'Saved.' : 'Posted. Thanks for helping other students.', 'success');
   closeTeacherPostModal();
   teacherTab = kind;
   fetchMyReviewCount();
