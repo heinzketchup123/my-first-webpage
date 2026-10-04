@@ -3198,10 +3198,11 @@ function renderFeed() {
     const commentCount = postComments(post).length;
     const likeCount = postReactionCount(post, 'like');
     const liked = iReacted(post, 'like');
-    const extraKeys = Object.entries(feedReactions[String(post.id)] || {})
-      .filter(([k, n]) => n > 0 && k !== 'like' && !REACTIONS.some(r => r.key === k))
-      .sort((a, b) => b[1] - a[1]).map(([k]) => k);
-    const reactionRow = REACTIONS.map(r => r.key).concat(extraKeys).map(key => {
+    // One reaction (👍) to tap or hold; any other only shows once someone has used it.
+    const usedKeys = [...new Set(REACTIONS.map(r => r.key).concat(Object.keys(feedReactions[String(post.id)] || {})))]
+      .filter(k => k !== 'like' && k !== 'thumbs' && postReactionCount(post, k) > 0)
+      .sort((a, b) => postReactionCount(post, b) - postReactionCount(post, a));
+    const reactionRow = ['thumbs'].concat(usedKeys).map(key => {
       const em = reactionEmoji(key);
       const n = postReactionCount(post, key);
       const on = iReacted(post, key);
