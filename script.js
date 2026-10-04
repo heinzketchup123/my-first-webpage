@@ -3013,6 +3013,11 @@ const samePostId = (a, b) => String(a) === String(b);
 const findPost = (id) => campusFeed.find(p => samePostId(p.id, id));
 
 function postReactionCount(post, key) {
+  if (key === 'heart') return rawReactionCount(post, 'heart') + rawReactionCount(post, 'like');
+  return rawReactionCount(post, key);
+}
+// (❤️ also counts the "likes" from the heart button posts used to have.)
+function rawReactionCount(post, key) {
   if (feedExtrasReady === false) {   // old database: show the counters stored on the post
     if (key === 'like') return post.likes || 0;
     const em = REACTIONS.find(r => r.key === key)?.em;
@@ -3020,7 +3025,13 @@ function postReactionCount(post, key) {
   }
   return feedReactions[String(post.id)]?.[key] || 0;
 }
-function iReacted(post, key) { return myFeedReactions.has(`${post.id}|${key}`); }
+function postReactionTotal(post) {
+  if (feedExtrasReady === false) return (post.likes || 0) + Object.values(post.reactions || {}).reduce((s, n) => s + (+n || 0), 0);
+  return Object.values(feedReactions[String(post.id)] || {}).reduce((s, n) => s + n, 0);
+}
+function iReacted(post, key) {
+  return myFeedReactions.has(`${post.id}|${key}`) || (key === 'heart' && myFeedReactions.has(`${post.id}|like`));
+}
 function postComments(post) {
   if (feedExtrasReady === false) return Array.isArray(post.comments) ? post.comments : [];
   return (feedComments[String(post.id)] || []).filter(c => !isBlocked(c.author_id));   // hide people you've blocked
@@ -3073,7 +3084,7 @@ function onFeedExtrasChanged() {
 function sortedFeed() {
   const list = campusFeed.filter(p => !isBlocked(p.author_id));   // hide people you've blocked
   if (feedSort === 'top') {
-    list.sort((a,b) => postReactionCount(b, 'like') - postReactionCount(a, 'like'));
+    list.sort((a,b) => postReactionTotal(b) - postReactionTotal(a));   // most reactions of any kind
   } else if (feedSort === 'comments') {
     list.sort((a,b) => postComments(b).length - postComments(a).length);
   } else {
@@ -3196,13 +3207,11 @@ function renderFeed() {
   list.forEach(post => {
     const pid = escapeAttr(post.id);
     const commentCount = postComments(post).length;
-    const likeCount = postReactionCount(post, 'like');
-    const liked = iReacted(post, 'like');
-    // One reaction (👍) to tap or hold; any other only shows once someone has used it.
+    // One reaction (❤️) to tap or hold; any other only shows once someone has used it.
     const usedKeys = [...new Set(REACTIONS.map(r => r.key).concat(Object.keys(feedReactions[String(post.id)] || {})))]
-      .filter(k => k !== 'like' && k !== 'thumbs' && postReactionCount(post, k) > 0)
+      .filter(k => k !== 'like' && k !== 'heart' && postReactionCount(post, k) > 0)
       .sort((a, b) => postReactionCount(post, b) - postReactionCount(post, a));
-    const reactionRow = ['thumbs'].concat(usedKeys).map(key => {
+    const reactionRow = ['heart'].concat(usedKeys).map(key => {
       const em = reactionEmoji(key);
       const n = postReactionCount(post, key);
       const on = iReacted(post, key);
@@ -3234,9 +3243,6 @@ function renderFeed() {
       <p class="post-body">${renderSafeMessage(post.text || '')}</p>
       <div class="reaction-row">${reactionRow}</div>
       <footer class="post-actions">
-        <button class="post-action-btn ${liked ? 'liked' : ''}" onclick="toggleLikePost('${pid}')" aria-pressed="${liked}" aria-label="${liked ? 'Unlike' : 'Like'}">
-          <i class="fa-${liked ? 'solid' : 'regular'} fa-heart"></i> ${likeCount}
-        </button>
         <button class="post-action-btn" onclick="openCommentsModal('${pid}')">
           <i class="fa-regular fa-comment"></i> ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}
         </button>
@@ -3279,6 +3285,7 @@ async function toggleFeedReaction(id, key) {
   if (needsFeedUpdate()) return;
   const post = findPost(id);
   if (!post) return;
+  if (key === 'heart' && myFeedReactions.has(`${post.id}|like`) && !myFeedReactions.has(`${post.id}|heart`)) key = 'like';
   const tag = `${post.id}|${key}`;
   if (reactInFlight.has(tag)) return;          // ignore double-taps while saving
   const had = myFeedReactions.has(tag);
@@ -3303,7 +3310,6 @@ async function toggleFeedReaction(id, key) {
   }
 }
 
-function toggleLikePost(id) { return toggleFeedReaction(id, 'like'); }
 function reactToPost(id, key) { return toggleFeedReaction(id, key); }
 
 function openCommentsModal(postId) {
