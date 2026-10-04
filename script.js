@@ -6054,7 +6054,7 @@ function renderTeacherHero() {
     <div class="teacher-hero-text">
       <h1>${escapeHtml(t.name)}</h1>
       <p>${[t.subject || 'No subject yet', schoolName(t.school_id)].filter(Boolean).map(escapeHtml).join(' · ')}</p>
-      ${known.length ? `<div class="th-known th-known-tags"><span class="th-known-label"><i class="fa-solid fa-bolt"></i> Known for</span>
+      ${known.length ? `<div class="th-known th-known-tags"><span class="th-known-label"><i class="fa-solid fa-tags"></i> Known for</span>
         ${known.map(([tag, c]) => `<span class="tag-chip">${escapeHtml(tag)} <b>${c}</b></span>`).join('')}</div>` : ''}
     </div>
     <div class="th-score">

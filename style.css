@@ -5463,3 +5463,44 @@ html.layout-desktop .teacher-card .teacher-meta small { white-space: nowrap; ove
 html.layout-desktop .teacher-card-stats span { padding: 0; background: none; white-space: nowrap; font-size: 0.76rem; }
 html.layout-desktop .teacher-card-stats .ts-reviews,
 html.layout-desktop .teacher-card-stats.only-reviews { display: none; }
+
+/* =====================================================================
+   ONE COLOUR: no rainbow of made-up colours
+   People, teachers, groups and events each had their own random colour
+   (avatars, banners, date blocks, group squares and stripes). They all use
+   the theme colour now, so the app reads as one thing. Colours that mean
+   something stay: ratings (green / yellow / red), anonymous (purple),
+   admin (yellow).
+   ===================================================================== */
+:is(.friend-avatar, .post-avatar, .group-face, .teacher-avatar)[data-tint],
+.group-mark, .ev-bigdate {
+  background: color-mix(in srgb, var(--accent-color) 22%, var(--card-bg-solid)) !important;
+  color: var(--accent-light) !important;
+  box-shadow: inset 0 0 0 1px var(--accent-soft-border) !important;
+}
+body.light-mode :is(.friend-avatar, .post-avatar, .group-face, .teacher-avatar)[data-tint],
+body.light-mode .group-mark, body.light-mode .ev-bigdate {
+  background: color-mix(in srgb, var(--accent-color) 12%, #ffffff) !important;
+  color: var(--accent-color) !important;
+  box-shadow: inset 0 0 0 1px var(--accent-soft-border) !important;
+}
+.group-card { box-shadow: inset 0 3px 0 color-mix(in srgb, var(--accent-color) 80%, transparent), var(--shadow-card); }
+.th-cover {
+  background:
+    radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--accent-color) 45%, transparent), transparent 62%),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-color) 22%, var(--card-bg-solid)), var(--accent-muted));
+}
+body.light-mode .th-cover {
+  background:
+    radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--accent-color) 30%, transparent), transparent 62%),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-color) 14%, #ffffff), var(--accent-muted));
+}
+body.light-mode .th-cover::after { background: var(--accent-color); opacity: 0.3; }
+.cal-next-card {
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent-color) 22%, transparent), transparent 60%),
+    var(--card-bg);
+}
+body.light-mode .cal-next-card {
+  background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent-color) 14%, transparent), transparent 60%), var(--card-bg);
+}
