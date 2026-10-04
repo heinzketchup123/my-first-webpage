@@ -83,16 +83,16 @@
             <span>Continue with Google</span>
           </button>
           <div class="auth-divider"><span>or use email</span></div>
-          <input type="email" id="login-email" class="auth-input" placeholder="Email Address" required />
+          <input type="email" id="login-email" class="auth-input" placeholder="Email address" required />
           <input type="password" id="login-password" class="auth-input" placeholder="Password" required />
-          <button type="submit" class="primary-btn">Sign In</button>
-          <p class="auth-toggle-text">Need an account? <span onclick="toggleAuthMode()">Sign Up</span></p>
+          <button type="submit" class="primary-btn">Sign in</button>
+          <p class="auth-toggle-text">Need an account? <span onclick="toggleAuthMode()">Sign up</span></p>
           <p class="auth-legal">By continuing you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms</a>
             and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</p>
         </form>
 
         <form id="signup-form" class="auth-form hidden" onsubmit="handleAuth(event)">
-          <h2>Create Account</h2>
+          <h2>Create account</h2>
           <p class="auth-sub">You'll pick your school next.</p>
           <button type="button" class="google-btn" onclick="signInWithGoogle()">
             <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
@@ -104,11 +104,11 @@
             <span>Sign up with Google</span>
           </button>
           <div class="auth-divider"><span>or use email</span></div>
-          <input type="text" id="signup-name" class="auth-input" placeholder="Full Name" required />
-          <input type="email" id="signup-email" class="auth-input" placeholder="Email Address" required />
+          <input type="text" id="signup-name" class="auth-input" placeholder="Full name" required />
+          <input type="email" id="signup-email" class="auth-input" placeholder="Email address" required />
           <input type="password" id="signup-password" class="auth-input" placeholder="Password" required />
-          <button type="submit" class="primary-btn">Create Account</button>
-          <p class="auth-toggle-text">Already have an account? <span onclick="toggleAuthMode()">Sign In</span></p>
+          <button type="submit" class="primary-btn">Create account</button>
+          <p class="auth-toggle-text">Already have an account? <span onclick="toggleAuthMode()">Sign in</span></p>
           <p class="auth-legal">By continuing you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms</a>
             and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</p>
         </form>
@@ -178,7 +178,7 @@
           <div class="analytics-row">
             <div class="stat-box">
               <span id="total-reviews-count" class="stat-number">0</span>
-              <span class="stat-label">My Reviews</span>
+              <span class="stat-label">My reviews</span>
             </div>
             <div class="stat-box">
               <span id="gpa-summary-val" class="stat-number">0.00</span>
@@ -226,7 +226,7 @@
         <!-- Campus Activity Feed -->
         <div class="feed-section">
           <div class="section-header">
-            <h3><i class="fa-solid fa-bullhorn"></i> School Feed</h3>
+            <h3><i class="fa-solid fa-bullhorn"></i> School feed</h3>
           </div>
 
           <button class="feed-composer" onclick="openNewPostModal()">
@@ -237,8 +237,8 @@
 
           <div class="filter-chips">
             <button class="chip active" onclick="setFeedSort('new', this)">Newest</button>
-            <button class="chip" onclick="setFeedSort('top', this)">Most Liked</button>
-            <button class="chip" onclick="setFeedSort('comments', this)">Most Discussed</button>
+            <button class="chip" onclick="setFeedSort('top', this)">Most liked</button>
+            <button class="chip" onclick="setFeedSort('comments', this)">Most discussed</button>
           </div>
 
           <div id="feed-container" class="stack-list">
@@ -254,7 +254,7 @@
             <h1 class="page-title">Teachers</h1>
             <p class="description">Reviews, course requirements and notes from students who've had them.</p>
           </div>
-          <button class="review-trigger-btn" onclick="openAddTeacherModal()"><i class="fa-solid fa-plus"></i> Add Teacher</button>
+          <button class="review-trigger-btn" onclick="openAddTeacherModal()"><i class="fa-solid fa-plus"></i> Add teacher</button>
         </div>
 
         <div class="search-input-wrapper">
@@ -267,8 +267,8 @@
           <select id="teacher-school-filter" class="mini-select flex-1" onchange="setTeacherDirSchool(this.value)" aria-label="School"></select>
           <!-- Phones: sorting is a dropdown next to the school (the chips below are for computers) -->
           <select id="teacher-sort-select" class="mini-select teacher-sort-select phone-only" onchange="setTeacherSort(this.value)" aria-label="Sort teachers">
-            <option value="top">Top Rated</option>
-            <option value="most">Most Reviewed</option>
+            <option value="top">Top rated</option>
+            <option value="most">Most reviewed</option>
             <option value="easy">Easiest</option>
             <option value="az">A–Z</option>
           </select>
@@ -277,8 +277,8 @@
         <div class="filter-chips subject-chips" id="teacher-subject-chips" hidden></div>
 
         <div class="filter-chips" id="teacher-sort-chips">
-          <button class="chip active" data-sort="top" onclick="setTeacherSort('top')">Top Rated</button>
-          <button class="chip" data-sort="most" onclick="setTeacherSort('most')">Most Reviewed</button>
+          <button class="chip active" data-sort="top" onclick="setTeacherSort('top')">Top rated</button>
+          <button class="chip" data-sort="most" onclick="setTeacherSort('most')">Most reviewed</button>
           <button class="chip" data-sort="easy" onclick="setTeacherSort('easy')">Easiest</button>
           <button class="chip" data-sort="az" onclick="setTeacherSort('az')">A–Z</button>
         </div>
@@ -302,7 +302,7 @@
         <div class="teacher-main">
         <div class="teacher-tabs" id="teacher-tabs">
           <button class="teacher-tab active" data-kind="requirement" onclick="setTeacherTab('requirement')">
-            <i class="fa-solid fa-list-check"></i> Course Info <span class="tt-count" id="tt-count-requirement">0</span>
+            <i class="fa-solid fa-list-check"></i> Course info <span class="tt-count" id="tt-count-requirement">0</span>
           </button>
           <button class="teacher-tab" data-kind="review" onclick="setTeacherTab('review')">
             <i class="fa-solid fa-star"></i> Reviews <span class="tt-count" id="tt-count-review">0</span>
@@ -333,18 +333,18 @@
       <section id="groups-view" class="view">
         <div class="page-header">
           <div class="page-header-text">
-            <h1 class="page-title">Study Groups</h1>
+            <h1 class="page-title">Study groups</h1>
             <p class="description">Find people in your classes to study with, or start your own group.</p>
           </div>
-          <button class="review-trigger-btn" onclick="openCreateGroupModal()"><i class="fa-solid fa-plus"></i> New Group</button>
+          <button class="review-trigger-btn" onclick="openCreateGroupModal()"><i class="fa-solid fa-plus"></i> New group</button>
         </div>
 
         <input id="group-search" type="search" class="auth-input group-search" autocomplete="off"
                placeholder="Search by course, name or topic" oninput="renderGroups()" aria-label="Search groups" />
         <div class="filter-chips" id="group-chips">
-          <button class="chip active" data-filter="all" onclick="filterGroups('all')">All Groups</button>
-          <button class="chip" data-filter="open" onclick="filterGroups('open')">Open Seats</button>
-          <button class="chip" data-filter="mine" onclick="filterGroups('mine')">My Groups</button>
+          <button class="chip active" data-filter="all" onclick="filterGroups('all')">All groups</button>
+          <button class="chip" data-filter="open" onclick="filterGroups('open')">Open seats</button>
+          <button class="chip" data-filter="mine" onclick="filterGroups('mine')">My groups</button>
           <button class="chip" data-filter="invited" onclick="filterGroups('invited')" hidden><i class="fa-solid fa-envelope"></i> Invites <span class="chip-count"></span></button>
         </div>
 
@@ -414,7 +414,7 @@
             <h1 class="page-title">Calendar</h1>
             <p class="description">Events and deadlines at your school.</p>
           </div>
-          <button class="review-trigger-btn" onclick="openEventModal()"><i class="fa-solid fa-plus"></i> Add Event</button>
+          <button class="review-trigger-btn" onclick="openEventModal()"><i class="fa-solid fa-plus"></i> Add event</button>
         </div>
 
         <div id="cal-next" class="cal-next"></div>
@@ -477,7 +477,7 @@
 
         <div class="section-header">
           <h3><i class="fa-solid fa-book-open"></i> This term's courses</h3>
-          <button class="text-btn" onclick="addGpaRow()">+ Add Course</button>
+          <button class="text-btn" onclick="addGpaRow()">+ Add course</button>
         </div>
 
         <div class="gpa-input-row">
@@ -765,7 +765,7 @@
 
         <div class="settings-footer">
           <button class="secondary-btn logout-btn" onclick="logout()">
-            <i class="fa-solid fa-right-from-bracket"></i> Sign Out
+            <i class="fa-solid fa-right-from-bracket"></i> Sign out
           </button>
           <p class="legal-links">
             <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
@@ -785,7 +785,7 @@
         <span class="brand-title">Campus Pulse</span>
       </div>
       <button class="primary-btn sidebar-post-btn desktop-only" onclick="openNewPostModal()">
-        <i class="fa-solid fa-pen"></i> New Post
+        <i class="fa-solid fa-pen"></i> New post
       </button>
       <div class="nav-section-label desktop-only">Campus</div>
       <button class="nav-btn active" data-view="home-view" onclick="switchTab('home-view', this)" aria-label="Home">
@@ -816,7 +816,7 @@
       </button>
       <button class="nav-btn desktop-only" onclick="openTimerModal()" aria-label="Focus timer">
         <i class="fa-solid fa-stopwatch"></i>
-        <span class="nav-label">Focus Timer</span>
+        <span class="nav-label">Focus timer</span>
       </button>
       <div class="nav-section-label desktop-only sidebar-groups-head sb-off" id="sidebar-groups-head">
         <span>Your groups</span>
@@ -973,7 +973,7 @@
   <!-- Post Modal -->
   <div id="postModal" class="modal-overlay">
     <div class="modal-content text-left">
-      <h2 class="modal-title">Create Campus Post</h2>
+      <h2 class="modal-title">New post</h2>
       <form onsubmit="submitPost(event)">
         <input type="text" id="post-title" class="auth-input modal-input" placeholder="Headline / Subject" required />
         <textarea id="post-text" class="auth-input textarea-input modal-input" placeholder="What's happening on campus?" required></textarea>
@@ -1010,7 +1010,7 @@
   <!-- Create Study Group Modal -->
   <div id="groupModal" class="modal-overlay">
     <div class="modal-content text-left">
-      <h2 class="modal-title" id="group-modal-title">Create Study Group</h2>
+      <h2 class="modal-title" id="group-modal-title">New study group</h2>
       <form onsubmit="createGroup(event)">
         <input type="text" id="group-name" class="auth-input modal-input" placeholder="Group name (e.g. Physics 101 Midterm Squad)" maxlength="80" required />
         <input type="text" id="group-course" class="auth-input modal-input" placeholder="Course (e.g. Physics 101)" maxlength="40" required />
@@ -1030,7 +1030,7 @@
         </label>
         <div class="modal-actions">
           <button type="button" class="secondary-btn" onclick="closeCreateGroupModal()">Cancel</button>
-          <button type="submit" class="primary-btn" id="group-submit-btn">Create Group</button>
+          <button type="submit" class="primary-btn" id="group-submit-btn">Create group</button>
         </div>
       </form>
     </div>
@@ -1064,7 +1064,7 @@
       </div>
 
       <div class="friends-tabs">
-        <button class="friends-tab active" data-tab="list" onclick="setFriendsTab('list', this)">My Friends</button>
+        <button class="friends-tab active" data-tab="list" onclick="setFriendsTab('list', this)">My friends</button>
         <button class="friends-tab" data-tab="requests" onclick="setFriendsTab('requests', this)">
           Requests <span id="friends-tab-badge" class="tab-badge" style="display:none;">0</span>
         </button>

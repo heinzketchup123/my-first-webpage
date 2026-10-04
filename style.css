@@ -5504,3 +5504,105 @@ body.light-mode .th-cover::after { background: var(--accent-color); opacity: 0.3
 body.light-mode .cal-next-card {
   background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent-color) 14%, transparent), transparent 60%), var(--card-bg);
 }
+
+/* =====================================================================
+   PLAIN: nothing that reads as generated
+   No neon glows, no gradient text, no heartbeat squiggles or pulsing dots,
+   no dot grid or glowing corners, no shine on buttons, no icons in front of
+   every heading, labels in normal case. The theme colour is kept for what
+   you can tap and what's selected; the logo keeps its heartbeat.
+   ===================================================================== */
+:root { --glow-shadow: 0 0 0 0 transparent; --bg-glow: transparent; }
+
+/* Background: just the theme colour */
+.mobile-frame,
+html.ios-short-viewport.layout-phone .mobile-frame,
+html.ios-solid-bar.layout-phone .mobile-frame,
+.auth-overlay { background: var(--bg-color); }
+
+/* Headings: solid text colour; no squiggles, dots or heading icons */
+.page-title {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--main-text-color);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+.page-header .page-title::after, .hero-card::after, .th-cover::after, .cal-next-card::after,
+.auth-brand::after, .hero-card .sub-heading::before, .section-header h3::before { content: none; display: none; }
+.cal-next-dot, .post-author::before { display: none; }
+.hero-title, .auth-brand, .auth-form h2 { font-weight: 700; }
+.hero-title { color: var(--main-text-color); }
+.section-header h3 i, .side-panel-head h3 i, .to-head h3 i { display: none; }
+.section-header h3, .side-panel-head h3, .to-head h3, .group-title, .post-title,
+.teacher-card .teacher-meta strong { font-weight: 700; }
+
+/* Numbers: plain text colour */
+body:not(.light-mode) .stat-number, .stat-number,
+body:not(.light-mode) .gpa-score, body.light-mode .gpa-score {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--main-text-color);
+  text-shadow: none;
+}
+.stat-number, .gpa-score { font-weight: 700; }
+
+/* Labels: normal case, no letter spacing */
+.sub-heading, .stat-label, .gpa-label, .gpa-stats small, .gpa-field span, .settings-group-title,
+.friends-subheading, .group-detail-label, .to-sec-head > span:first-child, .admin-section-head,
+.admin-people-label, .supply-group-head, .tp-label, .tstat-label, .cal-next-kicker, .group-course,
+.set-field > span, .ev-vis, .group-badge, .admin-badge,
+html.layout-desktop .nav-section-label, html.layout-desktop #chat-view .strip-label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.sub-heading, .stat-label, .gpa-label, .gpa-stats small, .gpa-field span, .settings-group-title,
+.friends-subheading, .group-detail-label, .to-sec-head > span:first-child, .admin-section-head,
+.admin-people-label, .supply-group-head, .tp-label, .tstat-label, .cal-next-kicker, .group-course,
+.set-field > span, html.layout-desktop .nav-section-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.hero-card .sub-heading { color: var(--sub-text-color); }
+
+/* Glows gone: buttons, nav, ring, dots, logo, empty states */
+.primary-btn { background: var(--accent-color); box-shadow: none; }
+.primary-btn, .chip.active, .seg-btn.active, .teacher-tab.active { background-image: none; }
+.primary-btn:hover:not(:disabled), .primary-btn:focus { box-shadow: none; filter: brightness(1.06); }
+.chat-bubble-mine, .tool-btn.pomo-live, .review-trigger-btn, .auth-logo { box-shadow: none; }
+.nav-btn.active i { filter: none; }
+.gpa-ring .gpa-ring-glow { filter: none; }
+.online-dot { box-shadow: none; animation: none; }
+.empty-state > i:first-child, .chat-empty > i:first-child {
+  background: var(--input-bg);
+  box-shadow: none;
+  color: var(--sub-text-color);
+}
+.friend-avatar { box-shadow: none; background-image: none; }
+
+/* Cards: flat; a neutral edge on hover instead of a coloured glow */
+body:not(.light-mode) :is(.info-card, .pref-card, .teacher-card, .side-panel, .cal-card,
+                          .gpa-dashboard-card, .chat-container) { background-image: none; }
+.hero-card, html.layout-desktop #home-view .hero-card { background: var(--card-bg); }
+@media (hover: hover) and (pointer: fine) {
+  :is(.feed-post, .group-card, .teacher-card, .event-card, .tpost):hover {
+    box-shadow: var(--shadow-card);
+    border-color: color-mix(in srgb, var(--main-text-color) 16%, transparent);
+  }
+}
+
+/* Banners and the "Next up" card: flat, no wash of colour */
+.th-cover { background: color-mix(in srgb, var(--accent-color) 16%, var(--card-bg-solid)); }
+body.light-mode .th-cover { background: color-mix(in srgb, var(--accent-color) 10%, #ffffff); }
+.cal-next-card, body.light-mode .cal-next-card { background: var(--card-bg); }
+
+/* Shortcuts: an icon and a word, no tinted squares */
+.tool-btn i { width: auto; height: 24px; background: none; color: var(--main-text-color); font-size: 1.1rem; }
+.tool-btn:hover, .tool-btn:active { transform: none; border-color: color-mix(in srgb, var(--main-text-color) 16%, transparent); }
+
+/* Teacher cards: plain facts, no icons */
+.teacher-card-stats i, .teacher-card .teacher-classes i { display: none; }
+.teacher-card-stats span:not(.ts-reviews) + span::before { content: '\00B7'; margin-right: 8px; opacity: 0.7; }
+:is(html.layout-phone, html.layout-desktop) .teacher-card-stats { gap: 8px; }
