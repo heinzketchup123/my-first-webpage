@@ -640,6 +640,19 @@ function toggleAuthMode() {
   document.getElementById('signup-form').classList.toggle('hidden');
 }
 
+// New passwords: at least 8 characters with a letter and a number, not your
+// email name and not an obvious one. (Supabase on its own only asks for 6.)
+function passwordProblem(pw, email) {
+  if (pw.length < 8) return 'Use at least 8 characters for your password.';
+  if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return 'Use at least one letter and one number in your password.';
+  const name = String(email || '').split('@')[0].toLowerCase();
+  if (name.length >= 3 && pw.toLowerCase().includes(name)) return "Don't put your email name in your password.";
+  if (/^(password|passw0rd|qwerty|abc123|letmein|iloveyou|welcome|admin|campus|school)/i.test(pw) || new Set(pw.toLowerCase()).size < 4
+      || '0123456789012345678901234567890'.includes(pw.replace(/[^0-9]/g, '')) && pw.replace(/[0-9]/g, '').length < 3)
+    return 'That password is too easy to guess. Try a few words with a number.';
+  return null;
+}
+
 async function handleAuth(event) {
   event.preventDefault();
   if (!isSupabaseConnected) return showToast('Sign-in is not available right now.', 'error');
@@ -650,6 +663,8 @@ async function handleAuth(event) {
       const email = document.getElementById('signup-email').value.trim();
       const password = document.getElementById('signup-password').value;
       const display_name = document.getElementById('signup-name').value.trim() || email.split('@')[0];
+      const weak = passwordProblem(password, email);
+      if (weak) return showToast(weak, 'warn', 5000);
       const { data, error } = await supabaseClient.auth.signUp({
         email, password,
         options: { data: { display_name } }

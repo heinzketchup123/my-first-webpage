@@ -87,8 +87,8 @@
             <span>Continue with Google</span>
           </button>
           <div class="auth-divider"><span>or use email</span></div>
-          <input type="email" id="login-email" class="auth-input" placeholder="Email address" required />
-          <input type="password" id="login-password" class="auth-input" placeholder="Password" required />
+          <input type="email" id="login-email" class="auth-input" placeholder="Email address" autocomplete="email" required />
+          <input type="password" id="login-password" class="auth-input" placeholder="Password" autocomplete="current-password" required />
           <button type="submit" class="primary-btn">Sign in</button>
           <p class="auth-toggle-text">Need an account? <span onclick="toggleAuthMode()">Sign up</span></p>
           <p class="auth-legal">By continuing you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms</a>
@@ -109,8 +109,9 @@
           </button>
           <div class="auth-divider"><span>or use email</span></div>
           <input type="text" id="signup-name" class="auth-input" placeholder="Full name" required />
-          <input type="email" id="signup-email" class="auth-input" placeholder="Email address" required />
-          <input type="password" id="signup-password" class="auth-input" placeholder="Password" required />
+          <input type="email" id="signup-email" class="auth-input" placeholder="Email address" autocomplete="email" required />
+          <input type="password" id="signup-password" class="auth-input" placeholder="Password" autocomplete="new-password" minlength="8" required />
+          <p class="auth-hint">At least 8 characters, with a letter and a number.</p>
           <button type="submit" class="primary-btn">Create account</button>
           <p class="auth-toggle-text">Already have an account? <span onclick="toggleAuthMode()">Sign in</span></p>
           <p class="auth-legal">By continuing you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms</a>

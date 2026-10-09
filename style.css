@@ -5661,3 +5661,6 @@ html.layout-desktop .react-picker { right: auto; bottom: auto; width: 340px; }
 }
 .msg-react-chip span { font-size: 0.7rem; font-weight: 700; }
 .msg-react-chip.mine { border-color: var(--accent-soft-border); background: var(--accent-muted); }
+
+/* Sign-up: what a password needs */
+.auth-hint { margin: -2px 2px 8px; font-size: 0.74rem; color: var(--sub-text-color); text-align: left; }
