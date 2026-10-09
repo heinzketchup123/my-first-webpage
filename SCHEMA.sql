@@ -2459,6 +2459,30 @@ create policy "message reactions: take yours back"
   on public.message_reactions for delete using (user_id = auth.uid());
 
 -- ============================================================
+-- 6s. SIGNED-IN ONLY
+-- ============================================================
+-- The website has to include Supabase's public "anon" key (that's how
+-- Supabase works, and it's safe to share), so anyone can talk to the
+-- database with it. Everything about people, posts, reviews, groups and
+-- chats therefore needs a signed-in account: visitors who aren't signed in
+-- can only see the list of schools and districts (for the sign-up screen).
+-- This runs near the end on purpose, so it also takes back the "anon"
+-- grants made by earlier sections each time the file is run.
+-- (Never put the "service_role" key in the website: it skips all of this.)
+do $$
+declare r record;
+begin
+  for r in select table_name from information_schema.tables
+            where table_schema = 'public' and table_name not in ('schools', 'districts') loop
+    execute format('revoke all on public.%I from anon', r.table_name);
+  end loop;
+end $$;
+-- Database functions: Postgres lets everyone run new functions unless told
+-- otherwise, so only signed-in users (and the server) may call them.
+revoke execute on all functions in schema public from public, anon;
+grant execute on all functions in schema public to authenticated, service_role;
+
+-- ============================================================
 -- 7. REALTIME
 -- ============================================================
 -- Make sure the tables the UI subscribes to broadcast changes.

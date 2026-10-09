@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <!-- Security: the page may only load code, styles and fonts from these places, and only talk
+       to our own database. (The inline handlers in this page need 'unsafe-inline'.) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob:; connect-src 'self' https://ndrkvyodqeqpopxkozov.supabase.co wss://ndrkvyodqeqpopxkozov.supabase.co; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
   <!-- viewport-fit=cover lets the app use the whole screen (down behind the home bar);
        the CSS keeps content clear of the edges with env(safe-area-inset-*). -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
